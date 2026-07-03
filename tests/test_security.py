@@ -28,6 +28,19 @@ def test_send_requires_enable_and_user_allowlist():
         policy.ensure_send_allowed(10, location, "hello world")
 
 
+def test_send_disabled_even_for_allowed_user():
+    policy = SecurityPolicy(
+        AppConfig(
+            discord_token="token",
+            enable_send=False,
+            allowed_user_ids=frozenset({10}),
+        )
+    )
+
+    with pytest.raises(SecurityError, match="Send is disabled"):
+        policy.ensure_send_allowed(10, DiscordLocation(guild_id=1, channel_id=2), "hello")
+
+
 def test_blocklist_is_case_insensitive():
     policy = SecurityPolicy(
         AppConfig(
@@ -40,4 +53,3 @@ def test_blocklist_is_case_insensitive():
 
     with pytest.raises(SecurityError):
         policy.ensure_send_allowed(10, DiscordLocation(guild_id=1, channel_id=2), "RM -RF /tmp/x")
-

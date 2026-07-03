@@ -6,8 +6,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .approval import ApprovalError, apply_approval, strategy_for
-from .config import AppConfig
+from .approval import ApprovalError, apply_approval, ensure_blocked_for_approval, strategy_for
+from .config import AppConfig, ApprovalStrategy
 from .formatter import format_bindings, format_status, format_tail, truncate
 from .herdr_client import HerdrClient, TargetResolutionError
 from .models import AuditEntry
@@ -190,6 +190,7 @@ class HerdrCog(commands.Cog):
             self.bot.security.ensure_approve_allowed(interaction.user.id, location)
             resolved = self._target_from_arg(location, target)
             target_info = self.bot.client.resolve_target(resolved)
+            ensure_blocked_for_approval(target_info)
             strategy = strategy_for(self.bot.config, target_info.agent_name)
             await interaction.response.defer(thinking=True)
             output = self.bot.client.read(resolved, lines=self.bot.config.max_tail_lines)
@@ -231,18 +232,21 @@ class HerdrCog(commands.Cog):
         payload: str | None,
         result: str,
     ) -> None:
-        self.bot.store.add_audit(
-            AuditEntry(
-                discord_user_id=str(interaction.user.id),
-                guild_id=str(location.guild_id) if location.guild_id is not None else None,
-                channel_id=str(location.channel_id),
-                thread_id=str(location.thread_id) if location.thread_id is not None else None,
-                action=action,
-                herdr_target=target,
-                payload_preview=truncate(payload or "", max_chars=200) if payload else None,
-                result=truncate(result, max_chars=500),
+        try:
+            self.bot.store.add_audit(
+                AuditEntry(
+                    discord_user_id=str(interaction.user.id),
+                    guild_id=str(location.guild_id) if location.guild_id is not None else None,
+                    channel_id=str(location.channel_id),
+                    thread_id=str(location.thread_id) if location.thread_id is not None else None,
+                    action=action,
+                    herdr_target=target,
+                    payload_preview=truncate(payload or "", max_chars=200) if payload else None,
+                    result=truncate(result, max_chars=500),
+                )
             )
-        )
+        except Exception:
+            LOG.exception("Failed to write audit log")
 
 
 class ApprovalView(discord.ui.View):
@@ -253,7 +257,7 @@ class ApprovalView(discord.ui.View):
         user_id: int,
         location: DiscordLocation,
         target: str,
-        strategy,
+        strategy: ApprovalStrategy,
     ):
         super().__init__(timeout=60)
         self.bot = bot
@@ -271,6 +275,8 @@ class ApprovalView(discord.ui.View):
             return
         try:
             self.bot.security.ensure_approve_allowed(interaction.user.id, self.location)
+            target_info = self.bot.client.resolve_target(self.target)
+            ensure_blocked_for_approval(target_info)
             apply_approval(self.bot.client, self.target, self.strategy)
             self.bot.store.add_audit(
                 AuditEntry(

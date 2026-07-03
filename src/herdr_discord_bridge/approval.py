@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .config import AppConfig, ApprovalStrategy
 from .herdr_client import HerdrClient
+from .models import HerdrTarget
 
 
 class ApprovalError(ValueError):
@@ -16,6 +17,12 @@ def strategy_for(config: AppConfig, agent_name: str | None) -> ApprovalStrategy:
     raise ApprovalError("No approval strategy is configured for this target.")
 
 
+def ensure_blocked_for_approval(target: HerdrTarget) -> None:
+    status = target.status or "unknown"
+    if status.casefold() != "blocked":
+        raise ApprovalError(f"Approval requires blocked status; current status is {status}.")
+
+
 def apply_approval(client: HerdrClient, target: str, strategy: ApprovalStrategy) -> None:
     if strategy.method == "send_keys":
         if not strategy.keys:
@@ -27,4 +34,3 @@ def apply_approval(client: HerdrClient, target: str, strategy: ApprovalStrategy)
         client.send_text_enter(target, strategy.text)
     else:
         raise ApprovalError(f"Unsupported approval method: {strategy.method}")
-
