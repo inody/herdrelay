@@ -57,6 +57,19 @@ class HerdrCog(commands.Cog):
         except Exception as exc:
             await _send_error(interaction, exc)
 
+    @herdr.command(name="ids", description="Show Discord IDs for this location")
+    async def ids(self, interaction: discord.Interaction) -> None:
+        location = _location(interaction)
+        message = (
+            "```text\n"
+            f"user_id:    {interaction.user.id}\n"
+            f"guild_id:   {interaction.guild_id}\n"
+            f"channel_id: {location.channel_id}\n"
+            f"thread_id:  {location.thread_id or '-'}\n"
+            "```"
+        )
+        await interaction.response.send_message(message, ephemeral=True)
+
     @herdr.command(name="tail", description="Show recent output for a bound or explicit target")
     @app_commands.describe(target="Herdr pane or agent target", lines="Number of recent lines")
     async def tail(
@@ -326,4 +339,3 @@ async def _send_error(interaction: discord.Interaction, exc: Exception) -> None:
 
 def build_bot(config: AppConfig, store: Store, client: HerdrClient) -> HerdrDiscordBot:
     return HerdrDiscordBot(config=config, store=store, client=client)
-
