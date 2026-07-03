@@ -24,7 +24,7 @@ def format_tail(output: str, *, max_chars: int = 1800) -> str:
     if not clean:
         clean = "(no output)"
     clean = clean.replace("```", "`\u200b``")
-    return code_block(clean, max_chars=max_chars)
+    return code_block(clean, max_chars=max_chars, keep="end")
 
 
 def format_bindings(bindings: Iterable[Binding], *, max_chars: int = 1800) -> str:
@@ -70,16 +70,19 @@ def truncate(text: str, *, max_chars: int) -> str:
     return text[: max_chars - len(suffix)] + suffix
 
 
-def code_block(text: str, *, max_chars: int) -> str:
+def code_block(text: str, *, max_chars: int, keep: str = "start") -> str:
     prefix = "```text\n"
     suffix = "\n```"
     budget = max_chars - len(prefix) - len(suffix)
     if budget < 20:
         return truncate(prefix + text + suffix, max_chars=max_chars)
     content = text
-    marker = "\n... truncated"
+    marker = "... truncated\n" if keep == "end" else "\n... truncated"
     if len(content) > budget:
-        content = content[: budget - len(marker)] + marker
+        if keep == "end":
+            content = marker + content[-(budget - len(marker)) :]
+        else:
+            content = content[: budget - len(marker)] + marker
     return prefix + content + suffix
 
 

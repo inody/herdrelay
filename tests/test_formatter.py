@@ -28,6 +28,15 @@ def test_tail_escapes_code_fences():
     assert "`\u200b``" in output
 
 
+def test_tail_truncation_keeps_recent_output():
+    output = format_tail("old context\n" + ("x" * 200) + "\nAPPROVE THIS?", max_chars=80)
+
+    assert "old context" not in output
+    assert "APPROVE THIS?" in output
+    assert output.startswith("```text\n... truncated")
+    assert output.endswith("\n```")
+
+
 def test_bindings_empty_message():
     assert format_bindings([]) == "No bindings."
 
