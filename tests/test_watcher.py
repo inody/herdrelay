@@ -1,5 +1,3 @@
-import time
-
 from herdr_discord_bridge.config import AppConfig, WatcherConfig
 from herdr_discord_bridge.models import HerdrTarget
 from herdr_discord_bridge.store import Store
@@ -66,15 +64,14 @@ def test_parse_agent_status_event_ignores_other_events():
     assert parse_agent_status_event({"type": "pane.created", "pane_id": "w1:p1"}) is None
 
 
-def test_dedupe_key_is_stable_within_bucket(monkeypatch):
-    monkeypatch.setattr(time, "time", lambda: 300.1)
+def test_dedupe_key_is_stable_across_time():
     event = AgentStatusEvent(pane_id="w1:p1", status="blocked")
 
     first = event_dedupe_key(event, "tail")
     second = event_dedupe_key(event, "tail")
 
     assert first == second
-    assert "w1:p1:blocked" in first
+    assert first == "w1:p1:blocked:0c62f876ef1dea83"
 
 
 def test_find_binding_for_target_prefers_thread_binding(tmp_path):

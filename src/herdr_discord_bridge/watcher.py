@@ -124,6 +124,10 @@ class EventWatcher:
             output = f"(failed to read tail: {exc})"
 
         dedupe_key = event_dedupe_key(event, output)
+        legacy_dedupe_prefix = event_legacy_dedupe_prefix(event, output)
+        if self.store.has_event_key_prefix(legacy_dedupe_prefix):
+            LOG.info("Skipping duplicate event notification for %s", event.pane_id)
+            return
         if not self.store.mark_event_seen(dedupe_key):
             LOG.info("Skipping duplicate event notification for %s", event.pane_id)
             return
@@ -260,9 +264,12 @@ def event_title(event: AgentStatusEvent) -> str:
 
 
 def event_dedupe_key(event: AgentStatusEvent, output: str) -> str:
+    return event_legacy_dedupe_prefix(event, output)
+
+
+def event_legacy_dedupe_prefix(event: AgentStatusEvent, output: str) -> str:
     digest = hashlib.sha256(output.encode(errors="replace")).hexdigest()[:16]
-    bucket = int(time.time() // 300)
-    return f"{event.pane_id}:{event.status}:{digest}:{bucket}"
+    return f"{event.pane_id}:{event.status}:{digest}"
 
 
 def _event_payload(payload: dict[str, Any]) -> dict[str, Any]:

@@ -76,3 +76,12 @@ def test_notification_message_roundtrip(tmp_path):
     store.add_notification_message(message_id="123", herdr_target="w7:p3", kind="blocked")
 
     assert store.get_notification_target("123") == "w7:p3"
+
+
+def test_event_key_prefix_matches_legacy_bucketed_keys(tmp_path):
+    store = Store(tmp_path / "bridge.sqlite3")
+
+    assert store.mark_event_seen("w7:p1:done:abc123:5943680")
+
+    assert store.has_event_key_prefix("w7:p1:done:abc123")
+    assert not store.has_event_key_prefix("w7:p1:blocked:abc123")

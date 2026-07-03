@@ -282,6 +282,5 @@ scripts/uninstall_launchd.sh
   `logs/launchd.err.log`.
 - Read/tail/send use Herdr CLI wrappers. Event notifications use the Herdr raw
   socket API.
-- Notification dedupe is stored in SQLite in five-minute buckets using
-  `pane_id + status + tail hash`.
+- Notification dedupe is stored in SQLite using `pane_id + status + tail hash`.
 - Dashboard message state is stored in SQLite under `bot_state`.

@@ -231,6 +231,14 @@ class Store:
         except sqlite3.IntegrityError:
             return False
 
+    def has_event_key_prefix(self, prefix: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM event_dedupe WHERE key LIKE ? LIMIT 1",
+                (f"{prefix}%",),
+            ).fetchone()
+        return row is not None
+
     def get_state(self, key: str) -> str | None:
         with self._connect() as conn:
             row = conn.execute("SELECT value FROM bot_state WHERE key = ?", (key,)).fetchone()
