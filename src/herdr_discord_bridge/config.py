@@ -39,6 +39,7 @@ class AppConfig:
     enable_approve: bool = False
     allow_pane_send_fallback: bool = False
     submit_after_agent_send: bool = True
+    submit_after_agent_send_delay_seconds: float = 0.5
     dangerous_text_blocklist: tuple[str, ...] = ()
     herdr: HerdrCliConfig = field(default_factory=HerdrCliConfig)
     approval: dict[str, ApprovalStrategy] = field(default_factory=dict)
@@ -76,6 +77,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         enable_approve=bool(data.get("enable_approve", False)),
         allow_pane_send_fallback=bool(data.get("allow_pane_send_fallback", False)),
         submit_after_agent_send=bool(data.get("submit_after_agent_send", True)),
+        submit_after_agent_send_delay_seconds=float(
+            data.get("submit_after_agent_send_delay_seconds", 0.5)
+        ),
         dangerous_text_blocklist=tuple(str(item) for item in data.get("dangerous_text_blocklist") or ()),
         herdr=HerdrCliConfig(
             cli_path=str(herdr_data.get("cli_path") or "herdr"),

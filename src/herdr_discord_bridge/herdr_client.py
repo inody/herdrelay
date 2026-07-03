@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from time import sleep
 from typing import Any
 
 from .config import AppConfig
@@ -33,6 +34,9 @@ class HerdrClient:
         try:
             self.cli.agent_send(target, message)
             if self.config.submit_after_agent_send:
+                delay = self.config.submit_after_agent_send_delay_seconds
+                if delay > 0:
+                    sleep(delay)
                 self.cli.pane_send_keys(target, "Enter")
             return
         except HerdrCliError:

@@ -69,6 +69,25 @@ def test_send_can_skip_submit_after_agent_send():
     assert fake_cli.calls == [("agent_send", "w7:p2", "hello")]
 
 
+def test_send_honors_zero_submit_delay():
+    client = HerdrClient(
+        AppConfig(
+            discord_token="token",
+            submit_after_agent_send=True,
+            submit_after_agent_send_delay_seconds=0,
+        )
+    )
+    fake_cli = FakeCli()
+    client.cli = fake_cli
+
+    client.send("w7:p2", "hello")
+
+    assert fake_cli.calls == [
+        ("agent_send", "w7:p2", "hello"),
+        ("pane_send_keys", "w7:p2", ("Enter",)),
+    ]
+
+
 class FakeCli:
     def __init__(self):
         self.calls = []

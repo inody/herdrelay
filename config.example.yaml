@@ -13,6 +13,7 @@ enable_send: false
 enable_approve: false
 allow_pane_send_fallback: false
 submit_after_agent_send: true
+submit_after_agent_send_delay_seconds: 0.5
 dangerous_text_blocklist:
   - "rm -rf"
   - "sudo"
