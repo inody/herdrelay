@@ -332,10 +332,11 @@ def _clamp_lines(lines: int | None, maximum: int) -> int:
 
 
 async def _send_error(interaction: discord.Interaction, exc: Exception) -> None:
-    LOG.exception("Discord command failed")
     if isinstance(exc, (SecurityError, TargetResolutionError, ApprovalError)):
+        LOG.info("Discord command rejected: %s", exc)
         message = str(exc)
     else:
+        LOG.exception("Discord command failed")
         message = f"Command failed: {exc}"
     if interaction.response.is_done():
         await interaction.followup.send(message, ephemeral=True)
