@@ -27,6 +27,7 @@ class ApprovalStrategy:
 class WatcherConfig:
     statuses: tuple[str, ...] = ("blocked", "done")
     reconnect_delay_seconds: float = 5
+    resubscribe_interval_seconds: float = 300
     blocked_tail_lines: int = 80
     done_tail_lines: int = 60
 
@@ -101,6 +102,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         watcher=WatcherConfig(
             statuses=tuple(str(item) for item in watcher_data.get("statuses") or ("blocked", "done")),
             reconnect_delay_seconds=float(watcher_data.get("reconnect_delay_seconds", 5)),
+            resubscribe_interval_seconds=float(
+                watcher_data.get("resubscribe_interval_seconds", 300)
+            ),
             blocked_tail_lines=int(watcher_data.get("blocked_tail_lines", 80)),
             done_tail_lines=int(watcher_data.get("done_tail_lines", 60)),
         ),

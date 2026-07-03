@@ -20,6 +20,13 @@ Write actions are guarded by config and audit logging:
 - `/herdr send`
 - `/herdr approve`
 
+Event notifications are available with `enable_watcher: true`:
+
+- `blocked` notifications include recent tail and Approve/Cancel buttons.
+- `done` notifications include recent tail.
+- The watcher uses Herdr's raw socket API and subscribes to current panes for
+  `pane.agent_status_changed` events.
+
 ## Setup
 
 1. Create a Discord application and bot.
@@ -36,7 +43,7 @@ Write actions are guarded by config and audit logging:
 7. Run the bot locally:
 
    ```bash
-   uv run herdr-discord-bridge --config config.yaml
+   scripts/run_bot.sh
    ```
 
 8. Verify `/herdr status`.
@@ -48,10 +55,77 @@ Write actions are guarded by config and audit logging:
 
 10. Test `/herdr tail`.
 
-Keep `enable_send` and `enable_approve` disabled until read-only commands work.
+Keep `enable_send`, `enable_approve`, and `enable_watcher` disabled until
+read-only commands work.
 
-## Notes
+## Suggested rollout
 
-The first implementation uses Herdr CLI wrappers. The client interface is kept
-small so the raw Herdr socket watcher can be added later.
+1. Start read-only:
 
+   ```yaml
+   enable_send: false
+   enable_approve: false
+   enable_watcher: false
+   ```
+
+2. Verify:
+
+   ```text
+   /herdr ids
+   /herdr status
+   /herdr bind target:w7:p2 label:test-agent
+   /herdr tail lines:20
+   ```
+
+3. Enable send only for allowlisted users:
+
+   ```yaml
+   enable_send: true
+   allowed_user_ids:
+     - 123456789012345678
+   ```
+
+   `submit_after_agent_send: true` sends Enter after `herdr agent send`. In the
+   tested environment, `submit_after_agent_send_delay_seconds: 0.5` was needed
+   so the agent UI had time to receive the text before Enter.
+
+4. Enable approval:
+
+   ```yaml
+   enable_approve: true
+   ```
+
+   Approval requires:
+
+   - an allowlisted Discord user
+   - a resolved target
+   - current Herdr status `blocked`
+   - explicit button click after a tail preview
+
+5. Enable watcher:
+
+   ```yaml
+   enable_watcher: true
+   watcher:
+     statuses: ["blocked", "done"]
+     reconnect_delay_seconds: 5
+     resubscribe_interval_seconds: 300
+     blocked_tail_lines: 80
+     done_tail_lines: 60
+   ```
+
+   Herdr currently requires `pane_id` and `agent_status` filters for
+   `events.subscribe`, so the watcher builds subscriptions from the panes visible
+   at connection time. It reconnects every `resubscribe_interval_seconds` to pick
+   up panes created after startup.
+
+## Operational notes
+
+- Secrets and local runtime files are ignored by Git: `.env`, `config.yaml`, and
+  SQLite databases.
+- The bot runs in the foreground. Use `scripts/run_bot.sh` from a terminal pane
+  or wrap it in your preferred process manager.
+- Read/tail/send use Herdr CLI wrappers. Event notifications use the Herdr raw
+  socket API.
+- Notification dedupe is stored in SQLite in five-minute buckets using
+  `pane_id + status + tail hash`.

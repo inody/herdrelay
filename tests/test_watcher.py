@@ -1,6 +1,6 @@
 import time
 
-from herdr_discord_bridge.config import AppConfig
+from herdr_discord_bridge.config import AppConfig, WatcherConfig
 from herdr_discord_bridge.models import HerdrTarget
 from herdr_discord_bridge.store import Store
 from herdr_discord_bridge.watcher import (
@@ -9,6 +9,7 @@ from herdr_discord_bridge.watcher import (
     event_dedupe_key,
     parse_agent_status_event,
     resolve_socket_path,
+    should_resubscribe,
 )
 
 
@@ -118,6 +119,26 @@ def test_build_agent_status_subscriptions_uses_pane_and_status_filters():
         {"type": "pane.agent_status_changed", "pane_id": "w1:p2", "agent_status": "blocked"},
         {"type": "pane.agent_status_changed", "pane_id": "w1:p2", "agent_status": "done"},
     ]
+
+
+def test_should_resubscribe_after_configured_interval(monkeypatch):
+    config = AppConfig(discord_token="token")
+    monkeypatch.setattr("herdr_discord_bridge.watcher.time.monotonic", lambda: 500.0)
+
+    assert should_resubscribe(199.9, config)
+    assert not should_resubscribe(250.1, config)
+
+
+def test_should_resubscribe_can_be_disabled(monkeypatch):
+    config = AppConfig(
+        discord_token="token",
+        watcher=WatcherConfig(
+            resubscribe_interval_seconds=0,
+        ),
+    )
+    monkeypatch.setattr("herdr_discord_bridge.watcher.time.monotonic", lambda: 1000.0)
+
+    assert not should_resubscribe(0, config)
 
 
 class FakeHerdrClient:

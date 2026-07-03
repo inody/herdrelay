@@ -19,6 +19,7 @@ submit_after_agent_send_delay_seconds: 0.5
 watcher:
   statuses: ["blocked", "done"]
   reconnect_delay_seconds: 5
+  resubscribe_interval_seconds: 300
   blocked_tail_lines: 80
   done_tail_lines: 60
 dangerous_text_blocklist:

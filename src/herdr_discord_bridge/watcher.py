@@ -76,8 +76,15 @@ class EventWatcher:
             writer.write((json.dumps(request) + "\n").encode())
             await writer.drain()
 
+            subscribed_at = time.monotonic()
             while not self._stopped.is_set():
-                line = await reader.readline()
+                if should_resubscribe(subscribed_at, self.config):
+                    LOG.info("Reconnecting Herdr event watcher to refresh subscriptions")
+                    return
+                try:
+                    line = await asyncio.wait_for(reader.readline(), timeout=1)
+                except TimeoutError:
+                    continue
                 if not line:
                     raise ConnectionError("Herdr event stream closed")
                 await self._handle_line(line)
@@ -196,6 +203,11 @@ def build_agent_status_subscriptions(client: HerdrClient, config: AppConfig) -> 
     if not subscriptions:
         raise RuntimeError("No Herdr targets available for event subscriptions")
     return subscriptions
+
+
+def should_resubscribe(subscribed_at: float, config: AppConfig) -> bool:
+    interval = config.watcher.resubscribe_interval_seconds
+    return interval > 0 and (time.monotonic() - subscribed_at) >= interval
 
 
 def parse_agent_status_event(payload: Any) -> AgentStatusEvent | None:
