@@ -202,8 +202,11 @@ class HerdrCog(commands.Cog):
                 resolved,
                 lines=_clamp_lines(lines, self.bot.config.max_tail_lines),
             )
-            await interaction.followup.send(
-                format_tail(output, max_chars=self.bot.config.max_output_chars)
+            await self._send_target_followup(
+                interaction,
+                format_tail(output, max_chars=self.bot.config.max_output_chars),
+                target=resolved,
+                kind="tail",
             )
         except Exception as exc:
             await _send_error(interaction, exc)
@@ -233,8 +236,11 @@ class HerdrCog(commands.Cog):
             message = f"Bound this location to `{resolved}`."
             if label:
                 message += f" Label: `{label}`."
-            await interaction.followup.send(
-                message + "\n" + format_tail(output, max_chars=self.bot.config.max_output_chars)
+            await self._send_target_followup(
+                interaction,
+                message + "\n" + format_tail(output, max_chars=self.bot.config.max_output_chars),
+                target=resolved,
+                kind="bind",
             )
         except Exception as exc:
             await _send_error(interaction, exc)
@@ -302,9 +308,12 @@ class HerdrCog(commands.Cog):
             self.bot.client.send(resolved, message)
             self._audit(interaction, location, "send", resolved, message, "ok")
             output = self.bot.client.read(resolved, lines=40)
-            await interaction.followup.send(
+            await self._send_target_followup(
+                interaction,
                 f"Sent to `{resolved}`.\n"
-                + format_tail(output, max_chars=self.bot.config.max_output_chars)
+                + format_tail(output, max_chars=self.bot.config.max_output_chars),
+                target=resolved,
+                kind="send",
             )
         except Exception as exc:
             self._audit(interaction, location, "send", resolved, message, f"error: {exc}")
@@ -335,14 +344,38 @@ class HerdrCog(commands.Cog):
                 target=resolved,
                 strategy=strategy,
             )
-            await interaction.followup.send(
+            await self._send_target_followup(
+                interaction,
                 "Review the recent output, then choose Approve or Cancel.\n"
                 + format_tail(output, max_chars=self.bot.config.max_output_chars),
+                target=resolved,
+                kind="approve_preview",
                 view=view,
             )
         except Exception as exc:
             self._audit(interaction, location, "approve_preview", resolved, None, f"error: {exc}")
             await _send_error(interaction, exc)
+
+    async def _send_target_followup(
+        self,
+        interaction: discord.Interaction,
+        content: str,
+        *,
+        target: str,
+        kind: str,
+        view: discord.ui.View | None = None,
+    ) -> discord.WebhookMessage:
+        message = await interaction.followup.send(content, view=view, wait=True)
+        if self.bot.config.enable_reply_send:
+            try:
+                self.bot.store.add_notification_message(
+                    message_id=message.id,
+                    herdr_target=target,
+                    kind=kind,
+                )
+            except Exception:
+                LOG.exception("Failed to store reply target for message %s", message.id)
+        return message
 
     def _target_from_arg(self, location: DiscordLocation, target: str | None) -> str:
         if target:
