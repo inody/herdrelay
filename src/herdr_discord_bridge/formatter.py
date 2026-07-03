@@ -15,7 +15,7 @@ def format_status(targets: Iterable[HerdrTarget], *, max_chars: int = 1800) -> s
         lines.append(f"{status:<8} {label:<18} {agent:<10} {target.target:<8} {cwd}")
     if not lines:
         return "No Herdr agents or panes found."
-    return truncate("```text\n" + "\n".join(lines) + "\n```", max_chars=max_chars)
+    return code_block("\n".join(lines), max_chars=max_chars)
 
 
 def format_tail(output: str, *, max_chars: int = 1800) -> str:
@@ -23,7 +23,7 @@ def format_tail(output: str, *, max_chars: int = 1800) -> str:
     if not clean:
         clean = "(no output)"
     clean = clean.replace("```", "`\u200b``")
-    return truncate(f"```text\n{clean}\n```", max_chars=max_chars)
+    return code_block(clean, max_chars=max_chars)
 
 
 def format_bindings(bindings: Iterable[Binding], *, max_chars: int = 1800) -> str:
@@ -34,7 +34,7 @@ def format_bindings(bindings: Iterable[Binding], *, max_chars: int = 1800) -> st
         lines.append(f"{place} -> {binding.herdr_target}{label}")
     if not lines:
         return "No bindings."
-    return truncate("```text\n" + "\n".join(lines) + "\n```", max_chars=max_chars)
+    return code_block("\n".join(lines), max_chars=max_chars)
 
 
 def truncate(text: str, *, max_chars: int) -> str:
@@ -44,6 +44,19 @@ def truncate(text: str, *, max_chars: int) -> str:
     return text[: max_chars - len(suffix)] + suffix
 
 
+def code_block(text: str, *, max_chars: int) -> str:
+    prefix = "```text\n"
+    suffix = "\n```"
+    budget = max_chars - len(prefix) - len(suffix)
+    if budget < 20:
+        return truncate(prefix + text + suffix, max_chars=max_chars)
+    content = text
+    marker = "\n... truncated"
+    if len(content) > budget:
+        content = content[: budget - len(marker)] + marker
+    return prefix + content + suffix
+
+
 def _shorten_cwd(cwd: str | None) -> str:
     if not cwd:
         return "-"
@@ -51,4 +64,3 @@ def _shorten_cwd(cwd: str | None) -> str:
     if len(parts) >= 3 and parts[0] == "":
         return "~/" + "/".join(parts[-2:])
     return cwd
-
