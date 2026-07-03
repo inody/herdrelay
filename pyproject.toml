@@ -1,0 +1,33 @@
+[project]
+name = "herdr-discord-bridge"
+version = "0.1.0"
+description = "A local Discord control surface for Herdr panes and agents."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "discord.py>=2.4,<3",
+  "python-dotenv>=1.0,<2",
+  "PyYAML>=6.0,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0,<9",
+  "pytest-asyncio>=0.23,<1",
+]
+
+[project.scripts]
+herdr-discord-bridge = "herdr_discord_bridge.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+

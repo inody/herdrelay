@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import json
+import subprocess
+from dataclasses import dataclass
+from typing import Any
+
+from .config import HerdrCliConfig
+
+
+class HerdrCliError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    stdout: str
+    stderr: str
+
+
+class HerdrCli:
+    def __init__(self, config: HerdrCliConfig):
+        self.config = config
+
+    def agent_list(self) -> Any:
+        return self._json_with_optional_json_flag(["agent", "list"])
+
+    def pane_list(self) -> Any:
+        return self._json_with_optional_json_flag(["pane", "list"])
+
+    def agent_read(self, target: str, *, lines: int) -> str:
+        return self._run(["agent", "read", target, "--lines", str(lines)]).stdout
+
+    def pane_read(self, target: str, *, lines: int, source: str | None = None) -> str:
+        source = source or self.config.default_source
+        return self._run(
+            ["pane", "read", target, "--source", source, "--lines", str(lines)]
+        ).stdout
+
+    def agent_send(self, target: str, message: str) -> None:
+        self._run(["agent", "send", target, message])
+
+    def pane_send_text(self, target: str, message: str) -> None:
+        self._run(["pane", "send-text", target, message])
+
+    def pane_send_keys(self, target: str, *keys: str) -> None:
+        for key in keys:
+            self._run(["pane", "send-keys", target, key])
+
+    def pane_run(self, target: str, message: str) -> None:
+        self._run(["pane", "run", target, message])
+
+    def _json_with_optional_json_flag(self, args: list[str]) -> Any:
+        try:
+            return self._json(args + ["--json"])
+        except HerdrCliError:
+            return self._json(args)
+
+    def _json(self, args: list[str]) -> Any:
+        raw = self._run(args).stdout
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HerdrCliError(f"Herdr did not return JSON for {' '.join(args)}") from exc
+
+    def _run(self, args: list[str]) -> CommandResult:
+        command = [self.config.cli_path, *args]
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self.config.command_timeout_seconds,
+            )
+        except FileNotFoundError as exc:
+            raise HerdrCliError(f"Herdr CLI not found: {self.config.cli_path}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise HerdrCliError(f"Herdr command timed out: {' '.join(command)}") from exc
+
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise HerdrCliError(f"Herdr command failed: {' '.join(command)}\n{detail}")
+        return CommandResult(stdout=completed.stdout, stderr=completed.stderr)
+

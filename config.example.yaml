@@ -1,0 +1,34 @@
+allowed_guild_ids: []
+allowed_channel_ids: []
+allowed_user_ids: []
+dashboard_channel_id: null
+
+database_path: herdr-discord-bridge.sqlite3
+
+max_tail_lines: 80
+max_output_chars: 1800
+max_message_chars: 2000
+
+enable_send: false
+enable_approve: false
+allow_pane_send_fallback: false
+dangerous_text_blocklist:
+  - "rm -rf"
+  - "sudo"
+  - "git reset --hard"
+
+herdr:
+  cli_path: herdr
+  default_source: recent-unwrapped
+  command_timeout_seconds: 20
+
+approval:
+  codex:
+    method: send_text_enter
+    text: "y"
+  claude:
+    method: send_keys
+    keys: ["Enter"]
+  pi:
+    method: send_keys
+    keys: ["Enter"]
