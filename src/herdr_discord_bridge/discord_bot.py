@@ -365,7 +365,10 @@ class HerdrCog(commands.Cog):
         kind: str,
         view: discord.ui.View | None = None,
     ) -> discord.WebhookMessage:
-        message = await interaction.followup.send(content, view=view, wait=True)
+        kwargs: dict[str, object] = {"wait": True}
+        if view is not None:
+            kwargs["view"] = view
+        message = await interaction.followup.send(content, **kwargs)
         if self.bot.config.enable_reply_send:
             try:
                 self.bot.store.add_notification_message(
