@@ -57,6 +57,12 @@ class Store:
                   key TEXT PRIMARY KEY,
                   created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS bot_state (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -217,6 +223,25 @@ class Store:
             return True
         except sqlite3.IntegrityError:
             return False
+
+    def get_state(self, key: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM bot_state WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO bot_state (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                  value = excluded.value,
+                  updated_at = excluded.updated_at
+                """,
+                (key, value, now),
+            )
 
 
 def _binding(row: sqlite3.Row) -> Binding:

@@ -58,3 +58,12 @@ def test_upsert_replaces_existing_null_thread_binding(tmp_path):
     assert len(bindings) == 1
     assert bindings[0].herdr_target == "1-2"
 
+
+def test_state_roundtrip(tmp_path):
+    store = Store(tmp_path / "bridge.sqlite3")
+
+    assert store.get_state("dashboard_message_id") is None
+    store.set_state("dashboard_message_id", "123")
+    store.set_state("dashboard_message_id", "456")
+
+    assert store.get_state("dashboard_message_id") == "456"

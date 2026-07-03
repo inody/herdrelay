@@ -33,6 +33,11 @@ class WatcherConfig:
 
 
 @dataclass(frozen=True)
+class DashboardConfig:
+    refresh_seconds: float = 60
+
+
+@dataclass(frozen=True)
 class AppConfig:
     discord_token: str
     herdr_socket_path: str | None = None
@@ -47,12 +52,14 @@ class AppConfig:
     enable_send: bool = False
     enable_approve: bool = False
     enable_watcher: bool = False
+    enable_dashboard: bool = False
     allow_pane_send_fallback: bool = False
     submit_after_agent_send: bool = True
     submit_after_agent_send_delay_seconds: float = 0.5
     dangerous_text_blocklist: tuple[str, ...] = ()
     herdr: HerdrCliConfig = field(default_factory=HerdrCliConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
+    dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     approval: dict[str, ApprovalStrategy] = field(default_factory=dict)
 
 
@@ -72,6 +79,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
 
     herdr_data = data.get("herdr") or {}
     watcher_data = data.get("watcher") or {}
+    dashboard_data = data.get("dashboard") or {}
     approval_data = data.get("approval") or {}
 
     return AppConfig(
@@ -88,6 +96,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         enable_send=bool(data.get("enable_send", False)),
         enable_approve=bool(data.get("enable_approve", False)),
         enable_watcher=bool(data.get("enable_watcher", False)),
+        enable_dashboard=bool(data.get("enable_dashboard", False)),
         allow_pane_send_fallback=bool(data.get("allow_pane_send_fallback", False)),
         submit_after_agent_send=bool(data.get("submit_after_agent_send", True)),
         submit_after_agent_send_delay_seconds=float(
@@ -107,6 +116,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             ),
             blocked_tail_lines=int(watcher_data.get("blocked_tail_lines", 80)),
             done_tail_lines=int(watcher_data.get("done_tail_lines", 60)),
+        ),
+        dashboard=DashboardConfig(
+            refresh_seconds=float(dashboard_data.get("refresh_seconds", 60)),
         ),
         approval=_approval_strategies(approval_data),
     )

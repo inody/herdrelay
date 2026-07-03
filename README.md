@@ -27,6 +27,14 @@ Event notifications are available with `enable_watcher: true`:
 - The watcher uses Herdr's raw socket API and subscribes to current panes for
   `pane.agent_status_changed` events.
 
+Dashboard updates are available with `enable_dashboard: true`:
+
+- The bot creates one dashboard message in `dashboard_channel_id`.
+- It edits that message periodically with current Herdr agent status.
+- `/herdr dashboard` refreshes the message manually.
+- `/herdr dashboard recreate:true` creates a fresh dashboard message and stores
+  that message ID.
+
 ## Setup
 
 1. Create a Discord application and bot.
@@ -119,6 +127,22 @@ read-only commands work.
    at connection time. It reconnects every `resubscribe_interval_seconds` to pick
    up panes created after startup.
 
+6. Enable dashboard:
+
+   ```yaml
+   enable_dashboard: true
+   dashboard_channel_id: 123456789012345678
+   dashboard:
+     refresh_seconds: 60
+   ```
+
+   The dashboard message is stored in SQLite and edited in place. If it is
+   deleted or you want a fresh one, run:
+
+   ```text
+   /herdr dashboard recreate:true
+   ```
+
 ## Operational notes
 
 - Secrets and local runtime files are ignored by Git: `.env`, `config.yaml`, and
@@ -129,3 +153,4 @@ read-only commands work.
   socket API.
 - Notification dedupe is stored in SQLite in five-minute buckets using
   `pane_id + status + tail hash`.
+- Dashboard message state is stored in SQLite under `bot_state`.

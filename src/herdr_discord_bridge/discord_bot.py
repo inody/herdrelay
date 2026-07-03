@@ -9,6 +9,7 @@ from discord.ext import commands
 
 from .approval import ApprovalError, apply_approval, ensure_blocked_for_approval, strategy_for
 from .config import AppConfig, ApprovalStrategy
+from .dashboard import DashboardManager
 from .formatter import format_bindings, format_status, format_tail, truncate
 from .herdr_client import HerdrClient, TargetResolutionError
 from .models import AuditEntry
@@ -29,6 +30,8 @@ class HerdrDiscordBot(commands.Bot):
         self.security = SecurityPolicy(config)
         self._watcher_task: asyncio.Task | None = None
         self._watcher: EventWatcher | None = None
+        self._dashboard_task: asyncio.Task | None = None
+        self.dashboard: DashboardManager | None = None
 
     async def setup_hook(self) -> None:
         await self.add_cog(HerdrCog(self))
@@ -51,6 +54,15 @@ class HerdrDiscordBot(commands.Bot):
             )
             self._watcher_task = asyncio.create_task(self._watcher.run_forever())
             LOG.info("Started Herdr event watcher")
+        if self.config.enable_dashboard:
+            self.dashboard = DashboardManager(
+                bot=self,
+                config=self.config,
+                store=self.store,
+                client=self.client,
+            )
+            self._dashboard_task = asyncio.create_task(self.dashboard.run_forever())
+            LOG.info("Started dashboard updater")
 
     async def close(self) -> None:
         if self._watcher:
@@ -59,6 +71,14 @@ class HerdrDiscordBot(commands.Bot):
             self._watcher_task.cancel()
             try:
                 await self._watcher_task
+            except asyncio.CancelledError:
+                pass
+        if self.dashboard:
+            self.dashboard.stop()
+        if self._dashboard_task:
+            self._dashboard_task.cancel()
+            try:
+                await self._dashboard_task
             except asyncio.CancelledError:
                 pass
         await super().close()
@@ -175,6 +195,24 @@ class HerdrCog(commands.Cog):
             await interaction.response.send_message(
                 format_bindings(bindings, max_chars=self.bot.config.max_output_chars)
             )
+        except Exception as exc:
+            await _send_error(interaction, exc)
+
+    @herdr.command(name="dashboard", description="Refresh or recreate the dashboard message")
+    @app_commands.describe(recreate="Create a new dashboard message instead of editing the saved one")
+    async def dashboard(self, interaction: discord.Interaction, recreate: bool = False) -> None:
+        try:
+            location = _location(interaction)
+            self.bot.security.ensure_read_allowed(location)
+            await interaction.response.defer(thinking=True)
+            manager = self.bot.dashboard or DashboardManager(
+                bot=self.bot,
+                config=self.bot.config,
+                store=self.bot.store,
+                client=self.bot.client,
+            )
+            message = await manager.refresh(recreate=recreate)
+            await interaction.followup.send(f"Dashboard updated: {message.jump_url}", ephemeral=True)
         except Exception as exc:
             await _send_error(interaction, exc)
 

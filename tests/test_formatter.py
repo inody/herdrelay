@@ -1,4 +1,4 @@
-from herdr_discord_bridge.formatter import format_bindings, format_status, format_tail
+from herdr_discord_bridge.formatter import format_bindings, format_dashboard, format_status, format_tail
 from herdr_discord_bridge.models import Binding, HerdrTarget
 
 
@@ -50,3 +50,17 @@ def test_bindings_formats_rows():
 
     assert "3 -> 1-1 (main)" in output
 
+
+def test_dashboard_summarizes_and_sorts_targets():
+    output = format_dashboard(
+        [
+            HerdrTarget(target="w1:p2", kind="agent", agent_name="codex", status="idle"),
+            HerdrTarget(target="w1:p1", kind="agent", agent_name="claude", status="blocked"),
+            HerdrTarget(target="w1:p3", kind="agent", agent_name="pi", status="working"),
+        ]
+    )
+
+    assert "Herdr dashboard" in output
+    assert "blocked:1" in output
+    assert "working:1" in output
+    assert output.index("blocked") < output.index("working")
