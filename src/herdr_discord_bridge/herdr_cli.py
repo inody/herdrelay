@@ -29,13 +29,13 @@ class HerdrCli:
         return self._json_with_optional_json_flag(["pane", "list"])
 
     def agent_read(self, target: str, *, lines: int) -> str:
-        return self._run(["agent", "read", target, "--lines", str(lines)]).stdout
+        return _read_text(self._run(["agent", "read", target, "--lines", str(lines)]).stdout)
 
     def pane_read(self, target: str, *, lines: int, source: str | None = None) -> str:
         source = source or self.config.default_source
-        return self._run(
-            ["pane", "read", target, "--source", source, "--lines", str(lines)]
-        ).stdout
+        return _read_text(
+            self._run(["pane", "read", target, "--source", source, "--lines", str(lines)]).stdout
+        )
 
     def agent_send(self, target: str, message: str) -> None:
         self._run(["agent", "send", target, message])
@@ -83,3 +83,25 @@ class HerdrCli:
             raise HerdrCliError(f"Herdr command failed: {' '.join(command)}\n{detail}")
         return CommandResult(stdout=completed.stdout, stderr=completed.stderr)
 
+
+def _read_text(stdout: str) -> str:
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return stdout
+    if not isinstance(payload, dict):
+        return stdout
+
+    result = payload.get("result")
+    if isinstance(result, dict):
+        read = result.get("read")
+        if isinstance(read, dict) and isinstance(read.get("text"), str):
+            return read["text"]
+        if isinstance(result.get("text"), str):
+            return result["text"]
+    read = payload.get("read")
+    if isinstance(read, dict) and isinstance(read.get("text"), str):
+        return read["text"]
+    if isinstance(payload.get("text"), str):
+        return payload["text"]
+    return stdout
