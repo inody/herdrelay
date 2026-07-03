@@ -12,6 +12,7 @@ max_message_chars: 2000
 enable_send: false
 enable_approve: false
 allow_pane_send_fallback: false
+submit_after_agent_send: true
 dangerous_text_blocklist:
   - "rm -rf"
   - "sudo"

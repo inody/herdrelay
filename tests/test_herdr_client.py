@@ -1,4 +1,5 @@
-from herdr_discord_bridge.herdr_client import normalize_targets
+from herdr_discord_bridge.config import AppConfig
+from herdr_discord_bridge.herdr_client import HerdrClient, normalize_targets
 
 
 def test_normalize_targets_from_result_agents():
@@ -44,3 +45,36 @@ def test_normalize_targets_from_plain_pane_list():
     assert targets[0].label == "logs"
     assert targets[0].kind == "pane"
 
+
+def test_send_submits_after_agent_send_by_default():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    fake_cli = FakeCli()
+    client.cli = fake_cli
+
+    client.send("w7:p2", "hello")
+
+    assert fake_cli.calls == [
+        ("agent_send", "w7:p2", "hello"),
+        ("pane_send_keys", "w7:p2", ("Enter",)),
+    ]
+
+
+def test_send_can_skip_submit_after_agent_send():
+    client = HerdrClient(AppConfig(discord_token="token", submit_after_agent_send=False))
+    fake_cli = FakeCli()
+    client.cli = fake_cli
+
+    client.send("w7:p2", "hello")
+
+    assert fake_cli.calls == [("agent_send", "w7:p2", "hello")]
+
+
+class FakeCli:
+    def __init__(self):
+        self.calls = []
+
+    def agent_send(self, target, message):
+        self.calls.append(("agent_send", target, message))
+
+    def pane_send_keys(self, target, *keys):
+        self.calls.append(("pane_send_keys", target, keys))

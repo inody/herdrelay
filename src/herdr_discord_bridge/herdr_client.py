@@ -32,6 +32,8 @@ class HerdrClient:
     def send(self, target: str, message: str) -> None:
         try:
             self.cli.agent_send(target, message)
+            if self.config.submit_after_agent_send:
+                self.cli.pane_send_keys(target, "Enter")
             return
         except HerdrCliError:
             if not self.config.allow_pane_send_fallback:
@@ -137,4 +139,3 @@ def _first_str(item: dict[str, Any], *keys: str) -> str | None:
         if value is not None and not isinstance(value, (dict, list)):
             return str(value)
     return None
-
