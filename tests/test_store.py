@@ -67,3 +67,12 @@ def test_state_roundtrip(tmp_path):
     store.set_state("dashboard_message_id", "456")
 
     assert store.get_state("dashboard_message_id") == "456"
+
+
+def test_notification_message_roundtrip(tmp_path):
+    store = Store(tmp_path / "bridge.sqlite3")
+
+    assert store.get_notification_target("123") is None
+    store.add_notification_message(message_id="123", herdr_target="w7:p3", kind="blocked")
+
+    assert store.get_notification_target("123") == "w7:p3"

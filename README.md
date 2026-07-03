@@ -20,6 +20,13 @@ Write actions are guarded by config and audit logging:
 - `/herdr send`
 - `/herdr approve`
 
+Reply-send is available with `enable_reply_send: true`:
+
+- The bot records watcher notification message IDs.
+- Replying to one of those bot notifications sends the reply text to the
+  corresponding Herdr target.
+- This requires Discord's Message Content Intent for the bot.
+
 Event notifications are available with `enable_watcher: true`:
 
 - `blocked` notifications include recent tail and Approve/Cancel buttons.
@@ -89,6 +96,7 @@ read-only commands work.
 
    ```yaml
    enable_send: true
+   enable_reply_send: true
    allowed_user_ids:
      - 123456789012345678
    ```
@@ -96,6 +104,10 @@ read-only commands work.
    `submit_after_agent_send: true` sends Enter after `herdr agent send`. In the
    tested environment, `submit_after_agent_send_delay_seconds: 0.5` was needed
    so the agent UI had time to receive the text before Enter.
+
+   With `enable_reply_send: true`, you can reply to a bot notification with
+   short choices such as `1`, `2`, `yes`, or free text. The reply is sent through
+   the same guarded send path and is audit-logged.
 
 4. Enable approval:
 

@@ -63,6 +63,13 @@ class Store:
                   value TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS notification_messages (
+                  message_id TEXT PRIMARY KEY,
+                  herdr_target TEXT NOT NULL,
+                  kind TEXT NOT NULL,
+                  created_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -242,6 +249,28 @@ class Store:
                 """,
                 (key, value, now),
             )
+
+    def add_notification_message(
+        self, *, message_id: int | str, herdr_target: str, kind: str
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO notification_messages (
+                  message_id, herdr_target, kind, created_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (str(message_id), herdr_target, kind, _now()),
+            )
+
+    def get_notification_target(self, message_id: int | str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT herdr_target FROM notification_messages WHERE message_id = ?",
+                (str(message_id),),
+            ).fetchone()
+        return str(row["herdr_target"]) if row else None
 
 
 def _binding(row: sqlite3.Row) -> Binding:

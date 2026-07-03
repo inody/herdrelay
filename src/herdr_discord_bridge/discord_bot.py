@@ -23,6 +23,8 @@ LOG = logging.getLogger(__name__)
 class HerdrDiscordBot(commands.Bot):
     def __init__(self, *, config: AppConfig, store: Store, client: HerdrClient):
         intents = discord.Intents.default()
+        if config.enable_reply_send:
+            intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
         self.config = config
         self.store = store
@@ -99,6 +101,57 @@ class HerdrDiscordBot(commands.Bot):
             target=target,
             strategy=strategy,
         )
+
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot:
+            return
+        await self._handle_reply_send(message)
+        await self.process_commands(message)
+
+    async def _handle_reply_send(self, message: discord.Message) -> None:
+        reference = message.reference
+        if reference is None or reference.message_id is None:
+            return
+        target = self.store.get_notification_target(reference.message_id)
+        if target is None:
+            return
+
+        content = (message.content or "").strip()
+        location = _location_from_message(message)
+        try:
+            if not content:
+                raise SecurityError(
+                    "Reply message content is empty. Enable Message Content Intent for this Discord bot."
+                )
+            self.security.ensure_reply_send_allowed(message.author.id, location, content)
+            self.client.send(target, content)
+            self.store.add_audit(
+                AuditEntry(
+                    discord_user_id=str(message.author.id),
+                    guild_id=str(location.guild_id) if location.guild_id is not None else None,
+                    channel_id=str(location.channel_id),
+                    thread_id=str(location.thread_id) if location.thread_id is not None else None,
+                    action="reply_send",
+                    herdr_target=target,
+                    payload_preview=truncate(content, max_chars=200),
+                    result="ok",
+                )
+            )
+            await message.reply(f"Sent reply to `{target}`.", mention_author=False)
+        except Exception as exc:
+            self.store.add_audit(
+                AuditEntry(
+                    discord_user_id=str(message.author.id),
+                    guild_id=str(location.guild_id) if location.guild_id is not None else None,
+                    channel_id=str(location.channel_id),
+                    thread_id=str(location.thread_id) if location.thread_id is not None else None,
+                    action="reply_send",
+                    herdr_target=target,
+                    payload_preview=truncate(content, max_chars=200) if content else None,
+                    result=truncate(f"error: {exc}", max_chars=500),
+                )
+            )
+            await message.reply(str(exc), mention_author=False)
 
 
 class HerdrCog(commands.Cog):
@@ -405,6 +458,18 @@ def _location(interaction: discord.Interaction) -> DiscordLocation:
     thread_id = interaction.channel_id if parent_id else None
     return DiscordLocation(
         guild_id=interaction.guild_id,
+        channel_id=int(channel_id),
+        thread_id=int(thread_id) if thread_id else None,
+    )
+
+
+def _location_from_message(message: discord.Message) -> DiscordLocation:
+    channel = message.channel
+    parent_id = getattr(channel, "parent_id", None)
+    channel_id = parent_id or message.channel.id
+    thread_id = message.channel.id if parent_id else None
+    return DiscordLocation(
+        guild_id=message.guild.id if message.guild else None,
         channel_id=int(channel_id),
         thread_id=int(thread_id) if thread_id else None,
     )

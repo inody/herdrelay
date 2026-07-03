@@ -53,6 +53,7 @@ class AppConfig:
     enable_approve: bool = False
     enable_watcher: bool = False
     enable_dashboard: bool = False
+    enable_reply_send: bool = False
     allow_pane_send_fallback: bool = False
     submit_after_agent_send: bool = True
     submit_after_agent_send_delay_seconds: float = 0.5
@@ -97,6 +98,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         enable_approve=bool(data.get("enable_approve", False)),
         enable_watcher=bool(data.get("enable_watcher", False)),
         enable_dashboard=bool(data.get("enable_dashboard", False)),
+        enable_reply_send=bool(data.get("enable_reply_send", False)),
         allow_pane_send_fallback=bool(data.get("allow_pane_send_fallback", False)),
         submit_after_agent_send=bool(data.get("submit_after_agent_send", True)),
         submit_after_agent_send_delay_seconds=float(

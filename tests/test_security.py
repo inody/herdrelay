@@ -41,6 +41,36 @@ def test_send_disabled_even_for_allowed_user():
         policy.ensure_send_allowed(10, DiscordLocation(guild_id=1, channel_id=2), "hello")
 
 
+def test_reply_send_requires_reply_feature_enabled():
+    policy = SecurityPolicy(
+        AppConfig(
+            discord_token="token",
+            enable_send=True,
+            enable_reply_send=False,
+            allowed_user_ids=frozenset({10}),
+        )
+    )
+
+    with pytest.raises(SecurityError, match="Reply send is disabled"):
+        policy.ensure_reply_send_allowed(10, DiscordLocation(guild_id=1, channel_id=2), "1")
+
+
+def test_reply_send_uses_send_guards():
+    policy = SecurityPolicy(
+        AppConfig(
+            discord_token="token",
+            enable_send=True,
+            enable_reply_send=True,
+            allowed_user_ids=frozenset({10}),
+            dangerous_text_blocklist=("rm -rf",),
+        )
+    )
+
+    policy.ensure_reply_send_allowed(10, DiscordLocation(guild_id=1, channel_id=2), "1")
+    with pytest.raises(SecurityError, match="blocked text"):
+        policy.ensure_reply_send_allowed(10, DiscordLocation(guild_id=1, channel_id=2), "rm -rf")
+
+
 def test_blocklist_is_case_insensitive():
     policy = SecurityPolicy(
         AppConfig(

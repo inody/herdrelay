@@ -138,7 +138,12 @@ class EventWatcher:
         view = None
         if event.status == "blocked" and self.approval_view_factory:
             view = self.approval_view_factory(event.pane_id)
-        await destination.send(body, view=view)
+        sent = await destination.send(body, view=view)
+        self.store.add_notification_message(
+            message_id=sent.id,
+            herdr_target=event.pane_id,
+            kind=event.status,
+        )
         LOG.info("Posted %s notification for %s", event.status, event.pane_id)
 
     async def _destination_for(self, pane_id: str) -> discord.abc.Messageable | None:

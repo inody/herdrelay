@@ -9,6 +9,7 @@ def test_load_config_reads_dashboard_settings(tmp_path, monkeypatch):
     config_path.write_text(
         """
 enable_dashboard: true
+enable_reply_send: true
 dashboard:
   refresh_seconds: 12
 """
@@ -17,4 +18,5 @@ dashboard:
     config = load_config(config_path)
 
     assert config.enable_dashboard is True
+    assert config.enable_reply_send is True
     assert config.dashboard.refresh_seconds == 12

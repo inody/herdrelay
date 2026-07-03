@@ -13,6 +13,7 @@ enable_send: false
 enable_approve: false
 enable_watcher: false
 enable_dashboard: false
+enable_reply_send: false
 allow_pane_send_fallback: false
 submit_after_agent_send: true
 submit_after_agent_send_delay_seconds: 0.5

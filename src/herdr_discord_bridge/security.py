@@ -35,6 +35,14 @@ class SecurityPolicy:
         if not self.config.enable_send:
             raise SecurityError("Send is disabled in config.")
         self._ensure_write_user(user_id)
+        self.ensure_message_allowed(message)
+
+    def ensure_reply_send_allowed(self, user_id: int, location: DiscordLocation, message: str) -> None:
+        if not self.config.enable_reply_send:
+            raise SecurityError("Reply send is disabled in config.")
+        self.ensure_send_allowed(user_id, location, message)
+
+    def ensure_message_allowed(self, message: str) -> None:
         if len(message) > self.config.max_message_chars:
             raise SecurityError("Message is too long.")
         lowered = message.casefold()
