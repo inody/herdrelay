@@ -11,9 +11,16 @@ max_message_chars: 2000
 
 enable_send: false
 enable_approve: false
+enable_watcher: false
 allow_pane_send_fallback: false
 submit_after_agent_send: true
 submit_after_agent_send_delay_seconds: 0.5
+
+watcher:
+  statuses: ["blocked", "done"]
+  reconnect_delay_seconds: 5
+  blocked_tail_lines: 80
+  done_tail_lines: 60
 dangerous_text_blocklist:
   - "rm -rf"
   - "sudo"

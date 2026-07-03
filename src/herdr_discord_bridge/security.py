@@ -44,6 +44,9 @@ class SecurityPolicy:
 
     def ensure_approve_allowed(self, user_id: int, location: DiscordLocation) -> None:
         self.ensure_read_allowed(location)
+        self.ensure_approve_user_allowed(user_id)
+
+    def ensure_approve_user_allowed(self, user_id: int) -> None:
         if not self.config.enable_approve:
             raise SecurityError("Approve is disabled in config.")
         self._ensure_write_user(user_id)
@@ -53,4 +56,3 @@ class SecurityPolicy:
             raise SecurityError("No write users are configured.")
         if user_id not in self.config.allowed_user_ids:
             raise SecurityError("This Discord user is not allowed to write.")
-

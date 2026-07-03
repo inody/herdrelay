@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -13,6 +14,7 @@ from .herdr_client import HerdrClient, TargetResolutionError
 from .models import AuditEntry
 from .security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
+from .watcher import EventWatcher
 
 LOG = logging.getLogger(__name__)
 
@@ -25,6 +27,8 @@ class HerdrDiscordBot(commands.Bot):
         self.store = store
         self.client = client
         self.security = SecurityPolicy(config)
+        self._watcher_task: asyncio.Task | None = None
+        self._watcher: EventWatcher | None = None
 
     async def setup_hook(self) -> None:
         await self.add_cog(HerdrCog(self))
@@ -37,6 +41,44 @@ class HerdrDiscordBot(commands.Bot):
         else:
             await self.tree.sync()
             LOG.info("Synced global commands")
+        if self.config.enable_watcher:
+            self._watcher = EventWatcher(
+                bot=self,
+                config=self.config,
+                store=self.store,
+                client=self.client,
+                approval_view_factory=self._approval_view_for_event,
+            )
+            self._watcher_task = asyncio.create_task(self._watcher.run_forever())
+            LOG.info("Started Herdr event watcher")
+
+    async def close(self) -> None:
+        if self._watcher:
+            self._watcher.stop()
+        if self._watcher_task:
+            self._watcher_task.cancel()
+            try:
+                await self._watcher_task
+            except asyncio.CancelledError:
+                pass
+        await super().close()
+
+    def _approval_view_for_event(self, target: str) -> discord.ui.View | None:
+        if not self.config.enable_approve:
+            return None
+        try:
+            target_info = self.client.resolve_target(target)
+            strategy = strategy_for(self.config, target_info.agent_name)
+        except Exception:
+            LOG.exception("Cannot create approval view for watcher event")
+            return None
+        return ApprovalView(
+            bot=self,
+            user_id=None,
+            location=None,
+            target=target,
+            strategy=strategy,
+        )
 
 
 class HerdrCog(commands.Cog):
@@ -254,8 +296,8 @@ class ApprovalView(discord.ui.View):
         self,
         *,
         bot: HerdrDiscordBot,
-        user_id: int,
-        location: DiscordLocation,
+        user_id: int | None,
+        location: DiscordLocation | None,
         target: str,
         strategy: ApprovalStrategy,
     ):
@@ -270,20 +312,25 @@ class ApprovalView(discord.ui.View):
     async def approve_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        if interaction.user.id != self.user_id:
+        if self.user_id is not None and interaction.user.id != self.user_id:
             await interaction.response.send_message("Only the requesting user can approve.", ephemeral=True)
             return
         try:
-            self.bot.security.ensure_approve_allowed(interaction.user.id, self.location)
+            if self.location is None:
+                self.bot.security.ensure_approve_user_allowed(interaction.user.id)
+            else:
+                self.bot.security.ensure_approve_allowed(interaction.user.id, self.location)
             target_info = self.bot.client.resolve_target(self.target)
             ensure_blocked_for_approval(target_info)
             apply_approval(self.bot.client, self.target, self.strategy)
             self.bot.store.add_audit(
                 AuditEntry(
                     discord_user_id=str(interaction.user.id),
-                    guild_id=str(self.location.guild_id) if self.location.guild_id is not None else None,
-                    channel_id=str(self.location.channel_id),
-                    thread_id=str(self.location.thread_id) if self.location.thread_id else None,
+                    guild_id=str(self.location.guild_id)
+                    if self.location and self.location.guild_id is not None
+                    else None,
+                    channel_id=str(self.location.channel_id) if self.location else None,
+                    thread_id=str(self.location.thread_id) if self.location and self.location.thread_id else None,
                     action="approve",
                     herdr_target=self.target,
                     result="ok",
@@ -298,7 +345,7 @@ class ApprovalView(discord.ui.View):
     async def cancel_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        if interaction.user.id != self.user_id:
+        if self.user_id is not None and interaction.user.id != self.user_id:
             await interaction.response.send_message("Only the requesting user can cancel.", ephemeral=True)
             return
         self._disable()

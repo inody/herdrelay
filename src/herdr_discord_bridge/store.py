@@ -148,6 +148,19 @@ class Store:
             rows = conn.execute(sql, args).fetchall()
         return [_binding(row) for row in rows]
 
+    def find_binding_for_target(self, herdr_target: str) -> Binding | None:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM bindings
+                WHERE herdr_target = ?
+                ORDER BY thread_id IS NULL ASC, updated_at DESC
+                LIMIT 1
+                """,
+                (herdr_target,),
+            ).fetchall()
+        return _binding(rows[0]) if rows else None
+
     def delete_binding(
         self, *, guild_id: int | str, channel_id: int | str, thread_id: int | str | None
     ) -> int:
