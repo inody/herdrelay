@@ -149,6 +149,15 @@ read-only commands work.
   SQLite databases.
 - The bot runs in the foreground. Use `scripts/run_bot.sh` from a terminal pane
   or wrap it in your preferred process manager.
+- On macOS, install it as a user `launchd` service:
+
+  ```bash
+  scripts/install_launchd.sh
+  scripts/status_launchd.sh
+  scripts/uninstall_launchd.sh
+  ```
+
+  Logs are written to `logs/launchd.out.log` and `logs/launchd.err.log`.
 - Read/tail/send use Herdr CLI wrappers. Event notifications use the Herdr raw
   socket API.
 - Notification dedupe is stored in SQLite in five-minute buckets using
