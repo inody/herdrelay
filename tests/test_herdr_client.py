@@ -88,6 +88,47 @@ def test_send_honors_zero_submit_delay():
     ]
 
 
+def test_normalize_targets_resolves_workspace_label_from_map():
+    targets = normalize_targets(
+        {"result": {"agents": [
+            {"pane_id": "w1:p1", "agent": "codex", "agent_status": "idle", "workspace_id": "w1"}
+        ]}},
+        preferred_kind="agent",
+        workspace_labels={"w1": "cbo_mppi"},
+    )
+
+    assert targets[0].workspace_label == "cbo_mppi"
+
+
+def test_normalize_targets_workspace_label_falls_back_to_nested():
+    targets = normalize_targets(
+        {"result": {"agents": [
+            {"pane_id": "1", "agent": "codex", "workspace": {"label": "nested"}}
+        ]}},
+        preferred_kind="agent",
+    )
+
+    assert targets[0].workspace_label == "nested"
+
+
+def test_list_workspaces_maps_ids_to_labels():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    client.cli = WorkspaceFakeCli()
+
+    assert client.list_workspaces() == {"w1": "cbo_mppi", "w7": "herdr-chat-bridge"}
+
+
+def test_list_targets_attaches_workspace_labels():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    client.cli = AgentWithWorkspaceFakeCli()
+
+    targets = {t.target: t for t in client.list_targets()}
+
+    assert targets["w1:p1"].workspace_label == "cbo_mppi"
+    assert targets["w7:p3"].workspace_label == "herdr-chat-bridge"
+    assert targets["w7:p3"].status == "blocked"
+
+
 class FakeCli:
     def __init__(self):
         self.calls = []
@@ -97,3 +138,27 @@ class FakeCli:
 
     def pane_send_keys(self, target, *keys):
         self.calls.append(("pane_send_keys", target, keys))
+
+
+class WorkspaceFakeCli:
+    def workspace_list(self):
+        return {
+            "result": {
+                "workspaces": [
+                    {"workspace_id": "w1", "label": "cbo_mppi"},
+                    {"workspace_id": "w7", "label": "herdr-chat-bridge"},
+                ]
+            }
+        }
+
+
+class AgentWithWorkspaceFakeCli(WorkspaceFakeCli):
+    def agent_list(self):
+        return {
+            "result": {
+                "agents": [
+                    {"pane_id": "w1:p1", "agent": "codex", "agent_status": "idle", "workspace_id": "w1"},
+                    {"pane_id": "w7:p3", "agent": "claude", "agent_status": "blocked", "workspace_id": "w7"},
+                ]
+            }
+        }

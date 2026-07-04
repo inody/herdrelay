@@ -33,8 +33,14 @@ class WatcherConfig:
 
 
 @dataclass(frozen=True)
-class DashboardConfig:
-    refresh_seconds: float = 60
+class AutoThreadsConfig:
+    refresh_seconds: float = 30
+
+
+@dataclass(frozen=True)
+class StreamConfig:
+    refresh_seconds: float = 8
+    tail_lines: int = 60
 
 
 @dataclass(frozen=True)
@@ -44,7 +50,7 @@ class AppConfig:
     allowed_guild_ids: frozenset[int] = frozenset()
     allowed_channel_ids: frozenset[int] = frozenset()
     allowed_user_ids: frozenset[int] = frozenset()
-    dashboard_channel_id: int | None = None
+    thread_parent_channel_id: int | None = None
     database_path: str = "herdr-discord-bridge.sqlite3"
     max_tail_lines: int = 80
     max_output_chars: int = 1800
@@ -52,16 +58,20 @@ class AppConfig:
     enable_send: bool = False
     enable_approve: bool = False
     enable_watcher: bool = False
-    enable_dashboard: bool = False
-    enable_reply_send: bool = False
+    enable_stop: bool = False
+    enable_auto_threads: bool = False
+    enable_streaming: bool = False
     allow_pane_send_fallback: bool = False
     submit_after_agent_send: bool = True
     submit_after_agent_send_delay_seconds: float = 0.5
     dangerous_text_blocklist: tuple[str, ...] = ()
     herdr: HerdrCliConfig = field(default_factory=HerdrCliConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
-    dashboard: DashboardConfig = field(default_factory=DashboardConfig)
+    auto_threads: AutoThreadsConfig = field(default_factory=AutoThreadsConfig)
+    streaming: StreamConfig = field(default_factory=StreamConfig)
     approval: dict[str, ApprovalStrategy] = field(default_factory=dict)
+    deny: dict[str, ApprovalStrategy] = field(default_factory=dict)
+    stop: ApprovalStrategy | None = None
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
@@ -80,7 +90,8 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
 
     herdr_data = data.get("herdr") or {}
     watcher_data = data.get("watcher") or {}
-    dashboard_data = data.get("dashboard") or {}
+    auto_threads_data = data.get("auto_threads") or {}
+    streaming_data = data.get("streaming") or {}
     approval_data = data.get("approval") or {}
 
     return AppConfig(
@@ -89,7 +100,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         allowed_guild_ids=_id_set(data.get("allowed_guild_ids")),
         allowed_channel_ids=_id_set(data.get("allowed_channel_ids")),
         allowed_user_ids=_id_set(data.get("allowed_user_ids")),
-        dashboard_channel_id=_optional_int(data.get("dashboard_channel_id")),
+        thread_parent_channel_id=_optional_int(data.get("thread_parent_channel_id")),
         database_path=str(data.get("database_path") or "herdr-discord-bridge.sqlite3"),
         max_tail_lines=int(data.get("max_tail_lines", 80)),
         max_output_chars=int(data.get("max_output_chars", 1800)),
@@ -97,8 +108,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         enable_send=bool(data.get("enable_send", False)),
         enable_approve=bool(data.get("enable_approve", False)),
         enable_watcher=bool(data.get("enable_watcher", False)),
-        enable_dashboard=bool(data.get("enable_dashboard", False)),
-        enable_reply_send=bool(data.get("enable_reply_send", False)),
+        enable_stop=bool(data.get("enable_stop", False)),
+        enable_auto_threads=bool(data.get("enable_auto_threads", False)),
+        enable_streaming=bool(data.get("enable_streaming", False)),
         allow_pane_send_fallback=bool(data.get("allow_pane_send_fallback", False)),
         submit_after_agent_send=bool(data.get("submit_after_agent_send", True)),
         submit_after_agent_send_delay_seconds=float(
@@ -119,10 +131,16 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             blocked_tail_lines=int(watcher_data.get("blocked_tail_lines", 80)),
             done_tail_lines=int(watcher_data.get("done_tail_lines", 60)),
         ),
-        dashboard=DashboardConfig(
-            refresh_seconds=float(dashboard_data.get("refresh_seconds", 60)),
+        auto_threads=AutoThreadsConfig(
+            refresh_seconds=float(auto_threads_data.get("refresh_seconds", 30)),
+        ),
+        streaming=StreamConfig(
+            refresh_seconds=float(streaming_data.get("refresh_seconds", 8)),
+            tail_lines=int(streaming_data.get("tail_lines", 60)),
         ),
         approval=_approval_strategies(approval_data),
+        deny=_approval_strategies(data.get("deny") or {}),
+        stop=_single_strategy(data.get("stop")),
     )
 
 
@@ -138,6 +156,18 @@ def _optional_int(value: Any) -> int | None:
     if value in (None, ""):
         return None
     return int(value)
+
+
+def _single_strategy(value: Any) -> ApprovalStrategy | None:
+    if not value:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("stop must be a YAML mapping")
+    return ApprovalStrategy(
+        method=str(value.get("method") or ""),
+        text=value.get("text"),
+        keys=tuple(str(key) for key in value.get("keys") or ()),
+    )
 
 
 def _approval_strategies(value: Any) -> dict[str, ApprovalStrategy]:

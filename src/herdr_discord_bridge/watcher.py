@@ -41,13 +41,13 @@ class EventWatcher:
         config: AppConfig,
         store: Store,
         client: HerdrClient,
-        approval_view_factory: APPROVAL_VIEW_FACTORY | None = None,
+        card_view_factory: APPROVAL_VIEW_FACTORY | None = None,
     ):
         self.bot = bot
         self.config = config
         self.store = store
         self.client = client
-        self.approval_view_factory = approval_view_factory
+        self.card_view_factory = card_view_factory
         self._stopped = asyncio.Event()
 
     def stop(self) -> None:
@@ -139,15 +139,9 @@ class EventWatcher:
 
         title = event_title(event)
         body = title + "\n" + format_tail(output, max_chars=self.config.max_output_chars)
-        view = None
-        if event.status == "blocked" and self.approval_view_factory:
-            view = self.approval_view_factory(event.pane_id)
-        sent = await destination.send(body, view=view)
-        self.store.add_notification_message(
-            message_id=sent.id,
-            herdr_target=event.pane_id,
-            kind=event.status,
-        )
+        mention_prefix = blocked_mention_prefix(self.config) if event.status == "blocked" else ""
+        view = self.card_view_factory(event.pane_id) if self.card_view_factory else None
+        await destination.send(mention_prefix + body, view=view)
         LOG.info("Posted %s notification for %s", event.status, event.pane_id)
 
     async def _destination_for(self, pane_id: str) -> discord.abc.Messageable | None:
@@ -156,8 +150,6 @@ class EventWatcher:
             channel = await self._channel_for_binding(binding)
             if channel:
                 return channel
-        if self.config.dashboard_channel_id:
-            return await self._get_channel(self.config.dashboard_channel_id)
         return None
 
     async def _channel_for_binding(self, binding: Binding) -> discord.abc.Messageable | None:
@@ -183,6 +175,13 @@ class EventWatcher:
             )
         except TimeoutError:
             return
+
+
+def blocked_mention_prefix(config: AppConfig) -> str:
+    """Mention allowed users so blocked notifications push to mobile."""
+    if not config.allowed_user_ids:
+        return ""
+    return " ".join(f"<@{uid}>" for uid in config.allowed_user_ids) + "\n"
 
 
 def resolve_socket_path(config: AppConfig) -> str:

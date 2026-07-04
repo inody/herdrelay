@@ -64,11 +64,19 @@ class Store:
                   updated_at TEXT NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS notification_messages (
-                  message_id TEXT PRIMARY KEY,
-                  herdr_target TEXT NOT NULL,
-                  kind TEXT NOT NULL,
-                  created_at TEXT NOT NULL
+                CREATE TABLE IF NOT EXISTS agent_threads (
+                  pane_id TEXT PRIMARY KEY,
+                  thread_id TEXT NOT NULL,
+                  guild_id TEXT NOT NULL,
+                  alias TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS pane_streams (
+                  pane_id TEXT PRIMARY KEY,
+                  last_tail TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
                 );
                 """
             )
@@ -258,27 +266,58 @@ class Store:
                 (key, value, now),
             )
 
-    def add_notification_message(
-        self, *, message_id: int | str, herdr_target: str, kind: str
+    def upsert_agent_thread(
+        self,
+        *,
+        pane_id: str,
+        thread_id: int | str,
+        guild_id: int | str,
+        alias: str | None = None,
     ) -> None:
+        now = _now()
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO notification_messages (
-                  message_id, herdr_target, kind, created_at
-                )
-                VALUES (?, ?, ?, ?)
+                INSERT INTO agent_threads (pane_id, thread_id, guild_id, alias, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(pane_id) DO UPDATE SET
+                  thread_id = excluded.thread_id,
+                  guild_id = excluded.guild_id,
+                  alias = excluded.alias,
+                  updated_at = excluded.updated_at
                 """,
-                (str(message_id), herdr_target, kind, _now()),
+                (pane_id, str(thread_id), str(guild_id), alias, now, now),
             )
 
-    def get_notification_target(self, message_id: int | str) -> str | None:
+    def get_agent_thread(self, pane_id: str) -> str | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT herdr_target FROM notification_messages WHERE message_id = ?",
-                (str(message_id),),
+                "SELECT thread_id FROM agent_threads WHERE pane_id = ?",
+                (pane_id,),
             ).fetchone()
-        return str(row["herdr_target"]) if row else None
+        return str(row["thread_id"]) if row else None
+
+    def upsert_pane_stream(self, pane_id: str, last_tail: str) -> None:
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO pane_streams (pane_id, last_tail, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(pane_id) DO UPDATE SET
+                  last_tail = excluded.last_tail,
+                  updated_at = excluded.updated_at
+                """,
+                (pane_id, last_tail, now),
+            )
+
+    def get_pane_stream(self, pane_id: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT last_tail FROM pane_streams WHERE pane_id = ?",
+                (pane_id,),
+            ).fetchone()
+        return str(row["last_tail"]) if row else None
 
 
 def _binding(row: sqlite3.Row) -> Binding:

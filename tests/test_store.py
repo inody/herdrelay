@@ -69,15 +69,6 @@ def test_state_roundtrip(tmp_path):
     assert store.get_state("dashboard_message_id") == "456"
 
 
-def test_notification_message_roundtrip(tmp_path):
-    store = Store(tmp_path / "bridge.sqlite3")
-
-    assert store.get_notification_target("123") is None
-    store.add_notification_message(message_id="123", herdr_target="w7:p3", kind="blocked")
-
-    assert store.get_notification_target("123") == "w7:p3"
-
-
 def test_event_key_prefix_matches_legacy_bucketed_keys(tmp_path):
     store = Store(tmp_path / "bridge.sqlite3")
 
@@ -85,3 +76,17 @@ def test_event_key_prefix_matches_legacy_bucketed_keys(tmp_path):
 
     assert store.has_event_key_prefix("w7:p1:done:abc123")
     assert not store.has_event_key_prefix("w7:p1:blocked:abc123")
+
+
+def test_agent_thread_upsert_and_get(tmp_path):
+    store = Store(tmp_path / "bridge.sqlite3")
+
+    assert store.get_agent_thread("w7:p5") is None
+
+    store.upsert_agent_thread(pane_id="w7:p5", thread_id=111, guild_id=1, alias="herdr/claude")
+
+    assert store.get_agent_thread("w7:p5") == "111"
+
+    store.upsert_agent_thread(pane_id="w7:p5", thread_id=222, guild_id=1, alias="herdr/claude")
+
+    assert store.get_agent_thread("w7:p5") == "222"

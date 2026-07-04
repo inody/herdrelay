@@ -19,16 +19,39 @@ class HerdrClient:
         self.cli = HerdrCli(config.herdr)
 
     def list_targets(self) -> list[HerdrTarget]:
+        workspace_labels = self.list_workspaces()
         try:
-            return normalize_targets(self.cli.agent_list(), preferred_kind="agent")
+            return normalize_targets(
+                self.cli.agent_list(),
+                preferred_kind="agent",
+                workspace_labels=workspace_labels,
+            )
         except HerdrCliError:
-            return normalize_targets(self.cli.pane_list(), preferred_kind="pane")
+            return normalize_targets(
+                self.cli.pane_list(),
+                preferred_kind="pane",
+                workspace_labels=workspace_labels,
+            )
 
-    def read(self, target: str, *, lines: int) -> str:
+    def list_workspaces(self) -> dict[str, str]:
+        """Return a mapping of workspace_id -> human-readable label."""
         try:
-            return self.cli.agent_read(target, lines=lines)
+            items = _extract_items(self.cli.workspace_list(), preferred_kind="workspace")
         except HerdrCliError:
-            return self.cli.pane_read(target, lines=lines)
+            return {}
+        mapping: dict[str, str] = {}
+        for item in items:
+            workspace_id = _first_str(item, "workspace_id", "id")
+            label = _first_str(item, "label", "name")
+            if workspace_id and label:
+                mapping[workspace_id] = label
+        return mapping
+
+    def read(self, target: str, *, lines: int, fmt: str | None = None) -> str:
+        try:
+            return self.cli.agent_read(target, lines=lines, fmt=fmt)
+        except HerdrCliError:
+            return self.cli.pane_read(target, lines=lines, fmt=fmt)
 
     def send(self, target: str, message: str) -> None:
         try:
@@ -69,9 +92,18 @@ class HerdrClient:
         raise TargetResolutionError(f"Target is ambiguous: {query}")
 
 
-def normalize_targets(payload: Any, *, preferred_kind: str) -> list[HerdrTarget]:
+def normalize_targets(
+    payload: Any,
+    *,
+    preferred_kind: str,
+    workspace_labels: dict[str, str] | None = None,
+) -> list[HerdrTarget]:
+    workspace_labels = workspace_labels or {}
     items = _extract_items(payload, preferred_kind)
-    targets = [_target_from_item(item, preferred_kind=preferred_kind) for item in items]
+    targets = [
+        _target_from_item(item, preferred_kind=preferred_kind, workspace_labels=workspace_labels)
+        for item in items
+    ]
     return [target for target in targets if target.target]
 
 
@@ -98,7 +130,13 @@ def _extract_items(payload: Any, preferred_kind: str) -> list[dict[str, Any]]:
     return [payload]
 
 
-def _target_from_item(item: dict[str, Any], *, preferred_kind: str) -> HerdrTarget:
+def _target_from_item(
+    item: dict[str, Any],
+    *,
+    preferred_kind: str,
+    workspace_labels: dict[str, str] | None = None,
+) -> HerdrTarget:
+    workspace_labels = workspace_labels or {}
     target = _first_str(
         item,
         "target",
@@ -112,6 +150,10 @@ def _target_from_item(item: dict[str, Any], *, preferred_kind: str) -> HerdrTarg
     workspace = _nested_dict(item, "workspace")
     tab = _nested_dict(item, "tab")
     agent = _nested_dict(item, "agent")
+    workspace_id = (
+        _first_str(item, "workspace_id", "workspace")
+        or _first_str(workspace, "id", "workspace_id")
+    )
 
     return HerdrTarget(
         target=target or "",
@@ -123,8 +165,11 @@ def _target_from_item(item: dict[str, Any], *, preferred_kind: str) -> HerdrTarg
         or _first_str(agent, "agent", "agent_name", "name"),
         status=_first_str(item, "agent_status", "status")
         or _first_str(agent, "agent_status", "status"),
-        workspace_label=_first_str(item, "workspace_label")
-        or _first_str(workspace, "label", "name"),
+        workspace_label=(
+            _first_str(item, "workspace_label")
+            or (workspace_labels.get(workspace_id) if workspace_id else None)
+            or _first_str(workspace, "label", "name")
+        ),
         tab_label=_first_str(item, "tab_label") or _first_str(tab, "label", "name"),
         cwd=_first_str(item, "cwd", "foreground_cwd", "working_directory")
         or _first_str(pane, "cwd", "foreground_cwd", "working_directory"),

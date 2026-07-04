@@ -3,6 +3,7 @@ from herdr_discord_bridge.models import HerdrTarget
 from herdr_discord_bridge.store import Store
 from herdr_discord_bridge.watcher import (
     AgentStatusEvent,
+    blocked_mention_prefix,
     build_agent_status_subscriptions,
     event_dedupe_key,
     parse_agent_status_event,
@@ -136,6 +137,22 @@ def test_should_resubscribe_can_be_disabled(monkeypatch):
     monkeypatch.setattr("herdr_discord_bridge.watcher.time.monotonic", lambda: 1000.0)
 
     assert not should_resubscribe(0, config)
+
+
+def test_blocked_mention_prefix_lists_allowed_users():
+    config = AppConfig(discord_token="token", allowed_user_ids=frozenset({111, 222}))
+
+    prefix = blocked_mention_prefix(config)
+
+    assert "<@111>" in prefix
+    assert "<@222>" in prefix
+    assert prefix.endswith("\n")
+
+
+def test_blocked_mention_prefix_empty_when_no_users():
+    config = AppConfig(discord_token="token")
+
+    assert blocked_mention_prefix(config) == ""
 
 
 class FakeHerdrClient:

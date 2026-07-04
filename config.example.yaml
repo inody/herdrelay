@@ -1,7 +1,7 @@
 allowed_guild_ids: []
 allowed_channel_ids: []
 allowed_user_ids: []
-dashboard_channel_id: null
+thread_parent_channel_id: null
 
 database_path: herdr-discord-bridge.sqlite3
 
@@ -12,14 +12,19 @@ max_message_chars: 2000
 enable_send: false
 enable_approve: false
 enable_watcher: false
-enable_dashboard: false
-enable_reply_send: false
+enable_stop: false
+enable_auto_threads: false
+enable_streaming: false
 allow_pane_send_fallback: false
 submit_after_agent_send: true
 submit_after_agent_send_delay_seconds: 0.5
 
-dashboard:
-  refresh_seconds: 60
+auto_threads:
+  refresh_seconds: 30
+
+streaming:
+  refresh_seconds: 8
+  tail_lines: 60
 
 watcher:
   statuses: ["blocked", "done"]
@@ -47,3 +52,16 @@ approval:
   pi:
     method: send_keys
     keys: ["Enter"]
+deny:
+  codex:
+    method: send_keys
+    keys: ["Escape"]
+  claude:
+    method: send_keys
+    keys: ["Escape"]
+  pi:
+    method: send_keys
+    keys: ["Escape"]
+stop:
+  method: send_keys
+  keys: ["C-c"]

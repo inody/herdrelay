@@ -37,11 +37,6 @@ class SecurityPolicy:
         self._ensure_write_user(user_id)
         self.ensure_message_allowed(message)
 
-    def ensure_reply_send_allowed(self, user_id: int, location: DiscordLocation, message: str) -> None:
-        if not self.config.enable_reply_send:
-            raise SecurityError("Reply send is disabled in config.")
-        self.ensure_send_allowed(user_id, location, message)
-
     def ensure_message_allowed(self, message: str) -> None:
         if len(message) > self.config.max_message_chars:
             raise SecurityError("Message is too long.")
@@ -57,6 +52,22 @@ class SecurityPolicy:
     def ensure_approve_user_allowed(self, user_id: int) -> None:
         if not self.config.enable_approve:
             raise SecurityError("Approve is disabled in config.")
+        self._ensure_write_user(user_id)
+
+    def ensure_deny_allowed(self, user_id: int, location: DiscordLocation) -> None:
+        # Deny is the inverse of approve and shares its guard.
+        self.ensure_approve_allowed(user_id, location)
+
+    def ensure_deny_user_allowed(self, user_id: int) -> None:
+        self.ensure_approve_user_allowed(user_id)
+
+    def ensure_stop_allowed(self, user_id: int, location: DiscordLocation) -> None:
+        self.ensure_read_allowed(location)
+        self.ensure_stop_user_allowed(user_id)
+
+    def ensure_stop_user_allowed(self, user_id: int) -> None:
+        if not self.config.enable_stop:
+            raise SecurityError("Stop is disabled in config.")
         self._ensure_write_user(user_id)
 
     def _ensure_write_user(self, user_id: int) -> None:

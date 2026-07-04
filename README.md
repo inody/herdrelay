@@ -1,286 +1,237 @@
 # herdr-discord-bridge
 
-A local Discord bot for monitoring Herdr panes and agents.
+A Discord control surface for Herdr. Each Herdr pane gets its own Discord
+thread, and the bridge keeps them in sync in both directions: pane output
+streams into the thread, and messages posted in the thread go to the pane.
 
 Herdr remains the source of truth for panes, agents, output, cwd, and status.
-Discord is only a remote dashboard and control surface.
+Discord threads are per-pane remote control surfaces.
 
-## Current scope
+## How it works
 
-Implemented first:
+```
+Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
+        │                       │
+        └── output streams ──→  thread (new lines, ~8s polling)
+        ←── messages posted ──  thread (normal posts go to the pane)
+        ←── approvals/denies ─  card buttons
+```
 
-- `/herdr status`
-- `/herdr tail`
-- `/herdr bind`
-- `/herdr bindings`
-- `/herdr unbind`
+- **Auto threads**: each Herdr pane gets one Discord thread under
+  `thread_parent_channel_id`, named `alias/agent` (prefixed `🔴` while blocked).
+  The thread is auto-bound to its pane.
+- **Streaming**: new pane output is posted into the bound thread.
+- **Thread post send**: any normal message posted in a bound thread is sent to
+  its pane (no need to reply — just type).
+- **Approvals**: blocked panes post an approval card (Approve / Deny buttons,
+  `@mention` so it pushes to mobile).
+- **Target cards**: `/herdr current` opens a card with Tail / Bind / Refresh /
+  Ask / Approve / Deny / Stop buttons.
 
-Write actions are guarded by config and audit logging:
+## Slash commands
 
-- `/herdr send`
-- `/herdr approve`
+- `/herdr status` — list visible Herdr agents and panes
+- `/herdr ids` — show Discord IDs for this location
+- `/herdr current` — open the target card for the pane bound here
+- `/herdr tail [target] [lines]` — show recent output
+- `/herdr bind target [label]` — bind this thread/channel to a Herdr target (manual fallback)
+- `/herdr bindings` — list bindings for this server
+- `/herdr unbind` — remove the binding for this location
+- `/herdr send message [target]` — send text to a Herdr target
+- `/herdr approve [target]` — preview output, then approve via button
 
-Reply-send is available with `enable_reply_send: true`:
-
-- The bot records watcher notification message IDs and target-scoped command
-  responses such as `/herdr tail`, `/herdr bind`, `/herdr send`, and
-  `/herdr approve`.
-- Replying to one of those bot messages sends the reply text to the
-  corresponding Herdr target.
-- This requires Discord's Message Content Intent for the bot.
-
-Event notifications are available with `enable_watcher: true`:
-
-- `blocked` notifications include recent tail and Approve/Cancel buttons.
-- `done` notifications include recent tail.
-- The watcher uses Herdr's raw socket API and subscribes to current panes for
-  `pane.agent_status_changed` events.
-
-Dashboard updates are available with `enable_dashboard: true`:
-
-- The bot creates one dashboard message in `dashboard_channel_id`.
-- It edits that message periodically with current Herdr agent status.
-- `/herdr dashboard` refreshes the message manually.
-- `/herdr dashboard recreate:true` creates a fresh dashboard message and stores
-  that message ID.
+Write actions (send, approve, deny, stop, post-in-bound-thread) require an
+allowlisted Discord user.
 
 ## Requirements
 
 - macOS or another local machine that can reach the Herdr CLI and socket.
 - Python 3.12 or newer.
 - `uv` for dependency installation.
-- A Discord server where you can install a bot. A private test server is strongly
-  recommended while setting this up.
+- A Discord server with a bot installed.
 - Herdr running locally with at least one pane or agent visible.
 
 ## Discord setup
 
-1. Open the Discord Developer Portal and create a new application.
-2. In the application's Bot page, create a bot and copy its token.
-3. Keep the token private. Put it only in `.env`; do not paste it into
-   `config.yaml`, issues, logs, or screenshots.
-4. In the Bot page, enable Message Content Intent only if you plan to use
-   reply-send. Slash commands, read-only status, watcher notifications, and
-   approval buttons do not need it.
-5. In OAuth2 URL Generator, select these scopes:
-
+1. Create a Discord application, add a bot, and copy its token into `.env`:
+   ```dotenv
+   DISCORD_TOKEN=
+   ```
+2. In the Bot page, enable **Message Content Intent** (required so the bridge
+   can read messages posted in threads and forward them to panes).
+3. In OAuth2 URL Generator, select scopes:
    ```text
    bot
    applications.commands
    ```
-
-6. Select the bot permissions needed for the channels where the bridge will
-   operate:
-
+4. Select bot permissions:
    ```text
    View Channels
    Send Messages
    Read Message History
+   Create Public Threads
+   Send Messages in Threads
+   Manage Threads          (rename threads to match status)
+   Add Reactions           (✅/⚠️ confirmations on thread posts)
    Use Application Commands
    ```
-
-   Add `Create Public Threads`, `Create Private Threads`, or thread-management
-   permissions only if your workflow needs the bot to create or manage threads.
-
-7. Open the generated install URL and add the bot to your Discord server.
-8. In Discord, enable Developer Mode in user settings. Then right-click your
-   server, target channel, and your user profile to copy their IDs. Putting the
-   guild ID in `config.yaml` before first launch lets the bot sync slash commands
-   to that server immediately.
+5. Open the install URL and add the bot to your server.
+6. Enable Developer Mode in Discord user settings, then copy the IDs for your
+   server, a **thread parent channel** (where pane threads are created), and
+   your user profile.
 
 ## Local setup
 
 1. Install dependencies:
-
    ```bash
    uv sync --extra dev
    ```
-
 2. Create local config files:
-
    ```bash
    cp .env.example .env
    cp config.example.yaml config.yaml
    ```
-
-3. Put the Discord bot token in the `DISCORD_TOKEN` entry in `.env`:
-
-   ```dotenv
-   DISCORD_TOKEN=
-   ```
-
-4. Put the Discord IDs in `config.yaml`:
-
+3. Put the Discord bot token in `.env`.
+4. Put the Discord IDs and the thread parent channel in `config.yaml`:
    ```yaml
    allowed_guild_ids:
      - 123456789012345678
    allowed_channel_ids:
-     - 123456789012345678
+     - 123456789012345678        # thread parent channel
    allowed_user_ids:
      - 123456789012345678
+   thread_parent_channel_id: 123456789012345678
    ```
-
-   `allowed_guild_ids` and `allowed_channel_ids` restrict where the bot responds.
-   `allowed_user_ids` restricts write actions such as send, reply-send, and
-   approval. Read-only commands are still limited by guild and channel.
-
-5. Start with write features disabled in `config.yaml`:
-
+5. Enable the features you want:
    ```yaml
-   enable_send: false
-   enable_approve: false
-   enable_watcher: false
-   enable_dashboard: false
-   enable_reply_send: false
+   enable_send: true
+   enable_approve: true
+   enable_watcher: true
+   enable_stop: true
+   enable_auto_threads: true
+   enable_streaming: true
    ```
-
 6. Run the bot:
-
    ```bash
    scripts/run_bot.sh
    ```
 
-7. In Discord, run:
-
-   ```text
-   /herdr ids
-   ```
-
-   Confirm the IDs match your `config.yaml`. If slash commands do not appear,
-   check that `applications.commands` was selected in the install URL, the bot is
-   installed in the server, and `allowed_guild_ids` contains that server ID.
-
-8. Restart the bot after editing `.env` or `config.yaml`.
-
 ## First verification
 
 1. Confirm the bot can see Herdr:
-
    ```text
    /herdr status
    ```
+2. With `enable_auto_threads: true`, pane threads appear under the thread parent
+   channel, named `alias/agent` (🔴 while blocked).
+3. Open a pane's thread and post a message — it is sent to the pane and gets a
+   ✅ reaction.
+4. Run `/herdr current` in a thread to open its target card.
 
-2. Bind the current Discord channel or thread to a Herdr target:
+## Configuration reference
 
-   ```text
-   /herdr bind target:w7:p2 label:test-agent
-   ```
+```yaml
+allowed_guild_ids: []
+allowed_channel_ids: []
+allowed_user_ids: []
+thread_parent_channel_id: null
 
-   Use a target shown by `/herdr status`.
+database_path: herdr-discord-bridge.sqlite3
 
-3. Read recent output through the binding:
+max_tail_lines: 80
+max_output_chars: 1800
+max_message_chars: 2000
 
-   ```text
-   /herdr tail lines:20
-   ```
+enable_send: false
+enable_approve: false
+enable_watcher: false
+enable_stop: false
+enable_auto_threads: false
+enable_streaming: false
+allow_pane_send_fallback: false
+submit_after_agent_send: true
+submit_after_agent_send_delay_seconds: 0.5
 
-Keep `enable_send`, `enable_approve`, `enable_watcher`, `enable_dashboard`, and
-`enable_reply_send` disabled until read-only commands work.
+auto_threads:
+  refresh_seconds: 30          # how often panes are synced to threads
 
-## Feature rollout
+streaming:
+  refresh_seconds: 8           # how often new pane output is pushed to threads
+  tail_lines: 60
 
-Enable features one at a time and restart the bot after each config change.
+watcher:
+  statuses: ["blocked", "done"]
+  reconnect_delay_seconds: 5
+  resubscribe_interval_seconds: 300
+  blocked_tail_lines: 80
+  done_tail_lines: 60
 
-1. Enable send only for allowlisted users:
+dangerous_text_blocklist:
+  - "rm -rf"
+  - "sudo"
+  - "git reset --hard"
 
-   ```yaml
-   enable_send: true
-   allowed_user_ids:
-     - 123456789012345678
-   ```
+herdr:
+  cli_path: herdr
+  default_source: recent-unwrapped
+  command_timeout_seconds: 20
 
-   `submit_after_agent_send: true` sends Enter after `herdr agent send`. In the
-   tested environment, `submit_after_agent_send_delay_seconds: 0.5` was needed
-   so the agent UI had time to receive the text before Enter.
+approval:                      # how each agent is approved (blocked panes)
+  codex:
+    method: send_text_enter
+    text: "y"
+  claude:
+    method: send_keys
+    keys: ["Enter"]
+  pi:
+    method: send_keys
+    keys: ["Enter"]
+deny:                          # how each agent's prompt is dismissed
+  codex:
+    method: send_keys
+    keys: ["Escape"]
+  claude:
+    method: send_keys
+    keys: ["Escape"]
+  pi:
+    method: send_keys
+    keys: ["Escape"]
+stop:                          # how a pane is interrupted (Stop button)
+  method: send_keys
+  keys: ["C-c"]
+```
 
-2. Enable reply-send if you enabled Message Content Intent in the Discord
-   Developer Portal:
+## Security
 
-   ```yaml
-   enable_send: true
-   enable_reply_send: true
-   ```
-
-   You can reply to a bot notification or target-scoped command response with
-   short choices such as `1`, `2`, `yes`, or free text. The reply is sent through
-   the same guarded send path and is audit-logged.
-
-3. Enable approval:
-
-   ```yaml
-   enable_approve: true
-   ```
-
-   Approval requires:
-
-   - an allowlisted Discord user
-   - a resolved target
-   - current Herdr status `blocked`
-   - explicit button click after a tail preview
-
-4. Enable watcher:
-
-   ```yaml
-   enable_watcher: true
-   watcher:
-     statuses: ["blocked", "done"]
-     reconnect_delay_seconds: 5
-     resubscribe_interval_seconds: 300
-     blocked_tail_lines: 80
-     done_tail_lines: 60
-   ```
-
-   Herdr currently requires `pane_id` and `agent_status` filters for
-   `events.subscribe`, so the watcher builds subscriptions from the panes visible
-   at connection time. It reconnects every `resubscribe_interval_seconds` to pick
-   up panes created after startup.
-
-5. Enable dashboard:
-
-   ```yaml
-   enable_dashboard: true
-   dashboard_channel_id: 123456789012345678
-   dashboard:
-     refresh_seconds: 60
-   ```
-
-   The dashboard message is stored in SQLite and edited in place. If it is
-   deleted or you want a fresh one, run:
-
-   ```text
-   /herdr dashboard recreate:true
-   ```
+- Read-only UI is allowed only in `allowed_guild_ids` / `allowed_channel_ids`.
+- Send, approve, deny, stop, and posting in a bound thread require an
+  `allowed_user_ids` entry.
+- The `dangerous_text_blocklist` rejects messages containing blocked phrases.
+- A target is never auto-resolved when multiple panes match a query.
+- All write actions are recorded in the audit log (`audit_log` table).
 
 ## Running in the background
-
-For regular use on macOS, install the included user `launchd` service:
 
 ```bash
 scripts/install_launchd.sh
 scripts/status_launchd.sh
 ```
 
-After changing `.env`, `config.yaml`, or code, restart the service:
+After changing `.env`, `config.yaml`, or code:
 
 ```bash
 launchctl kickstart -k "gui/$UID/dev.herdr.discord-bridge"
 ```
 
-To remove it:
-
-```bash
-scripts/uninstall_launchd.sh
-```
+Logs: `logs/launchd.out.log` and `logs/launchd.err.log`.
 
 ## Operational notes
 
-- Secrets and local runtime files are ignored by Git: `.env`, `config.yaml`, and
-  SQLite databases.
-- The bot runs in the foreground. Use `scripts/run_bot.sh` from a terminal pane
-  or wrap it in your preferred process manager.
-- The macOS `launchd` service writes logs to `logs/launchd.out.log` and
-  `logs/launchd.err.log`.
-- Read/tail/send use Herdr CLI wrappers. Event notifications use the Herdr raw
-  socket API.
+- `.env`, `config.yaml`, and the SQLite database are gitignored.
+- Read/tail/send use Herdr CLI wrappers. Event notifications and streaming use
+  the Herdr CLI and raw socket API.
+- Thread names are renamed to `🔴 alias/agent` only while blocked; other status
+  changes do not rename threads (Discord rate-limits channel edits).
 - Notification dedupe is stored in SQLite using `pane_id + status + tail hash`.
-- Dashboard message state is stored in SQLite under `bot_state`.
+- Pane ↔ thread mapping and per-pane stream state are stored in SQLite
+  (`agent_threads`, `pane_streams`).

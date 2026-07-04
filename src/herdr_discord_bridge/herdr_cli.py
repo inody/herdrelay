@@ -28,14 +28,21 @@ class HerdrCli:
     def pane_list(self) -> Any:
         return self._json_with_optional_json_flag(["pane", "list"])
 
-    def agent_read(self, target: str, *, lines: int) -> str:
-        return _read_text(self._run(["agent", "read", target, "--lines", str(lines)]).stdout)
+    def workspace_list(self) -> Any:
+        return self._json_with_optional_json_flag(["workspace", "list"])
 
-    def pane_read(self, target: str, *, lines: int, source: str | None = None) -> str:
+    def agent_read(self, target: str, *, lines: int, fmt: str | None = None) -> str:
+        args = ["agent", "read", target, "--lines", str(lines)]
+        if fmt:
+            args += ["--format", fmt]
+        return _read_text(self._run(args).stdout)
+
+    def pane_read(self, target: str, *, lines: int, source: str | None = None, fmt: str | None = None) -> str:
         source = source or self.config.default_source
-        return _read_text(
-            self._run(["pane", "read", target, "--source", source, "--lines", str(lines)]).stdout
-        )
+        args = ["pane", "read", target, "--source", source, "--lines", str(lines)]
+        if fmt:
+            args += ["--format", fmt]
+        return _read_text(self._run(args).stdout)
 
     def agent_send(self, target: str, message: str) -> None:
         self._run(["agent", "send", target, message])
