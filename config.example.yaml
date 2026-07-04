@@ -5,7 +5,6 @@ thread_parent_channel_id: null
 
 database_path: herdr-discord-bridge.sqlite3
 
-max_tail_lines: 80
 max_output_chars: 1800
 max_message_chars: 2000
 

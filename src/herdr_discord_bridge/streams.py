@@ -92,7 +92,7 @@ class StreamManager:
             return
         try:
             current = self.client.read(
-                pane_id, lines=self.config.streaming.tail_lines, fmt="text"
+                pane_id, lines=self.config.streaming.tail_lines, fmt="text", source="visible"
             )
         except Exception:
             LOG.exception("Failed to read tail for streaming %s", pane_id)

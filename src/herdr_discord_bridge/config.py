@@ -52,7 +52,6 @@ class AppConfig:
     allowed_user_ids: frozenset[int] = frozenset()
     thread_parent_channel_id: int | None = None
     database_path: str = "herdr-discord-bridge.sqlite3"
-    max_tail_lines: int = 80
     max_output_chars: int = 1800
     max_message_chars: int = 2000
     enable_send: bool = False
@@ -102,7 +101,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         allowed_user_ids=_id_set(data.get("allowed_user_ids")),
         thread_parent_channel_id=_optional_int(data.get("thread_parent_channel_id")),
         database_path=str(data.get("database_path") or "herdr-discord-bridge.sqlite3"),
-        max_tail_lines=int(data.get("max_tail_lines", 80)),
         max_output_chars=int(data.get("max_output_chars", 1800)),
         max_message_chars=int(data.get("max_message_chars", 2000)),
         enable_send=bool(data.get("enable_send", False)),

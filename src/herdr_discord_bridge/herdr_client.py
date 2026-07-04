@@ -47,9 +47,9 @@ class HerdrClient:
                 mapping[workspace_id] = label
         return mapping
 
-    def read(self, target: str, *, lines: int, fmt: str | None = None) -> str:
+    def read(self, target: str, *, lines: int, fmt: str | None = None, source: str | None = None) -> str:
         try:
-            return self.cli.agent_read(target, lines=lines, fmt=fmt)
+            return self.cli.agent_read(target, lines=lines, fmt=fmt, source=source)
         except HerdrCliError:
             return self.cli.pane_read(target, lines=lines, fmt=fmt)
 

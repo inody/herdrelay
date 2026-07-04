@@ -25,22 +25,28 @@ Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
   its pane (no need to reply — just type).
 - **Approvals**: blocked panes post an approval card (Approve / Deny buttons,
   `@mention` so it pushes to mobile).
-- **Target cards**: `/herdr current` opens a card with Tail / Bind / Refresh /
-  Ask / Approve / Deny / Stop buttons.
+- **Target cards**: when a pane becomes blocked or finishes, the watcher
+  posts a card showing the latest output (up to `max_tail_lines`) plus a status
+  header and Approve / Deny / Stop buttons (shown only when relevant).
 
-## Slash commands
+## Usage
 
-- `/herdr status` — list visible Herdr agents and panes
-- `/herdr ids` — show Discord IDs for this location
-- `/herdr current` — open the target card for the pane bound here
-- `/herdr tail [target] [lines]` — show recent output
-- `/herdr bind target [label]` — bind this thread/channel to a Herdr target (manual fallback)
-- `/herdr bindings` — list bindings for this server
-- `/herdr unbind` — remove the binding for this location
-- `/herdr send message [target]` — send text to a Herdr target
-- `/herdr approve [target]` — preview output, then approve via button
+There are no slash commands — this keeps `/status`, `/compact`, `/usage`
+(Codex), and other harness commands usable as plain text inside threads.
+Each Herdr pane has its own Discord thread (auto-created under
+`thread_parent_channel_id`).
 
-Write actions (send, approve, deny, stop, post-in-bound-thread) require an
+- **Post in a thread** to send text to its pane. Harness slash commands
+  (`/status`, `/compact`, …) work by typing them as normal messages.
+- **Special keys**: type `!esc`, `!enter`, `!up`, `!down`, `!left`, `!right`,
+  `!tab`, `!space`, `!ctrl-c`, `!backspace`, `!pgup`, `!pgdn` to send those
+  keys instead of text — useful for escaping a pager (e.g. Claude's `/usage`
+  shows "esc to exit") or navigating a TUI (e.g. `/model`).
+- **Approve / Deny / Stop** buttons appear on the target card the watcher
+  posts when a pane is blocked or working.
+- Pane output streams into the thread automatically (~8s polling).
+
+Write actions (approve, deny, stop, posting in a bound thread) require an
 allowlisted Discord user.
 
 ## Requirements
@@ -62,7 +68,6 @@ allowlisted Discord user.
 3. In OAuth2 URL Generator, select scopes:
    ```text
    bot
-   applications.commands
    ```
 4. Select bot permissions:
    ```text
@@ -73,7 +78,6 @@ allowlisted Discord user.
    Send Messages in Threads
    Manage Threads          (rename threads to match status)
    Add Reactions           (✅/⚠️ confirmations on thread posts)
-   Use Application Commands
    ```
 5. Open the install URL and add the bot to your server.
 6. Enable Developer Mode in Discord user settings, then copy the IDs for your
@@ -118,15 +122,13 @@ allowlisted Discord user.
 
 ## First verification
 
-1. Confirm the bot can see Herdr:
-   ```text
-   /herdr status
-   ```
-2. With `enable_auto_threads: true`, pane threads appear under the thread parent
-   channel, named `alias/agent` (🔴 while blocked).
-3. Open a pane's thread and post a message — it is sent to the pane and gets a
-   ✅ reaction.
-4. Run `/herdr current` in a thread to open its target card.
+1. With `enable_auto_threads: true`, pane threads appear under the thread
+   parent channel, named `alias/agent` (🔴 while blocked).
+2. Open a pane's thread and post a message — it is sent to the pane and gets a
+   ✅ reaction. Harness commands like `/status` or `/compact` also work as
+   normal messages.
+3. When a pane becomes blocked, the watcher posts a target card with Approve /
+   Deny buttons (and `@mention`).
 
 ## Configuration reference
 
@@ -138,7 +140,6 @@ thread_parent_channel_id: null
 
 database_path: herdr-discord-bridge.sqlite3
 
-max_tail_lines: 80
 max_output_chars: 1800
 max_message_chars: 2000
 
@@ -228,8 +229,9 @@ Logs: `logs/launchd.out.log` and `logs/launchd.err.log`.
 ## Operational notes
 
 - `.env`, `config.yaml`, and the SQLite database are gitignored.
-- Read/tail/send use Herdr CLI wrappers. Event notifications and streaming use
-  the Herdr CLI and raw socket API.
+- Send and streaming use Herdr CLI wrappers (`agent send`, `agent read`
+  with the `visible` source so pager/TUI output like Claude's `/usage` is
+  captured). Event notifications use the raw socket API.
 - Thread names are renamed to `🔴 alias/agent` only while blocked; other status
   changes do not rename threads (Discord rate-limits channel edits).
 - Notification dedupe is stored in SQLite using `pane_id + status + tail hash`.
