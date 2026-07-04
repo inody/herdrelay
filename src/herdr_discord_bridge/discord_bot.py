@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -890,21 +889,6 @@ def _safe_tail_preview(bot: HerdrDiscordBot, target_str: str) -> str:
     except Exception:
         LOG.exception("Failed to read tail preview for %s", target_str)
         return ""
-
-
-def _select_option_description(target: HerdrTarget) -> str:
-    agent = target.agent_name or target.kind or "?"
-    parts = [agent, target.target]
-    cwd = _cwd_brief(target.cwd)
-    if cwd:
-        parts.append(cwd)
-    return " · ".join(parts)
-
-
-def _cwd_brief(cwd: str | None) -> str:
-    if not cwd:
-        return ""
-    return Path(cwd).name or ""
 
 
 async def _react(message: discord.Message, emoji: str) -> None:
