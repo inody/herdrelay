@@ -59,6 +59,32 @@ class HerdrCli:
     def pane_run(self, target: str, message: str) -> None:
         self._run(["pane", "run", target, message])
 
+    def agent_start(
+        self,
+        name: str,
+        *,
+        cwd: str | None = None,
+        argv: list[str] | None = None,
+        workspace: str | None = None,
+        tab: str | None = None,
+        split: str | None = None,
+    ) -> Any:
+        args = ["agent", "start", name]
+        if cwd:
+            args += ["--cwd", cwd]
+        if workspace:
+            args += ["--workspace", workspace]
+        if tab:
+            args += ["--tab", tab]
+        if split:
+            args += ["--split", split]
+        args += ["--"]
+        args += argv or [name]
+        return self._json(args)
+
+    def pane_close(self, pane_id: str) -> None:
+        self._run(["pane", "close", pane_id])
+
     def _json_with_optional_json_flag(self, args: list[str]) -> Any:
         try:
             return self._json(args + ["--json"])

@@ -73,6 +73,23 @@ class HerdrClient:
     def send_text_enter(self, target: str, text: str) -> None:
         self.cli.pane_run(target, text)
 
+    def agent_start(
+        self,
+        name: str,
+        *,
+        cwd: str | None = None,
+        argv: list[str] | None = None,
+        workspace: str | None = None,
+        tab: str | None = None,
+        split: str | None = None,
+    ) -> Any:
+        return self.cli.agent_start(
+            name, cwd=cwd, argv=argv, workspace=workspace, tab=tab, split=split
+        )
+
+    def pane_close(self, pane_id: str) -> None:
+        self.cli.pane_close(pane_id)
+
     def resolve_target(self, query: str) -> HerdrTarget:
         candidates = []
         for target in self.list_targets():

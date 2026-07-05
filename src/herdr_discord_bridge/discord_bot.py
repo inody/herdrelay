@@ -16,6 +16,7 @@ from .approval import (
 )
 from .config import AppConfig
 from .formatter import (
+    target_alias,
     truncate,
 )
 from .herdr_client import HerdrClient, TargetResolutionError
@@ -85,6 +86,16 @@ class HerdrDiscordBot(commands.Bot):
             self._stream_task = asyncio.create_task(self.stream_manager.run_forever())
             LOG.info("Started pane streamer")
 
+    async def on_ready(self) -> None:
+        # Nickname the bot "herdr" so @he autocomplete points here.
+        for guild in self.guilds:
+            try:
+                if guild.me.nick != "herdr":
+                    await guild.me.edit(nick="herdr")
+            except discord.HTTPException:
+                LOG.warning("Failed to set nickname in guild %s", guild.id)
+        LOG.info("Logged in as %s", self.user)
+
     async def close(self) -> None:
         if self._watcher:
             self._watcher.stop()
@@ -129,6 +140,9 @@ class HerdrDiscordBot(commands.Bot):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
+        if self.user and self.user in message.mentions:
+            await self._handle_control_command(message)
+            return
         await self._handle_thread_send(message)
 
     async def _handle_thread_send(self, message: discord.Message) -> bool:
@@ -172,6 +186,192 @@ class HerdrDiscordBot(commands.Bot):
             )
             await _react(message, "⚠️")
         return True
+
+    async def _handle_control_command(self, message: discord.Message) -> None:
+        content = message.content
+        if self.user:
+            content = (
+                content.replace(f"<@!{self.user.id}>", "")
+                .replace(f"<@{self.user.id}>", "")
+                .strip()
+            )
+        parts = content.split()
+        if not parts:
+            await message.reply(self._control_help())
+            return
+        cmd = parts[0].lower()
+        args = parts[1:]
+        try:
+            if cmd == "start":
+                await self._control_start(message, args)
+            elif cmd == "stop":
+                await self._control_stop(message, args)
+            elif cmd == "list":
+                await self._control_list(message)
+            elif cmd in ("help", "?"):
+                await message.reply(self._control_help())
+            else:
+                await message.reply(f"Unknown command `{cmd}`. Try: start, close, list, help")
+        except Exception as exc:
+            await message.reply(f"Error: {exc}")
+
+    def _inherited_context(
+        self, message: discord.Message
+    ) -> tuple[str | None, str | None, str | None] | None:
+        """Return (workspace_id, tab_id, cwd) from the bound pane in this thread."""
+        parent_id = getattr(message.channel, "parent_id", None)
+        if parent_id is None:
+            return None
+        location = _location_from_message(message)
+        binding = self.store.get_binding(
+            guild_id=location.guild_id or 0,
+            channel_id=location.channel_id,
+            thread_id=location.thread_id,
+        )
+        if binding is None:
+            return None
+        for target in self.client.list_targets():
+            if target.target == binding.herdr_target:
+                raw = target.raw or {}
+                return raw.get("workspace_id"), raw.get("tab_id"), target.cwd
+        return None
+
+    async def _control_start(self, message: discord.Message, args: list[str]) -> None:
+        if not args:
+            await message.reply(
+                "Usage: `@herdr start <name> [--cwd PATH] [--workspace ID] [--tab ID] [--split right|down] [-- <argv...>]`"
+            )
+            return
+        name = args[0]
+        rest = args[1:]
+        cwd: str | None = None
+        workspace: str | None = None
+        tab: str | None = None
+        split: str | None = None
+        argv: list[str] | None = None
+        if "--" in rest:
+            idx = rest.index("--")
+            argv = rest[idx + 1 :]
+            rest = rest[:idx]
+        i = 0
+        while i < len(rest):
+            if rest[i] == "--cwd" and i + 1 < len(rest):
+                cwd = rest[i + 1]
+                i += 2
+            elif rest[i] == "--workspace" and i + 1 < len(rest):
+                workspace = rest[i + 1]
+                i += 2
+            elif rest[i] == "--tab" and i + 1 < len(rest):
+                tab = rest[i + 1]
+                i += 2
+            elif rest[i] == "--split" and i + 1 < len(rest):
+                split = rest[i + 1]
+                i += 2
+            else:
+                i += 1
+        # Inherit workspace/tab/cwd from the bound pane when called inside a pane thread
+        if cwd is None or workspace is None or tab is None:
+            inherited = self._inherited_context(message)
+            if inherited is not None:
+                inh_workspace, inh_tab, inh_cwd = inherited
+                if cwd is None:
+                    cwd = inh_cwd
+                if workspace is None:
+                    workspace = inh_workspace
+                if tab is None:
+                    tab = inh_tab
+        result = self.client.agent_start(
+            name, cwd=cwd, argv=argv, workspace=workspace, tab=tab, split=split
+        )
+        pane_id = _extract_started_pane_id(result)
+        details = []
+        if cwd:
+            details.append(f"cwd `{cwd}`")
+        if workspace:
+            details.append(f"workspace `{workspace}`")
+        if tab:
+            details.append(f"tab `{tab}`")
+        if split:
+            details.append(f"split `{split}`")
+        if pane_id:
+            details.append(f"pane `{pane_id}`")
+        detail = f" ({', '.join(details)})" if details else ""
+        # Wait briefly for the agent to start, then check if the pane survived.
+        if pane_id:
+            await asyncio.sleep(2)
+            try:
+                output = self.client.read(pane_id, lines=20, fmt="text", source="visible").strip()
+            except Exception:
+                await message.reply(
+                    f"Started `{name}`{detail}, but the pane exited immediately — "
+                    "the agent likely failed to launch. Check herdr TUI for details."
+                )
+                return
+            if output:
+                preview = output[-1500:] if len(output) > 1500 else output
+                await message.reply(f"Started `{name}`{detail}.\n```text\n{preview}\n```")
+                return
+        await message.reply(f"Started `{name}`{detail}.")
+
+    async def _control_stop(self, message: discord.Message, args: list[str]) -> None:
+        pane_id = args[0] if args else None
+        if pane_id is None:
+            # Inside a pane thread, close that thread's pane
+            parent_id = getattr(message.channel, "parent_id", None)
+            if parent_id is not None:
+                location = _location_from_message(message)
+                binding = self.store.get_binding(
+                    guild_id=location.guild_id or 0,
+                    channel_id=location.channel_id,
+                    thread_id=location.thread_id,
+                )
+                if binding:
+                    pane_id = binding.herdr_target
+        if pane_id is None:
+            await message.reply(
+                "Usage: `@herdr stop <pane_id>` (or run inside a pane thread)"
+            )
+            return
+        self.client.pane_close(pane_id)
+        await message.reply(f"Stopped `{pane_id}`.")
+
+    async def _control_list(self, message: discord.Message) -> None:
+        targets = self.client.list_targets()
+        if not targets:
+            await message.reply("No Herdr agents or panes found.")
+            return
+        lines = []
+        for t in targets:
+            status = t.status or "unknown"
+            alias = target_alias(t)
+            agent = t.agent_name or t.kind or "?"
+            lines.append(f"{status:<8} {t.target:<8} {alias}/{agent}")
+        await message.reply("```text\n" + "\n".join(lines) + "\n```")
+
+    def _control_help(self) -> str:
+        return (
+            "**Herdr control** (mention me)\n"
+            "```\n"
+            "@herdr start <name> [options] [-- <argv...>]    Start a pane (agent)\n"
+            "  options: --cwd PATH --workspace ID --tab ID --split right|down\n"
+            "  inside a pane thread: inherits that pane's workspace/tab/cwd\n"
+            "  elsewhere: herdr's focused workspace/tab; argv defaults to <name>\n"
+            "@herdr stop [<pane_id>]                          Stop (close) a pane\n"
+            "  inside a pane thread: closes that thread's pane (no arg needed)\n"
+            "@herdr list                                      List panes/agents\n"
+            "@herdr help                                      Show this help\n"
+            "```\n"
+            "Inside a pane thread, just type to send to the pane. "
+            "Use `!esc`/`!enter`/`!up`/`!down` etc. for special keys."
+        )
+
+
+def _extract_started_pane_id(result: object) -> str | None:
+    try:
+        agent = result.get("result", {}).get("agent", {})  # type: ignore[union-attr]
+        return agent.get("pane_id") or agent.get("terminal_id")  # type: ignore[union-attr]
+    except Exception:
+        return None
 
 
 SPECIAL_KEYS: dict[str, tuple[str, ...]] = {
@@ -268,7 +468,7 @@ class TargetCardView(discord.ui.View):
         except Exception as exc:
             await _send_error(interaction, exc)
 
-    async def stop_callback(self, interaction: discord.Interaction) -> None:
+    async def cancel_callback(self, interaction: discord.Interaction) -> None:
         if not self._check_actor(interaction):
             await interaction.response.send_message(
                 "Only the requesting user can act here.", ephemeral=True
@@ -278,14 +478,14 @@ class TargetCardView(discord.ui.View):
             location = self.location if self.location is not None else _location(interaction)
             self.bot.security.ensure_stop_allowed(interaction.user.id, location)
             stop_strategy_for(self.bot.config)  # validate a strategy is configured
-            view = StopConfirmView(
+            view = CancelConfirmView(
                 bot=self.bot,
                 user_id=interaction.user.id,
                 location=location,
                 target_str=self.target_str,
             )
             await interaction.response.send_message(
-                f"Stop `{self.target_str}`? This sends the interrupt sequence.",
+                f"Cancel `{self.target_str}`? This sends the interrupt sequence.",
                 view=view,
                 ephemeral=True,
             )
@@ -311,13 +511,13 @@ def build_target_card_view(
             deny_button.callback = view.deny_callback
             view.add_item(deny_button)
     if status == "working" and bot.config.enable_stop:
-        stop_button = discord.ui.Button(label="Stop", style=discord.ButtonStyle.danger)
-        stop_button.callback = view.stop_callback
-        view.add_item(stop_button)
+        cancel_button = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.danger)
+        cancel_button.callback = view.cancel_callback
+        view.add_item(cancel_button)
     return view
 
 
-class StopConfirmView(discord.ui.View):
+class CancelConfirmView(discord.ui.View):
     def __init__(
         self,
         *,
@@ -332,7 +532,7 @@ class StopConfirmView(discord.ui.View):
         self.location = location
         self.target_str = target_str
 
-    @discord.ui.button(label="Yes, stop", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Yes, cancel", style=discord.ButtonStyle.danger)
     async def confirm_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
@@ -345,10 +545,10 @@ class StopConfirmView(discord.ui.View):
             self.bot.security.ensure_stop_allowed(interaction.user.id, self.location)
             strategy = stop_strategy_for(self.bot.config)
             apply_action(self.bot.client, self.target_str, strategy)
-            _audit_action(self.bot, interaction, self.location, "stop", self.target_str, "ok")
+            _audit_action(self.bot, interaction, self.location, "cancel", self.target_str, "ok")
             self._disable()
             await interaction.response.edit_message(
-                content=f"Stopped `{self.target_str}`.", view=self
+                content=f"Cancelled `{self.target_str}`.", view=self
             )
         except Exception as exc:
             await _send_error(interaction, exc)

@@ -52,6 +52,8 @@ class StreamManager:
         self.store = store
         self.client = client
         self._stopped = asyncio.Event()
+        self._prev_recent: dict[str, str] = {}
+        self._prev_visible: dict[str, str] = {}
 
     def stop(self) -> None:
         self._stopped.set()
@@ -90,18 +92,36 @@ class StreamManager:
         thread = await self._fetch_thread(int(thread_id))
         if thread is None:
             return
+        tail_lines = self.config.streaming.tail_lines
         try:
-            current = self.client.read(
-                pane_id, lines=self.config.streaming.tail_lines, fmt="text", source="visible"
+            current_recent = self.client.read(
+                pane_id, lines=tail_lines, fmt="text", source="recent"
             )
         except Exception:
-            LOG.exception("Failed to read tail for streaming %s", pane_id)
+            LOG.exception("Failed to read recent tail for streaming %s", pane_id)
             return
-        prev = self.store.get_pane_stream(pane_id)
-        diff = compute_stream_diff(prev, current)
-        self.store.upsert_pane_stream(pane_id, current)
-        if not diff or not diff.strip():
+        diff = compute_stream_diff(self._prev_recent.get(pane_id), current_recent)
+        self._prev_recent[pane_id] = current_recent
+        if diff and diff.strip():
+            await self._send_diff(thread, thread_id, diff)
             return
+        # No change in agent output — check the visible screen for pager/TUI
+        # updates (e.g. Claude's /usage) that recent does not capture.
+        try:
+            current_visible = self.client.read(
+                pane_id, lines=tail_lines, fmt="text", source="visible"
+            )
+        except Exception:
+            LOG.exception("Failed to read visible tail for streaming %s", pane_id)
+            return
+        diff = compute_stream_diff(self._prev_visible.get(pane_id), current_visible)
+        self._prev_visible[pane_id] = current_visible
+        if diff and diff.strip():
+            await self._send_diff(thread, thread_id, diff)
+
+    async def _send_diff(
+        self, thread: discord.Thread, thread_id: int | str, diff: str
+    ) -> None:
         for chunk in split_tail_chunks(diff, max_chars=self.config.max_output_chars):
             try:
                 await thread.send(wrap_code_block(chunk))

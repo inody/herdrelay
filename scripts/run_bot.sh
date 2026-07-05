@@ -13,4 +13,4 @@ if [[ ! -f config.yaml ]]; then
   exit 1
 fi
 
-exec uv run herdr-discord-bridge --config config.yaml "$@"
+exec uv run herdrelay --config config.yaml "$@"

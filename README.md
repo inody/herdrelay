@@ -1,8 +1,9 @@
-# herdr-discord-bridge
+# HerdRelay
 
-A Discord control surface for Herdr. Each Herdr pane gets its own Discord
-thread, and the bridge keeps them in sync in both directions: pane output
-streams into the thread, and messages posted in the thread go to the pane.
+HerdRelay — a Discord control surface for Herdr. Each Herdr pane gets its own
+Discord thread, and the relay keeps them in sync in both directions: pane
+output streams into the thread, and messages posted in the thread go to the
+pane.
 
 Herdr remains the source of truth for panes, agents, output, cwd, and status.
 Discord threads are per-pane remote control surfaces.
@@ -42,7 +43,15 @@ Each Herdr pane has its own Discord thread (auto-created under
   `!tab`, `!space`, `!ctrl-c`, `!backspace`, `!pgup`, `!pgdn` to send those
   keys instead of text — useful for escaping a pager (e.g. Claude's `/usage`
   shows "esc to exit") or navigating a TUI (e.g. `/model`).
-- **Approve / Deny / Stop** buttons appear on the target card the watcher
+- **Control Herdr** by mentioning the bot (`@herdr`):
+  - `@herdr start <name> [options] [-- <argv...>]` — start a pane (agent)
+    - options: `--cwd PATH` `--workspace ID` `--tab ID` `--split right|down`
+    - inside a pane thread: inherits that pane's workspace/tab/cwd by default
+    - elsewhere: uses herdr's focused workspace/tab; argv defaults to `<name>`
+  - `@herdr stop [<pane_id>]` — stop (close) a pane (inside a pane thread: closes that pane)
+  - `@herdr list` — list panes/agents
+  - `@herdr help` — show commands
+- **Approve / Deny / Cancel** buttons appear on the target card the watcher
   posts when a pane is blocked or working.
 - Pane output streams into the thread automatically (~8s polling).
 
@@ -138,7 +147,7 @@ allowed_channel_ids: []
 allowed_user_ids: []
 thread_parent_channel_id: null
 
-database_path: herdr-discord-bridge.sqlite3
+database_path: herdrelay.sqlite3
 
 max_output_chars: 1800
 max_message_chars: 2000
@@ -221,7 +230,7 @@ scripts/status_launchd.sh
 After changing `.env`, `config.yaml`, or code:
 
 ```bash
-launchctl kickstart -k "gui/$UID/dev.herdr.discord-bridge"
+launchctl kickstart -k "gui/$UID/dev.herdrelay"
 ```
 
 Logs: `logs/launchd.out.log` and `logs/launchd.err.log`.

@@ -72,12 +72,6 @@ class Store:
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 );
-
-                CREATE TABLE IF NOT EXISTS pane_streams (
-                  pane_id TEXT PRIMARY KEY,
-                  last_tail TEXT NOT NULL,
-                  updated_at TEXT NOT NULL
-                );
                 """
             )
 
@@ -297,27 +291,13 @@ class Store:
             ).fetchone()
         return str(row["thread_id"]) if row else None
 
-    def upsert_pane_stream(self, pane_id: str, last_tail: str) -> None:
-        now = _now()
+    def list_agent_threads(self) -> dict[str, str]:
+        """Return mapping of pane_id -> thread_id for all recorded threads."""
         with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO pane_streams (pane_id, last_tail, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(pane_id) DO UPDATE SET
-                  last_tail = excluded.last_tail,
-                  updated_at = excluded.updated_at
-                """,
-                (pane_id, last_tail, now),
-            )
-
-    def get_pane_stream(self, pane_id: str) -> str | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT last_tail FROM pane_streams WHERE pane_id = ?",
-                (pane_id,),
-            ).fetchone()
-        return str(row["last_tail"]) if row else None
+            rows = conn.execute(
+                "SELECT pane_id, thread_id FROM agent_threads"
+            ).fetchall()
+        return {str(row["pane_id"]): str(row["thread_id"]) for row in rows}
 
 
 def _binding(row: sqlite3.Row) -> Binding:

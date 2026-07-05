@@ -3,7 +3,7 @@ allowed_channel_ids: []
 allowed_user_ids: []
 thread_parent_channel_id: null
 
-database_path: herdr-discord-bridge.sqlite3
+database_path: herdrelay.sqlite3
 
 max_output_chars: 1800
 max_message_chars: 2000

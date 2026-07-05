@@ -68,6 +68,7 @@ class ThreadManager:
     async def sync(self) -> None:
         parent = await self._parent_channel()
         targets = self.client.list_targets()
+        active_pane_ids = {t.target for t in targets if t.target}
         for target in targets:
             if not target.target:
                 continue
@@ -75,6 +76,7 @@ class ThreadManager:
                 await self._sync_target(parent, target)
             except Exception:
                 LOG.exception("Failed to sync thread for %s", target.target)
+        await self._archive_stale_threads(parent, active_pane_ids)
 
     async def _sync_target(self, parent: discord.TextChannel, target: HerdrTarget) -> None:
         pane_id = target.target
@@ -109,6 +111,12 @@ class ThreadManager:
                 "Thread %s for %s not found; leaving record in place", existing, pane_id
             )
             return
+        if thread.archived:
+            try:
+                await thread.edit(archived=False, reason=f"Pane {pane_id} active again")
+                LOG.info("Unarchived thread %s for %s", thread.id, pane_id)
+            except discord.HTTPException:
+                LOG.warning("Could not unarchive thread %s", thread.id)
         if thread.name == name:
             return
         try:
@@ -122,6 +130,25 @@ class ThreadManager:
             LOG.info("Renamed thread %s to %s", thread.id, name)
         except discord.HTTPException:
             LOG.warning("Could not rename thread %s (rate limited?)", thread.id)
+
+    async def _archive_stale_threads(
+        self, parent: discord.TextChannel, active_pane_ids: set[str]
+    ) -> None:
+        """Archive threads whose pane no longer exists."""
+        for pane_id, thread_id_str in self.store.list_agent_threads().items():
+            if pane_id in active_pane_ids:
+                continue
+            try:
+                thread = await self._fetch_thread(parent, int(thread_id_str))
+            except ValueError:
+                continue
+            if thread is None or thread.archived:
+                continue
+            try:
+                await thread.edit(archived=True, reason=f"Pane {pane_id} closed")
+                LOG.info("Archived thread %s (pane %s gone)", thread_id_str, pane_id)
+            except discord.HTTPException:
+                LOG.warning("Could not archive thread %s", thread_id_str)
 
     async def _fetch_thread(
         self, parent: discord.TextChannel, thread_id: int

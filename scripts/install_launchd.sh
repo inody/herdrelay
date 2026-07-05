@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-LABEL="dev.herdr.discord-bridge"
+LABEL="dev.herdrelay"
 ROOT_DIR="$(pwd)"
 PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG_DIR="$ROOT_DIR/logs"
