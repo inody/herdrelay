@@ -159,8 +159,6 @@ enable_stop: false
 enable_auto_threads: false
 enable_streaming: false
 allow_pane_send_fallback: false
-submit_after_agent_send: true
-submit_after_agent_send_delay_seconds: 0.5
 
 auto_threads:
   refresh_seconds: 30          # how often panes are synced to threads
@@ -238,9 +236,9 @@ Logs: `logs/launchd.out.log` and `logs/launchd.err.log`.
 ## Operational notes
 
 - `.env`, `config.yaml`, and the SQLite database are gitignored.
-- Send and streaming use Herdr CLI wrappers (`agent send`, `agent read`
-  with the `visible` source so pager/TUI output like Claude's `/usage` is
-  captured). Event notifications use the raw socket API.
+- Send and streaming use the Herdr 0.8 CLI (`agent prompt`, `agent read`;
+  the `visible` source captures pager/TUI output like Claude's `/usage`).
+  Event notifications use the raw socket API.
 - Thread names are renamed to `🔴 alias/agent` only while blocked; other status
   changes do not rename threads (Discord rate-limits channel edits).
 - Notification dedupe is stored in SQLite using `pane_id + status + tail hash`.

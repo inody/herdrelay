@@ -75,7 +75,7 @@ class StreamManager:
                 pass
 
     async def sync(self) -> None:
-        targets = self.client.list_targets()
+        targets = await asyncio.to_thread(self.client.list_targets)
         for target in targets:
             if not target.target:
                 continue
@@ -94,8 +94,12 @@ class StreamManager:
             return
         tail_lines = self.config.streaming.tail_lines
         try:
-            current_recent = self.client.read(
-                pane_id, lines=tail_lines, fmt="text", source="recent"
+            current_recent = await asyncio.to_thread(
+                self.client.read,
+                pane_id,
+                lines=tail_lines,
+                fmt="text",
+                source="recent",
             )
         except Exception:
             LOG.exception("Failed to read recent tail for streaming %s", pane_id)
@@ -108,8 +112,12 @@ class StreamManager:
         # No change in agent output — check the visible screen for pager/TUI
         # updates (e.g. Claude's /usage) that recent does not capture.
         try:
-            current_visible = self.client.read(
-                pane_id, lines=tail_lines, fmt="text", source="visible"
+            current_visible = await asyncio.to_thread(
+                self.client.read,
+                pane_id,
+                lines=tail_lines,
+                fmt="text",
+                source="visible",
             )
         except Exception:
             LOG.exception("Failed to read visible tail for streaming %s", pane_id)

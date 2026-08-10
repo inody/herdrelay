@@ -4,8 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 LABEL="dev.herdrelay"
+LEGACY_LABEL="dev.herdr.discord-bridge"
 ROOT_DIR="$(pwd)"
 PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"
+LEGACY_PLIST_PATH="$HOME/Library/LaunchAgents/${LEGACY_LABEL}.plist"
 LOG_DIR="$ROOT_DIR/logs"
 RUN_SCRIPT="$ROOT_DIR/scripts/run_bot.sh"
 
@@ -53,6 +55,9 @@ PLIST
 
 chmod 644 "$PLIST_PATH"
 
+# Migrate installations created before the project was renamed to HerdRelay.
+launchctl bootout "gui/$UID" "$LEGACY_PLIST_PATH" >/dev/null 2>&1 || true
+rm -f "$LEGACY_PLIST_PATH"
 launchctl bootout "gui/$UID" "$PLIST_PATH" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$UID" "$PLIST_PATH"
 launchctl kickstart -k "gui/$UID/${LABEL}"

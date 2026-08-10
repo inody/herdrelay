@@ -46,45 +46,33 @@ def test_normalize_targets_from_plain_pane_list():
     assert targets[0].kind == "pane"
 
 
-def test_send_submits_after_agent_send_by_default():
+def test_send_uses_agent_prompt_without_extra_enter():
     client = HerdrClient(AppConfig(discord_token="token"))
     fake_cli = FakeCli()
     client.cli = fake_cli
 
     client.send("w7:p2", "hello")
 
-    assert fake_cli.calls == [
-        ("agent_send", "w7:p2", "hello"),
-        ("pane_send_keys", "w7:p2", ("Enter",)),
-    ]
+    assert fake_cli.calls == [("agent_prompt", "w7:p2", "hello")]
 
 
-def test_send_can_skip_submit_after_agent_send():
-    client = HerdrClient(AppConfig(discord_token="token", submit_after_agent_send=False))
-    fake_cli = FakeCli()
+def test_agent_start_splits_source_pane_then_uses_current_cli_shape():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    fake_cli = StartFakeCli()
     client.cli = fake_cli
 
-    client.send("w7:p2", "hello")
-
-    assert fake_cli.calls == [("agent_send", "w7:p2", "hello")]
-
-
-def test_send_honors_zero_submit_delay():
-    client = HerdrClient(
-        AppConfig(
-            discord_token="token",
-            submit_after_agent_send=True,
-            submit_after_agent_send_delay_seconds=0,
-        )
+    started = client.agent_start(
+        "claude",
+        cwd="/tmp/project",
+        argv=["claude", "--model", "sonnet"],
+        split="down",
+        source_pane="w7:p1",
     )
-    fake_cli = FakeCli()
-    client.cli = fake_cli
 
-    client.send("w7:p2", "hello")
-
+    assert started.pane_id == "w7:p2"
     assert fake_cli.calls == [
-        ("agent_send", "w7:p2", "hello"),
-        ("pane_send_keys", "w7:p2", ("Enter",)),
+        ("pane_split", "w7:p1", "down", "/tmp/project"),
+        ("agent_start", "claude", "claude", "w7:p2", ["--model", "sonnet"]),
     ]
 
 
@@ -133,11 +121,24 @@ class FakeCli:
     def __init__(self):
         self.calls = []
 
-    def agent_send(self, target, message):
-        self.calls.append(("agent_send", target, message))
+    def agent_prompt(self, target, message):
+        self.calls.append(("agent_prompt", target, message))
 
     def pane_send_keys(self, target, *keys):
         self.calls.append(("pane_send_keys", target, keys))
+
+
+class StartFakeCli:
+    def __init__(self):
+        self.calls = []
+
+    def pane_split(self, pane_id, *, direction, cwd):
+        self.calls.append(("pane_split", pane_id, direction, cwd))
+        return {"result": {"pane": {"pane_id": "w7:p2"}}}
+
+    def agent_start(self, name, *, kind, pane_id, argv):
+        self.calls.append(("agent_start", name, kind, pane_id, argv))
+        return {"result": {"agent": {"pane_id": pane_id}}}
 
 
 class WorkspaceFakeCli:

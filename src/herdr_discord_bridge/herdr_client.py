@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from time import sleep
+from dataclasses import dataclass
 from typing import Any
 
 from .config import AppConfig
@@ -11,6 +11,12 @@ from .models import HerdrTarget
 
 class TargetResolutionError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class StartedAgent:
+    pane_id: str
+    result: Any
 
 
 class HerdrClient:
@@ -55,12 +61,7 @@ class HerdrClient:
 
     def send(self, target: str, message: str) -> None:
         try:
-            self.cli.agent_send(target, message)
-            if self.config.submit_after_agent_send:
-                delay = self.config.submit_after_agent_send_delay_seconds
-                if delay > 0:
-                    sleep(delay)
-                self.cli.pane_send_keys(target, "Enter")
+            self.cli.agent_prompt(target, message)
             return
         except HerdrCliError:
             if not self.config.allow_pane_send_fallback:
@@ -82,10 +83,53 @@ class HerdrClient:
         workspace: str | None = None,
         tab: str | None = None,
         split: str | None = None,
-    ) -> Any:
-        return self.cli.agent_start(
-            name, cwd=cwd, argv=argv, workspace=workspace, tab=tab, split=split
+        source_pane: str | None = None,
+    ) -> StartedAgent:
+        """Create a shell pane, then start a Herdr-supported agent in it."""
+        direction = split or "right"
+        if direction not in {"right", "down"}:
+            raise ValueError(f"Unsupported split direction: {direction}")
+
+        if source_pane:
+            created = self.cli.pane_split(source_pane, direction=direction, cwd=cwd)
+        elif tab:
+            panes = _extract_items(self.cli.pane_list(), preferred_kind="pane")
+            tab_panes = [pane for pane in panes if _first_str(pane, "tab_id") == tab]
+            if not tab_panes:
+                raise TargetResolutionError(f"No pane found in tab: {tab}")
+            parent = next((pane for pane in tab_panes if pane.get("focused")), tab_panes[0])
+            parent_id = _first_str(parent, "pane_id", "id")
+            if not parent_id:
+                raise TargetResolutionError(f"No usable pane found in tab: {tab}")
+            created = self.cli.pane_split(parent_id, direction=direction, cwd=cwd)
+        elif workspace:
+            created = self.cli.tab_create(workspace=workspace, cwd=cwd)
+        else:
+            panes = _extract_items(self.cli.pane_list(), preferred_kind="pane")
+            focused = next((pane for pane in panes if pane.get("focused")), None)
+            focused_id = _first_str(focused or {}, "pane_id", "id")
+            if focused_id:
+                created = self.cli.pane_split(focused_id, direction=direction, cwd=cwd)
+            else:
+                created = self.cli.workspace_create(cwd=cwd)
+
+        pane_id = _created_pane_id(created)
+        if not pane_id:
+            raise HerdrCliError("Herdr did not return a pane ID after creating a pane")
+
+        # Herdr 0.8 starts the canonical executable selected by --kind.  Keep
+        # accepting the old `-- <executable> <args...>` form by dropping a
+        # redundant executable name from argv.
+        agent_args = list(argv or ())
+        if agent_args and agent_args[0].casefold() == name.casefold():
+            agent_args.pop(0)
+        result = self.cli.agent_start(
+            name,
+            kind=name.casefold(),
+            pane_id=pane_id,
+            argv=agent_args,
         )
+        return StartedAgent(pane_id=pane_id, result=result)
 
     def pane_close(self, pane_id: str) -> None:
         self.cli.pane_close(pane_id)
@@ -192,6 +236,26 @@ def _target_from_item(
         or _first_str(pane, "cwd", "foreground_cwd", "working_directory"),
         raw=item,
     )
+
+
+def _created_pane_id(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    result = payload.get("result")
+    containers = [result, payload] if isinstance(result, dict) else [payload]
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in ("pane", "root_pane"):
+            pane = container.get(key)
+            if isinstance(pane, dict):
+                pane_id = _first_str(pane, "pane_id", "id")
+                if pane_id:
+                    return pane_id
+        pane_id = _first_str(container, "pane_id")
+        if pane_id:
+            return pane_id
+    return None
 
 
 def _nested_dict(item: dict[str, Any], key: str) -> dict[str, Any]:

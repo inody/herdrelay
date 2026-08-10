@@ -61,8 +61,6 @@ class AppConfig:
     enable_auto_threads: bool = False
     enable_streaming: bool = False
     allow_pane_send_fallback: bool = False
-    submit_after_agent_send: bool = True
-    submit_after_agent_send_delay_seconds: float = 0.5
     dangerous_text_blocklist: tuple[str, ...] = ()
     herdr: HerdrCliConfig = field(default_factory=HerdrCliConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
@@ -110,10 +108,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         enable_auto_threads=bool(data.get("enable_auto_threads", False)),
         enable_streaming=bool(data.get("enable_streaming", False)),
         allow_pane_send_fallback=bool(data.get("allow_pane_send_fallback", False)),
-        submit_after_agent_send=bool(data.get("submit_after_agent_send", True)),
-        submit_after_agent_send_delay_seconds=float(
-            data.get("submit_after_agent_send_delay_seconds", 0.5)
-        ),
         dangerous_text_blocklist=tuple(str(item) for item in data.get("dangerous_text_blocklist") or ()),
         herdr=HerdrCliConfig(
             cli_path=str(herdr_data.get("cli_path") or "herdr"),

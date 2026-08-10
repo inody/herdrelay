@@ -174,10 +174,10 @@ class HerdrDiscordBot(commands.Bot):
             self.security.ensure_send_allowed(message.author.id, location, content)
             keys = _parse_special_keys(content)
             if keys is not None:
-                self.client.send_keys(binding.herdr_target, keys)
+                await asyncio.to_thread(self.client.send_keys, binding.herdr_target, keys)
                 audit_fields["action"] = "key_send"
             else:
-                self.client.send(binding.herdr_target, content)
+                await asyncio.to_thread(self.client.send, binding.herdr_target, content)
             self.store.add_audit(AuditEntry(result="ok", **audit_fields))
             await _react(message, "✅")
         except Exception as exc:
@@ -215,10 +215,10 @@ class HerdrDiscordBot(commands.Bot):
         except Exception as exc:
             await message.reply(f"Error: {exc}")
 
-    def _inherited_context(
+    async def _inherited_context(
         self, message: discord.Message
-    ) -> tuple[str | None, str | None, str | None] | None:
-        """Return (workspace_id, tab_id, cwd) from the bound pane in this thread."""
+    ) -> tuple[str | None, str | None, str | None, str] | None:
+        """Return (workspace_id, tab_id, cwd, pane_id) for this thread."""
         parent_id = getattr(message.channel, "parent_id", None)
         if parent_id is None:
             return None
@@ -230,10 +230,11 @@ class HerdrDiscordBot(commands.Bot):
         )
         if binding is None:
             return None
-        for target in self.client.list_targets():
+        targets = await asyncio.to_thread(self.client.list_targets)
+        for target in targets:
             if target.target == binding.herdr_target:
                 raw = target.raw or {}
-                return raw.get("workspace_id"), raw.get("tab_id"), target.cwd
+                return raw.get("workspace_id"), raw.get("tab_id"), target.cwd, target.target
         return None
 
     async def _control_start(self, message: discord.Message, args: list[str]) -> None:
@@ -249,6 +250,7 @@ class HerdrDiscordBot(commands.Bot):
         tab: str | None = None
         split: str | None = None
         argv: list[str] | None = None
+        source_pane: str | None = None
         if "--" in rest:
             idx = rest.index("--")
             argv = rest[idx + 1 :]
@@ -269,21 +271,32 @@ class HerdrDiscordBot(commands.Bot):
                 i += 2
             else:
                 i += 1
-        # Inherit workspace/tab/cwd from the bound pane when called inside a pane thread
+        # Inherit workspace/tab/cwd from the bound pane when called inside a pane thread.
+        # An explicitly selected workspace or tab must not be overridden by that pane.
+        use_inherited_pane = workspace is None and tab is None
         if cwd is None or workspace is None or tab is None:
-            inherited = self._inherited_context(message)
+            inherited = await self._inherited_context(message)
             if inherited is not None:
-                inh_workspace, inh_tab, inh_cwd = inherited
+                inh_workspace, inh_tab, inh_cwd, inherited_pane = inherited
                 if cwd is None:
                     cwd = inh_cwd
                 if workspace is None:
                     workspace = inh_workspace
                 if tab is None:
                     tab = inh_tab
-        result = self.client.agent_start(
-            name, cwd=cwd, argv=argv, workspace=workspace, tab=tab, split=split
+                if use_inherited_pane:
+                    source_pane = inherited_pane
+        started = await asyncio.to_thread(
+            self.client.agent_start,
+            name,
+            cwd=cwd,
+            argv=argv,
+            workspace=workspace,
+            tab=tab,
+            split=split,
+            source_pane=source_pane,
         )
-        pane_id = _extract_started_pane_id(result)
+        pane_id = started.pane_id
         details = []
         if cwd:
             details.append(f"cwd `{cwd}`")
@@ -332,11 +345,11 @@ class HerdrDiscordBot(commands.Bot):
                 "Usage: `@herdr stop <pane_id>` (or run inside a pane thread)"
             )
             return
-        self.client.pane_close(pane_id)
+        await asyncio.to_thread(self.client.pane_close, pane_id)
         await message.reply(f"Stopped `{pane_id}`.")
 
     async def _control_list(self, message: discord.Message) -> None:
-        targets = self.client.list_targets()
+        targets = await asyncio.to_thread(self.client.list_targets)
         if not targets:
             await message.reply("No Herdr agents or panes found.")
             return
@@ -364,14 +377,6 @@ class HerdrDiscordBot(commands.Bot):
             "Inside a pane thread, just type to send to the pane. "
             "Use `!esc`/`!enter`/`!up`/`!down` etc. for special keys."
         )
-
-
-def _extract_started_pane_id(result: object) -> str | None:
-    try:
-        agent = result.get("result", {}).get("agent", {})  # type: ignore[union-attr]
-        return agent.get("pane_id") or agent.get("terminal_id")  # type: ignore[union-attr]
-    except Exception:
-        return None
 
 
 SPECIAL_KEYS: dict[str, tuple[str, ...]] = {

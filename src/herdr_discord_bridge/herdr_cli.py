@@ -23,13 +23,13 @@ class HerdrCli:
         self.config = config
 
     def agent_list(self) -> Any:
-        return self._json_with_optional_json_flag(["agent", "list"])
+        return self._json(["agent", "list"])
 
     def pane_list(self) -> Any:
-        return self._json_with_optional_json_flag(["pane", "list"])
+        return self._json(["pane", "list"])
 
     def workspace_list(self) -> Any:
-        return self._json_with_optional_json_flag(["workspace", "list"])
+        return self._json(["workspace", "list"])
 
     def agent_read(self, target: str, *, lines: int, fmt: str | None = None, source: str | None = None) -> str:
         args = ["agent", "read", target, "--lines", str(lines)]
@@ -46,8 +46,8 @@ class HerdrCli:
             args += ["--format", fmt]
         return _read_text(self._run(args).stdout)
 
-    def agent_send(self, target: str, message: str) -> None:
-        self._run(["agent", "send", target, message])
+    def agent_prompt(self, target: str, message: str) -> None:
+        self._run(["agent", "prompt", target, message])
 
     def pane_send_text(self, target: str, message: str) -> None:
         self._run(["pane", "send-text", target, message])
@@ -59,37 +59,45 @@ class HerdrCli:
     def pane_run(self, target: str, message: str) -> None:
         self._run(["pane", "run", target, message])
 
+    def tab_create(self, *, workspace: str, cwd: str | None = None) -> Any:
+        args = ["tab", "create", "--workspace", workspace, "--no-focus"]
+        if cwd:
+            args += ["--cwd", cwd]
+        return self._json(args)
+
+    def pane_split(
+        self,
+        pane_id: str,
+        *,
+        direction: str = "right",
+        cwd: str | None = None,
+    ) -> Any:
+        args = ["pane", "split", pane_id, "--direction", direction, "--no-focus"]
+        if cwd:
+            args += ["--cwd", cwd]
+        return self._json(args)
+
+    def workspace_create(self, *, cwd: str | None = None) -> Any:
+        args = ["workspace", "create", "--no-focus"]
+        if cwd:
+            args += ["--cwd", cwd]
+        return self._json(args)
+
     def agent_start(
         self,
         name: str,
         *,
-        cwd: str | None = None,
+        kind: str,
+        pane_id: str,
         argv: list[str] | None = None,
-        workspace: str | None = None,
-        tab: str | None = None,
-        split: str | None = None,
     ) -> Any:
-        args = ["agent", "start", name]
-        if cwd:
-            args += ["--cwd", cwd]
-        if workspace:
-            args += ["--workspace", workspace]
-        if tab:
-            args += ["--tab", tab]
-        if split:
-            args += ["--split", split]
-        args += ["--"]
-        args += argv or [name]
+        args = ["agent", "start", name, "--kind", kind, "--pane", pane_id]
+        if argv:
+            args += ["--", *argv]
         return self._json(args)
 
     def pane_close(self, pane_id: str) -> None:
         self._run(["pane", "close", pane_id])
-
-    def _json_with_optional_json_flag(self, args: list[str]) -> Any:
-        try:
-            return self._json(args + ["--json"])
-        except HerdrCliError:
-            return self._json(args)
 
     def _json(self, args: list[str]) -> Any:
         raw = self._run(args).stdout

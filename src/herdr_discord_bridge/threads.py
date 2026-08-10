@@ -67,7 +67,7 @@ class ThreadManager:
 
     async def sync(self) -> None:
         parent = await self._parent_channel()
-        targets = self.client.list_targets()
+        targets = await asyncio.to_thread(self.client.list_targets)
         active_pane_ids = {t.target for t in targets if t.target}
         for target in targets:
             if not target.target:

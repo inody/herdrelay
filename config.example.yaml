@@ -15,8 +15,6 @@ enable_stop: false
 enable_auto_threads: false
 enable_streaming: false
 allow_pane_send_fallback: false
-submit_after_agent_send: true
-submit_after_agent_send_delay_seconds: 0.5
 
 auto_threads:
   refresh_seconds: 30

@@ -68,10 +68,13 @@ class EventWatcher:
         LOG.info("Connecting Herdr event watcher to %s", socket_path)
         reader, writer = await asyncio.open_unix_connection(socket_path)
         try:
+            subscriptions = await asyncio.to_thread(
+                build_agent_status_subscriptions, self.client, self.config
+            )
             request = {
                 "id": "discord_bridge_events",
                 "method": "events.subscribe",
-                "params": {"subscriptions": build_agent_status_subscriptions(self.client, self.config)},
+                "params": {"subscriptions": subscriptions},
             }
             writer.write((json.dumps(request) + "\n").encode())
             await writer.drain()
@@ -118,7 +121,9 @@ class EventWatcher:
             else self.config.watcher.done_tail_lines
         )
         try:
-            output = self.client.read(event.pane_id, lines=tail_lines)
+            output = await asyncio.to_thread(
+                self.client.read, event.pane_id, lines=tail_lines
+            )
         except Exception as exc:
             LOG.exception("Failed to read tail for %s", event.pane_id)
             output = f"(failed to read tail: {exc})"
