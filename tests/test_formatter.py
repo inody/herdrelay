@@ -1,5 +1,6 @@
 from herdr_discord_bridge.formatter import (
     format_tail,
+    split_tail_chunks,
     target_alias,
 )
 from herdr_discord_bridge.models import HerdrTarget
@@ -18,6 +19,15 @@ def test_tail_truncation_keeps_recent_output():
     assert "APPROVE THIS?" in output
     assert output.startswith("```text\n... truncated")
     assert output.endswith("\n```")
+
+
+def test_split_tail_chunks_splits_a_single_oversized_line():
+    text = "x" * 5000
+
+    chunks = split_tail_chunks(text, max_chars=2000)
+
+    assert "".join(chunks) == text
+    assert all(len(chunk) <= 1988 for chunk in chunks)
 
 
 def test_target_alias_prefers_workspace_label():

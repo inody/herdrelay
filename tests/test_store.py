@@ -74,6 +74,8 @@ def test_event_key_prefix_matches_legacy_bucketed_keys(tmp_path):
 
     assert store.mark_event_seen("w7:p1:done:abc123:5943680")
 
+    assert store.has_event_key("w7:p1:done:abc123:5943680")
+    assert not store.has_event_key("w7:p1:done:abc123")
     assert store.has_event_key_prefix("w7:p1:done:abc123")
     assert not store.has_event_key_prefix("w7:p1:blocked:abc123")
 

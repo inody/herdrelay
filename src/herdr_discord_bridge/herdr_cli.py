@@ -31,14 +31,6 @@ class HerdrCli:
     def workspace_list(self) -> Any:
         return self._json(["workspace", "list"])
 
-    def agent_read(self, target: str, *, lines: int, fmt: str | None = None, source: str | None = None) -> str:
-        args = ["agent", "read", target, "--lines", str(lines)]
-        if source:
-            args += ["--source", source]
-        if fmt:
-            args += ["--format", fmt]
-        return _read_text(self._run(args).stdout)
-
     def pane_read(self, target: str, *, lines: int, source: str | None = None, fmt: str | None = None) -> str:
         source = source or self.config.default_source
         args = ["pane", "read", target, "--source", source, "--lines", str(lines)]

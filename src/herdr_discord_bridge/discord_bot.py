@@ -57,7 +57,7 @@ class HerdrDiscordBot(commands.Bot):
         else:
             await self.tree.sync()
             LOG.info("Synced global command tree")
-        if self.config.enable_watcher:
+        if self.config.enable_watcher and self.config.watcher.statuses:
             self._watcher = EventWatcher(
                 bot=self,
                 config=self.config,
@@ -84,7 +84,7 @@ class HerdrDiscordBot(commands.Bot):
                 client=self.client,
             )
             self._stream_task = asyncio.create_task(self.stream_manager.run_forever())
-            LOG.info("Started pane streamer")
+            LOG.info("Started output relay")
 
     async def on_ready(self) -> None:
         # Nickname the bot "herdr" so @he autocomplete points here.

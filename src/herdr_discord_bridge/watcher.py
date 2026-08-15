@@ -115,21 +115,29 @@ class EventWatcher:
         await self._notify(event)
 
     async def _notify(self, event: AgentStatusEvent) -> None:
-        tail_lines = (
-            self.config.watcher.blocked_tail_lines
-            if event.status == "blocked"
-            else self.config.watcher.done_tail_lines
-        )
-        try:
-            output = await asyncio.to_thread(
-                self.client.read, event.pane_id, lines=tail_lines
+        output = ""
+        dedupe_material = ""
+        if self.config.watcher.include_output:
+            tail_lines = (
+                self.config.watcher.blocked_tail_lines
+                if event.status == "blocked"
+                else self.config.watcher.done_tail_lines
             )
-        except Exception as exc:
-            LOG.exception("Failed to read tail for %s", event.pane_id)
-            output = f"(failed to read tail: {exc})"
+            try:
+                output = await asyncio.to_thread(
+                    self.client.read, event.pane_id, lines=tail_lines
+                )
+                dedupe_material = output
+            except Exception as exc:
+                LOG.warning("Failed to read tail for %s: %s", event.pane_id, exc)
+                dedupe_material = f"read-error:{event.pane_id}:{event.status}"
+        else:
+            dedupe_material = await asyncio.to_thread(
+                event_state_marker, self.client, event
+            )
 
-        dedupe_key = event_dedupe_key(event, output)
-        legacy_dedupe_prefix = event_legacy_dedupe_prefix(event, output)
+        dedupe_key = event_dedupe_key(event, dedupe_material)
+        legacy_dedupe_prefix = event_legacy_dedupe_prefix(event, dedupe_material)
         if self.store.has_event_key_prefix(legacy_dedupe_prefix):
             LOG.info("Skipping duplicate event notification for %s", event.pane_id)
             return
@@ -143,7 +151,9 @@ class EventWatcher:
             return
 
         title = event_title(event)
-        body = title + "\n" + format_tail(output, max_chars=self.config.max_output_chars)
+        body = title
+        if output:
+            body += "\n" + format_tail(output, max_chars=self.config.max_output_chars)
         mention_prefix = blocked_mention_prefix(self.config) if event.status == "blocked" else ""
         view = self.card_view_factory(event.pane_id) if self.card_view_factory else None
         await destination.send(mention_prefix + body, view=view)
@@ -258,6 +268,18 @@ def parse_agent_status_event(payload: Any) -> AgentStatusEvent | None:
         or _first_str(agent, "agent_name", "name"),
         raw=payload,
     )
+
+
+def event_state_marker(client: HerdrClient, event: AgentStatusEvent) -> str:
+    """Stable marker for status-only notifications without reading pane output."""
+    try:
+        target = client.resolve_target(event.pane_id)
+        sequence = (target.raw or {}).get("state_change_seq")
+        if sequence is not None:
+            return f"state-change:{sequence}"
+    except Exception:
+        pass
+    return json.dumps(event.raw or {}, sort_keys=True, default=str)
 
 
 def event_title(event: AgentStatusEvent) -> str:

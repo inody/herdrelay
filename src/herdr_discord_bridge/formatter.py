@@ -49,11 +49,20 @@ def split_tail_chunks(text: str, *, max_chars: int = 1900) -> list[str]:
     current: list[str] = []
     current_len = 0
     for line in lines:
-        line_len = len(line) + 1
+        if len(line) > budget:
+            if current:
+                chunks.append("\n".join(current))
+                current = []
+                current_len = 0
+            while len(line) > budget:
+                chunks.append(line[:budget])
+                line = line[budget:]
+        line_len = len(line) + (1 if current else 0)
         if current and current_len + line_len > budget:
             chunks.append("\n".join(current))
             current = []
             current_len = 0
+            line_len = len(line)
         current.append(line)
         current_len += line_len
     if current:

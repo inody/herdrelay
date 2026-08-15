@@ -28,6 +28,7 @@ class WatcherConfig:
     statuses: tuple[str, ...] = ("blocked", "done")
     reconnect_delay_seconds: float = 5
     resubscribe_interval_seconds: float = 300
+    include_output: bool = True
     blocked_tail_lines: int = 80
     done_tail_lines: int = 60
 
@@ -39,8 +40,15 @@ class AutoThreadsConfig:
 
 @dataclass(frozen=True)
 class StreamConfig:
+    mode: str = "hooks"
     refresh_seconds: float = 8
-    tail_lines: int = 60
+    tail_lines: int = 1000
+    initial_tail_lines: int = 60
+    enable_visible_fallback: bool = True
+    hook_inbox_path: str = "~/.cache/herdrelay/agent-output"
+    hook_refresh_seconds: float = 1
+    hook_max_event_bytes: int = 2_000_000
+    hook_max_event_age_seconds: float = 86_400
 
 
 @dataclass(frozen=True)
@@ -115,11 +123,15 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             command_timeout_seconds=int(herdr_data.get("command_timeout_seconds", 20)),
         ),
         watcher=WatcherConfig(
-            statuses=tuple(str(item) for item in watcher_data.get("statuses") or ("blocked", "done")),
+            statuses=tuple(
+                str(item)
+                for item in watcher_data.get("statuses", ("blocked", "done"))
+            ),
             reconnect_delay_seconds=float(watcher_data.get("reconnect_delay_seconds", 5)),
             resubscribe_interval_seconds=float(
                 watcher_data.get("resubscribe_interval_seconds", 300)
             ),
+            include_output=bool(watcher_data.get("include_output", True)),
             blocked_tail_lines=int(watcher_data.get("blocked_tail_lines", 80)),
             done_tail_lines=int(watcher_data.get("done_tail_lines", 60)),
         ),
@@ -127,13 +139,38 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             refresh_seconds=float(auto_threads_data.get("refresh_seconds", 30)),
         ),
         streaming=StreamConfig(
+            mode=_stream_mode(streaming_data.get("mode")),
             refresh_seconds=float(streaming_data.get("refresh_seconds", 8)),
-            tail_lines=int(streaming_data.get("tail_lines", 60)),
+            tail_lines=int(streaming_data.get("tail_lines", 1000)),
+            initial_tail_lines=int(streaming_data.get("initial_tail_lines", 60)),
+            enable_visible_fallback=bool(
+                streaming_data.get("enable_visible_fallback", True)
+            ),
+            hook_inbox_path=str(
+                streaming_data.get("hook_inbox_path")
+                or "~/.cache/herdrelay/agent-output"
+            ),
+            hook_refresh_seconds=float(
+                streaming_data.get("hook_refresh_seconds", 1)
+            ),
+            hook_max_event_bytes=int(
+                streaming_data.get("hook_max_event_bytes", 2_000_000)
+            ),
+            hook_max_event_age_seconds=float(
+                streaming_data.get("hook_max_event_age_seconds", 86_400)
+            ),
         ),
         approval=_approval_strategies(approval_data),
         deny=_approval_strategies(data.get("deny") or {}),
         stop=_single_strategy(data.get("stop")),
     )
+
+
+def _stream_mode(value: Any) -> str:
+    mode = str(value or "hooks").casefold()
+    if mode not in {"hooks", "poll"}:
+        raise ValueError("streaming.mode must be 'hooks' or 'poll'")
+    return mode
 
 
 def _id_set(value: Any) -> frozenset[int]:

@@ -53,11 +53,19 @@ class HerdrClient:
                 mapping[workspace_id] = label
         return mapping
 
-    def read(self, target: str, *, lines: int, fmt: str | None = None, source: str | None = None) -> str:
-        try:
-            return self.cli.agent_read(target, lines=lines, fmt=fmt, source=source)
-        except HerdrCliError:
-            return self.cli.pane_read(target, lines=lines, fmt=fmt)
+    def read(
+        self,
+        target: str,
+        *,
+        lines: int,
+        fmt: str | None = None,
+        source: str | None = None,
+    ) -> str:
+        # All bridge targets are pane IDs. Reading the pane directly remains
+        # valid while an agent is being released or re-detected, whereas
+        # agent.read can fail during that transition and needlessly churn the
+        # server and logs.
+        return self.cli.pane_read(target, lines=lines, fmt=fmt, source=source)
 
     def send(self, target: str, message: str) -> None:
         try:

@@ -46,6 +46,15 @@ def test_normalize_targets_from_plain_pane_list():
     assert targets[0].kind == "pane"
 
 
+def test_read_uses_pane_read_without_agent_lifecycle_dependency():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    fake_cli = ReadFakeCli()
+    client.cli = fake_cli
+
+    assert client.read("w7:p2", lines=1000, fmt="text", source="recent") == "output"
+    assert fake_cli.calls == [("pane_read", "w7:p2", 1000, "text", "recent")]
+
+
 def test_send_uses_agent_prompt_without_extra_enter():
     client = HerdrClient(AppConfig(discord_token="token"))
     fake_cli = FakeCli()
@@ -115,6 +124,15 @@ def test_list_targets_attaches_workspace_labels():
     assert targets["w1:p1"].workspace_label == "cbo_mppi"
     assert targets["w7:p3"].workspace_label == "herdr-chat-bridge"
     assert targets["w7:p3"].status == "blocked"
+
+
+class ReadFakeCli:
+    def __init__(self):
+        self.calls = []
+
+    def pane_read(self, target, *, lines, fmt, source):
+        self.calls.append(("pane_read", target, lines, fmt, source))
+        return "output"
 
 
 class FakeCli:

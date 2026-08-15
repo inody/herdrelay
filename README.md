@@ -1,19 +1,20 @@
 # HerdRelay
 
 HerdRelay — a Discord control surface for Herdr. Each Herdr pane gets its own
-Discord thread, and the relay keeps them in sync in both directions: pane
-output streams into the thread, and messages posted in the thread go to the
-pane.
+Discord thread, and the relay keeps them in sync in both directions: completed
+agent responses are relayed into the thread, and messages posted there go to
+the pane.
 
-Herdr remains the source of truth for panes, agents, output, cwd, and status.
-Discord threads are per-pane remote control surfaces.
+Herdr remains the source of truth for panes, agents, cwd, and status; agent
+adapters provide completed responses without scraping terminal output. Discord
+threads are per-pane remote control surfaces.
 
 ## How it works
 
 ```
 Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
         │                       │
-        └── output streams ──→  thread (new lines, ~8s polling)
+        └── agent hook ──────→  thread (completed response)
         ←── messages posted ──  thread (normal posts go to the pane)
         ←── approvals/denies ─  card buttons
 ```
@@ -21,7 +22,9 @@ Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
 - **Auto threads**: each Herdr pane gets one Discord thread under
   `thread_parent_channel_id`, named `alias/agent` (prefixed `🔴` while blocked).
   The thread is auto-bound to its pane.
-- **Streaming**: new pane output is posted into the bound thread.
+- **Output relay**: agent adapters post completed responses into the bound
+  thread. Claude Code and Codex use Stop hooks; Pi uses an `agent_settled`
+  extension. None of these adapters reads terminal contents.
 - **Thread post send**: any normal message posted in a bound thread is sent to
   its pane (no need to reply — just type).
 - **Approvals**: blocked panes post an approval card (Approve / Deny buttons,
@@ -53,7 +56,8 @@ Each Herdr pane has its own Discord thread (auto-created under
   - `@herdr help` — show commands
 - **Approve / Deny / Cancel** buttons appear on the target card the watcher
   posts when a pane is blocked or working.
-- Pane output streams into the thread automatically (~8s polling).
+- Supported agent responses are relayed into the thread automatically when a
+  turn completes.
 
 Write actions (approve, deny, stop, posting in a bound thread) require an
 allowlisted Discord user.
@@ -123,8 +127,21 @@ allowlisted Discord user.
    enable_stop: true
    enable_auto_threads: true
    enable_streaming: true
+   streaming:
+     mode: hooks
    ```
-6. Run the bot:
+6. Install the agent adapters. The Claude and Codex installers preserve their
+   existing settings and create backups; the Codex hook does not replace its
+   existing `notify` command.
+   ```bash
+   python3 scripts/manage_claude_hook.py install
+   python3 scripts/manage_pi_adapter.py install
+   python3 scripts/manage_codex_hook.py install
+   ```
+   Run `/reload` in existing Pi sessions. Restart existing Claude Code and
+   Codex sessions so they load their new Stop hooks. Each command also supports
+   `uninstall`.
+7. Run the bot:
    ```bash
    scripts/run_bot.sh
    ```
@@ -136,7 +153,9 @@ allowlisted Discord user.
 2. Open a pane's thread and post a message — it is sent to the pane and gets a
    ✅ reaction. Harness commands like `/status` or `/compact` also work as
    normal messages.
-3. When a pane becomes blocked, the watcher posts a target card with Approve /
+3. Complete a turn in a reloaded/restarted Claude Code, Pi, or Codex pane — its
+   full final response appears in the corresponding thread.
+4. When a pane becomes blocked, the watcher posts a target card with Approve /
    Deny buttons (and `@mention`).
 
 ## Configuration reference
@@ -164,13 +183,21 @@ auto_threads:
   refresh_seconds: 30          # how often panes are synced to threads
 
 streaming:
-  refresh_seconds: 8           # how often new pane output is pushed to threads
-  tail_lines: 60
+  mode: hooks                  # hooks (recommended) or poll
+  refresh_seconds: 8           # poll mode only
+  tail_lines: 1000             # poll mode only
+  initial_tail_lines: 60       # poll mode only
+  enable_visible_fallback: true # poll mode only; captures pager/TUI updates
+  hook_inbox_path: ~/.cache/herdrelay/agent-output
+  hook_refresh_seconds: 1
+  hook_max_event_bytes: 2000000
+  hook_max_event_age_seconds: 86400
 
 watcher:
   statuses: ["blocked", "done"]
   reconnect_delay_seconds: 5
   resubscribe_interval_seconds: 300
+  include_output: true         # read and attach a tail to status notifications
   blocked_tail_lines: 80
   done_tail_lines: 60
 
@@ -217,6 +244,8 @@ stop:                          # how a pane is interrupted (Stop button)
 - The `dangerous_text_blocklist` rejects messages containing blocked phrases.
 - A target is never auto-resolved when multiple panes match a query.
 - All write actions are recorded in the audit log (`audit_log` table).
+- Hook events contain full assistant responses. They are written with mode
+  `0600` inside a `0700` inbox and removed after successful delivery.
 
 ## Running in the background
 
@@ -231,16 +260,61 @@ After changing `.env`, `config.yaml`, or code:
 launchctl kickstart -k "gui/$UID/dev.herdrelay"
 ```
 
-Logs: `logs/launchd.out.log` and `logs/launchd.err.log`.
+Logs: `logs/launchd.out.log` and `logs/launchd.err.log`. The launchd
+installation also checks them hourly, rotates files above 10 MiB, and keeps
+three gzip-compressed backups.
 
 ## Operational notes
 
 - `.env`, `config.yaml`, and the SQLite database are gitignored.
-- Send and streaming use the Herdr 0.8 CLI (`agent prompt`, `agent read`;
-  the `visible` source captures pager/TUI output like Claude's `/usage`).
-  Event notifications use the raw socket API.
+- Sending uses the Herdr 0.8 CLI (`agent prompt`). Hook-mode output relay does
+  not call `pane read` or `agent read`. The optional legacy `poll` mode does,
+  and its `visible` fallback can capture pager/TUI output such as `/usage`.
+  Status notifications use the raw socket API.
 - Thread names are renamed to `🔴 alias/agent` only while blocked; other status
   changes do not rename threads (Discord rate-limits channel edits).
 - Notification dedupe is stored in SQLite using `pane_id + status + tail hash`.
-- Pane ↔ thread mapping and per-pane stream state are stored in SQLite
-  (`agent_threads`, `pane_streams`).
+- Pane ↔ thread mappings are stored in SQLite (`agent_threads`).
+
+### Agent output adapters
+
+Hook mode is agent-neutral. An adapter atomically places a `.json` file in
+`hook_inbox_path` with this format:
+
+```json
+{
+  "version": 1,
+  "event_id": "stable-id-for-this-turn",
+  "agent": "claude",
+  "pane_id": "w1:p1",
+  "text": "complete assistant response"
+}
+```
+
+HerdRelay handles pane/thread lookup, Discord chunking, retries, and persistent
+deduplication. `scripts/agent_stop_hook.py` handles Claude Code and Codex Stop
+events; `integrations/pi-herdrelay-output.ts` handles Pi's `agent_settled`
+event. Additional agents can use the same protocol without changing the
+Discord relay or reading terminal contents.
+
+### Herdr 0.8 fullscreen redraw workaround
+
+If a fullscreen/alternate-screen agent appears to jump upward when a turn ends,
+avoid the watcher operations correlated with the redraw while keeping Discord
+send and output streaming enabled:
+
+```yaml
+streaming:
+  mode: hooks
+watcher:
+  statuses: ["blocked"]
+  resubscribe_interval_seconds: 0
+  include_output: false
+```
+
+Hook mode receives completed responses directly from agent-specific adapters;
+it never reads terminal output. The watcher settings disable done cards,
+watcher tail reads, and periodic subscription reconnects. New panes will not
+receive watcher notifications until HerdRelay restarts, but auto-thread
+creation and hook output relay continue. Set `enable_watcher: false` to disable
+status subscriptions, or `enable_streaming: false` to disable response relay.

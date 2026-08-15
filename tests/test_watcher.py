@@ -6,6 +6,7 @@ from herdr_discord_bridge.watcher import (
     blocked_mention_prefix,
     build_agent_status_subscriptions,
     event_dedupe_key,
+    event_state_marker,
     parse_agent_status_event,
     resolve_socket_path,
     should_resubscribe,
@@ -73,6 +74,14 @@ def test_dedupe_key_is_stable_across_time():
 
     assert first == second
     assert first == "w1:p1:blocked:0c62f876ef1dea83"
+
+
+def test_event_state_marker_uses_state_change_sequence_without_reading_output():
+    event = AgentStatusEvent(pane_id="w1:p1", status="blocked")
+
+    marker = event_state_marker(StateMarkerClient(), event)
+
+    assert marker == "state-change:42"
 
 
 def test_find_binding_for_target_prefers_thread_binding(tmp_path):
@@ -153,6 +162,11 @@ def test_blocked_mention_prefix_empty_when_no_users():
     config = AppConfig(discord_token="token")
 
     assert blocked_mention_prefix(config) == ""
+
+
+class StateMarkerClient:
+    def resolve_target(self, target):
+        return HerdrTarget(target=target, raw={"state_change_seq": 42})
 
 
 class FakeHerdrClient:

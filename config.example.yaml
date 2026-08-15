@@ -20,13 +20,21 @@ auto_threads:
   refresh_seconds: 30
 
 streaming:
-  refresh_seconds: 8
-  tail_lines: 60
+  mode: hooks                  # hooks (recommended) or poll
+  refresh_seconds: 8           # poll mode only
+  tail_lines: 1000             # poll mode only
+  initial_tail_lines: 60       # poll mode only
+  enable_visible_fallback: true # poll mode only
+  hook_inbox_path: ~/.cache/herdrelay/agent-output
+  hook_refresh_seconds: 1
+  hook_max_event_bytes: 2000000
+  hook_max_event_age_seconds: 86400
 
 watcher:
   statuses: ["blocked", "done"]
   reconnect_delay_seconds: 5
   resubscribe_interval_seconds: 300
+  include_output: true
   blocked_tail_lines: 80
   done_tail_lines: 60
 dangerous_text_blocklist:
