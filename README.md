@@ -144,6 +144,15 @@ allowlisted Discord user.
    Run `/reload` in existing Pi sessions. Restart existing Claude Code and
    Codex sessions so they load their new Stop hooks. Each command also supports
    `uninstall`.
+
+   Codex hooks are experimental and must be enabled in `~/.codex/config.toml`:
+   ```toml
+   [features]
+   hooks = true
+   ```
+   Use `hooks`, not the deprecated `codex_hooks` alias. Codex clients can share
+   a long-lived app-server; after upgrading Codex or changing this setting,
+   restart that app-server as well as the Codex pane.
 7. Run the bot:
    ```bash
    scripts/run_bot.sh
@@ -302,8 +311,12 @@ choice buttons (and accept a matching numeric thread post such as `2`); multiple
 choices use a Discord select menu. `integrations/pi-herdrelay-output.ts` handles
 Pi's `agent_settled` event. Pi asks in an ordinary final text response and
 waits for a Discord thread reply; this project does not depend on Pi's optional
-modal `ask_user` package. Additional agents can use the same protocol without
-changing the Discord relay or reading terminal contents.
+modal `ask_user` package. Codex hooks run in its shared app-server, which does
+not inherit `HERDR_PANE_ID`; HerdRelay resolves the hook to the only Codex pane
+with the same cwd using Herdr pane metadata. If multiple Codex panes share that
+cwd, it intentionally does not deliver an ambiguous response. Additional agents
+can use the same protocol without changing the Discord relay or reading terminal
+contents.
 
 ### Herdr 0.8 fullscreen redraw workaround
 
