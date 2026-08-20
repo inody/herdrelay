@@ -65,6 +65,7 @@ watcher:
   statuses: ["blocked"]
   resubscribe_interval_seconds: 0
   include_output: false
+  blocked_notification_delay_seconds: 2
 """
     )
 
@@ -73,6 +74,7 @@ watcher:
     assert config.watcher.statuses == ("blocked",)
     assert config.watcher.resubscribe_interval_seconds == 0
     assert config.watcher.include_output is False
+    assert config.watcher.blocked_notification_delay_seconds == 2
 
 
 def test_load_config_accepts_empty_watcher_statuses(tmp_path, monkeypatch):

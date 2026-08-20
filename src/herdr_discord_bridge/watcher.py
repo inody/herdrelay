@@ -115,6 +115,11 @@ class EventWatcher:
         await self._notify(event)
 
     async def _notify(self, event: AgentStatusEvent) -> None:
+        # Give agent hooks a brief head start to persist a structured question.
+        # Without this, the status card can race the question choice view and
+        # expose a generic Enter button that picks Claude's first option.
+        if event.status == "blocked":
+            await asyncio.sleep(self.config.watcher.blocked_notification_delay_seconds)
         output = ""
         dedupe_material = ""
         if self.config.watcher.include_output:

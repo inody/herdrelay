@@ -1,3 +1,4 @@
+from herdr_discord_bridge.models import PendingQuestion, QuestionOption
 from herdr_discord_bridge.store import Store
 
 
@@ -78,6 +79,24 @@ def test_event_key_prefix_matches_legacy_bucketed_keys(tmp_path):
     assert not store.has_event_key("w7:p1:done:abc123")
     assert store.has_event_key_prefix("w7:p1:done:abc123")
     assert not store.has_event_key_prefix("w7:p1:blocked:abc123")
+
+
+def test_pending_question_roundtrip_and_conditional_clear(tmp_path):
+    store = Store(tmp_path / "bridge.sqlite3")
+    question = PendingQuestion(
+        pane_id="w7:p5",
+        event_id="question-1",
+        prompt="Choose",
+        options=(QuestionOption("One"), QuestionOption("Two", "Second")),
+    )
+
+    store.upsert_pending_question(question)
+
+    assert store.get_pending_question("w7:p5") == question
+    store.clear_pending_question("w7:p5", event_id="different")
+    assert store.get_pending_question("w7:p5") == question
+    store.clear_pending_question("w7:p5", event_id="question-1")
+    assert store.get_pending_question("w7:p5") is None
 
 
 def test_agent_thread_upsert_and_get(tmp_path):

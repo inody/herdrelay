@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Forward a completed Claude Code or Codex response to HerdRelay.
+"""Forward agent responses and Claude questions to HerdRelay.
 
 This hook is intentionally silent and best-effort: relay failures must never
-change the agent's stop decision or write anything into its transcript.
+change the agent's decision or write anything into its transcript.
 """
 
 from __future__ import annotations
@@ -48,6 +48,113 @@ def build_event(
     }
 
 
+def build_question_event(
+    data: object, environ: dict[str, str]
+) -> dict[str, object] | None:
+    """Build a relay event from Claude's AskUserQuestion PreToolUse payload."""
+    if not isinstance(data, dict) or data.get("hook_event_name") != "PreToolUse":
+        return None
+    if data.get("tool_name") != "AskUserQuestion":
+        return None
+    pane_id = environ.get("HERDR_PANE_ID", "").strip()
+    tool_input = data.get("tool_input")
+    text = format_ask_user_question(tool_input)
+    question = first_ask_user_question(tool_input)
+    if not pane_id or not text or question is None:
+        return None
+    session_id = data.get("session_id")
+    tool_use_id = data.get("tool_use_id")
+    if not isinstance(session_id, str):
+        session_id = ""
+    if not isinstance(tool_use_id, str):
+        tool_use_id = ""
+    identity = "\0".join(("claude-question", session_id, tool_use_id, text))
+    return {
+        "version": 1,
+        "event_id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
+        "agent": "claude",
+        "pane_id": pane_id,
+        "session_id": session_id,
+        "kind": "question",
+        "question": question,
+        "text": text,
+        "created_at": time.time(),
+    }
+
+
+def first_ask_user_question(tool_input: object) -> dict[str, object] | None:
+    if not isinstance(tool_input, dict):
+        return None
+    questions = tool_input.get("questions")
+    if not isinstance(questions, list) or len(questions) != 1:
+        return None
+    item = questions[0]
+    if not isinstance(item, dict):
+        return None
+    prompt = item.get("question")
+    options = item.get("options")
+    if not isinstance(prompt, str) or not prompt.strip() or not isinstance(options, list):
+        return None
+    normalized_options = [
+        {
+            "label": option["label"].strip(),
+            "description": (
+                option["description"].strip()
+                if isinstance(option.get("description"), str)
+                and option["description"].strip()
+                else None
+            ),
+        }
+        for option in options
+        if isinstance(option, dict)
+        and isinstance(option.get("label"), str)
+        and option["label"].strip()
+    ]
+    if not normalized_options:
+        return None
+    return {
+        "prompt": prompt.strip(),
+        "options": normalized_options,
+        "multi_select": item.get("multiSelect") is True,
+    }
+
+
+def format_ask_user_question(tool_input: object) -> str:
+    if not isinstance(tool_input, dict):
+        return ""
+    questions = tool_input.get("questions")
+    if not isinstance(questions, list):
+        return ""
+    rendered: list[str] = []
+    for item in questions:
+        if not isinstance(item, dict):
+            continue
+        question = item.get("question")
+        if not isinstance(question, str) or not question.strip():
+            continue
+        block = question.strip()
+        options = item.get("options")
+        if isinstance(options, list):
+            choices: list[str] = []
+            for option in options:
+                if not isinstance(option, dict):
+                    continue
+                label = option.get("label")
+                description = option.get("description")
+                if not isinstance(label, str) or not label.strip():
+                    continue
+                choice = f"- {label.strip()}"
+                if isinstance(description, str) and description.strip():
+                    choice += f": {description.strip()}"
+                choices.append(choice)
+            if choices:
+                block += "\nOptions:\n" + "\n".join(choices)
+        if item.get("multiSelect") is True:
+            block += "\n(Multiple selections allowed.)"
+        rendered.append(block)
+    return "\n\n".join(rendered)
+
+
 def _transcript_marker(value: object) -> str:
     if not isinstance(value, str) or not value:
         return ""
@@ -86,10 +193,15 @@ def write_event(event: dict[str, object], inbox: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--agent", choices=("claude", "codex"), default="claude")
+    parser.add_argument("--event", choices=("stop", "question"), default="stop")
     args, _unknown = parser.parse_known_args()
     try:
         data = json.load(sys.stdin)
-        event = build_event(data, dict(os.environ), agent=args.agent)
+        event = (
+            build_question_event(data, dict(os.environ))
+            if args.event == "question"
+            else build_event(data, dict(os.environ), agent=args.agent)
+        )
         if event is not None:
             inbox = Path(
                 os.environ.get("HERDRELAY_HOOK_INBOX", DEFAULT_INBOX)

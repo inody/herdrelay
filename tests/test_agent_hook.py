@@ -4,7 +4,12 @@ import stat
 import sys
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from agent_stop_hook import build_event, write_event  # noqa: E402
+from agent_stop_hook import (  # noqa: E402
+    build_event,
+    build_question_event,
+    format_ask_user_question,
+    write_event,
+)
 from manage_claude_hook import MARKER, update_settings  # noqa: E402
 
 
@@ -42,6 +47,47 @@ def test_build_event_supports_codex_stop_payload(tmp_path):
     assert event is not None
     assert event["agent"] == "codex"
     assert event["text"] == "Codex response"
+
+
+def test_build_question_event_formats_claude_ask_user_question():
+    data = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "session-1",
+        "tool_use_id": "tool-1",
+        "tool_name": "AskUserQuestion",
+        "tool_input": {
+            "questions": [
+                {
+                    "question": "Which approach should I use?",
+                    "options": [
+                        {"label": "Safe", "description": "Preserve compatibility"},
+                        {"label": "Fast", "description": "Prioritize speed"},
+                    ],
+                }
+            ]
+        },
+    }
+
+    event = build_question_event(data, {"HERDR_PANE_ID": "w1:p2"})
+
+    assert event is not None
+    assert event["kind"] == "question"
+    assert event["question"] == {
+        "prompt": "Which approach should I use?",
+        "options": [
+            {"label": "Safe", "description": "Preserve compatibility"},
+            {"label": "Fast", "description": "Prioritize speed"},
+        ],
+        "multi_select": False,
+    }
+    assert event["text"] == (
+        "Which approach should I use?\nOptions:\n"
+        "- Safe: Preserve compatibility\n- Fast: Prioritize speed"
+    )
+
+
+def test_format_ask_user_question_ignores_malformed_input():
+    assert format_ask_user_question({"questions": [{"question": 1}]}) == ""
 
 
 def test_build_event_id_is_stable_for_repeated_stop_hook(tmp_path):
@@ -83,6 +129,8 @@ def test_install_and_uninstall_preserve_other_hooks(tmp_path):
     assert len(settings["hooks"]["Stop"]) == 2
     command = settings["hooks"]["Stop"][1]["hooks"][0]["command"]
     assert MARKER in command
+    question_command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert "--event question" in question_command
     assert not update_settings(settings, install=True, hook_script=script)
     assert update_settings(settings, install=False, hook_script=script)
     assert settings["hooks"]["Stop"][0]["hooks"][0]["command"] == "echo existing"

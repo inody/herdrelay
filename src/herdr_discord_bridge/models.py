@@ -40,3 +40,18 @@ class AuditEntry:
     herdr_target: str | None = None
     payload_preview: str | None = None
 
+
+@dataclass(frozen=True)
+class QuestionOption:
+    label: str
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class PendingQuestion:
+    pane_id: str
+    event_id: str
+    prompt: str
+    options: tuple[QuestionOption, ...]
+    multi_select: bool = False
+

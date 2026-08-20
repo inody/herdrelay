@@ -29,6 +29,7 @@ class WatcherConfig:
     reconnect_delay_seconds: float = 5
     resubscribe_interval_seconds: float = 300
     include_output: bool = True
+    blocked_notification_delay_seconds: float = 1.5
     blocked_tail_lines: int = 80
     done_tail_lines: int = 60
 
@@ -132,6 +133,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
                 watcher_data.get("resubscribe_interval_seconds", 300)
             ),
             include_output=bool(watcher_data.get("include_output", True)),
+            blocked_notification_delay_seconds=float(
+                watcher_data.get("blocked_notification_delay_seconds", 1.5)
+            ),
             blocked_tail_lines=int(watcher_data.get("blocked_tail_lines", 80)),
             done_tail_lines=int(watcher_data.get("done_tail_lines", 60)),
         ),

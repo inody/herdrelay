@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import AuditEntry, Binding
+from .models import AuditEntry, Binding, PendingQuestion, QuestionOption
 
 
 class Store:
@@ -71,6 +72,15 @@ class Store:
                   alias TEXT,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS pending_questions (
+                  pane_id TEXT PRIMARY KEY,
+                  event_id TEXT NOT NULL,
+                  prompt TEXT NOT NULL,
+                  options_json TEXT NOT NULL,
+                  multi_select INTEGER NOT NULL,
+                  created_at TEXT NOT NULL
                 );
                 """
             )
@@ -266,6 +276,79 @@ class Store:
                 """,
                 (key, value, now),
             )
+
+    def upsert_pending_question(self, question: PendingQuestion) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_questions (
+                  pane_id, event_id, prompt, options_json, multi_select, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(pane_id) DO UPDATE SET
+                  event_id = excluded.event_id,
+                  prompt = excluded.prompt,
+                  options_json = excluded.options_json,
+                  multi_select = excluded.multi_select,
+                  created_at = excluded.created_at
+                """,
+                (
+                    question.pane_id,
+                    question.event_id,
+                    question.prompt,
+                    json.dumps(
+                        [
+                            {"label": option.label, "description": option.description}
+                            for option in question.options
+                        ],
+                        ensure_ascii=False,
+                    ),
+                    question.multi_select,
+                    _now(),
+                ),
+            )
+
+    def get_pending_question(self, pane_id: str) -> PendingQuestion | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM pending_questions WHERE pane_id = ?", (pane_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            raw_options = json.loads(row["options_json"])
+            options = tuple(
+                QuestionOption(
+                    label=str(option["label"]),
+                    description=(
+                        str(option["description"])
+                        if option.get("description") is not None
+                        else None
+                    ),
+                )
+                for option in raw_options
+                if isinstance(option, dict) and isinstance(option.get("label"), str)
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not options:
+            return None
+        return PendingQuestion(
+            pane_id=str(row["pane_id"]),
+            event_id=str(row["event_id"]),
+            prompt=str(row["prompt"]),
+            options=options,
+            multi_select=bool(row["multi_select"]),
+        )
+
+    def clear_pending_question(self, pane_id: str, *, event_id: str | None = None) -> None:
+        with self._connect() as conn:
+            if event_id is None:
+                conn.execute("DELETE FROM pending_questions WHERE pane_id = ?", (pane_id,))
+            else:
+                conn.execute(
+                    "DELETE FROM pending_questions WHERE pane_id = ? AND event_id = ?",
+                    (pane_id, event_id),
+                )
 
     def upsert_agent_thread(
         self,

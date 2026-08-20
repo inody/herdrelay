@@ -16,13 +16,15 @@ MARKER = "herdrelay-claude-stop-hook"
 DEFAULT_SETTINGS = Path("~/.claude/settings.json").expanduser()
 
 
-def hook_entry(hook_script: Path) -> dict[str, object]:
-    command = (
-        f"/usr/bin/env python3 {shlex.quote(str(hook_script))} --agent claude"
-        f" # {MARKER}"
-    )
+def hook_entry(hook_script: Path, *, event_name: str) -> dict[str, object]:
+    command = f"/usr/bin/env python3 {shlex.quote(str(hook_script))} --agent claude"
+    matcher = "*"
+    if event_name == "PreToolUse":
+        command += " --event question"
+        matcher = "AskUserQuestion"
+    command += f" # {MARKER}"
     return {
-        "matcher": "*",
+        "matcher": matcher,
         "hooks": [{"type": "command", "command": command, "timeout": 5}],
     }
 
@@ -50,26 +52,27 @@ def update_settings(
         settings["hooks"] = hooks
     if not isinstance(hooks, dict):
         raise ValueError("settings.json field 'hooks' must be an object")
-    stop = hooks.get("Stop")
-    if stop is None:
-        if not install:
-            return False
-        stop = []
-        hooks["Stop"] = stop
-    if not isinstance(stop, list):
-        raise ValueError("settings.json field 'hooks.Stop' must be an array")
 
-    filtered = [group for group in stop if not is_herdrelay_group(group)]
-    if install:
-        filtered.append(hook_entry(hook_script))
-    changed = filtered != stop
-    if changed:
-        if filtered:
-            hooks["Stop"] = filtered
-        else:
-            hooks.pop("Stop", None)
-            if not hooks:
-                settings.pop("hooks", None)
+    changed = False
+    for event_name in ("Stop", "PreToolUse"):
+        groups = hooks.get(event_name)
+        if groups is None:
+            if not install:
+                continue
+            groups = []
+        if not isinstance(groups, list):
+            raise ValueError(f"settings.json field 'hooks.{event_name}' must be an array")
+        filtered = [group for group in groups if not is_herdrelay_group(group)]
+        if install:
+            filtered.append(hook_entry(hook_script, event_name=event_name))
+        if filtered != groups:
+            changed = True
+            if filtered:
+                hooks[event_name] = filtered
+            else:
+                hooks.pop(event_name, None)
+    if not hooks:
+        settings.pop("hooks", None)
     return changed
 
 

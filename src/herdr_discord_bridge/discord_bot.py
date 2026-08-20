@@ -20,7 +20,8 @@ from .formatter import (
     truncate,
 )
 from .herdr_client import HerdrClient, TargetResolutionError
-from .models import AuditEntry, HerdrTarget
+from .models import AuditEntry, HerdrTarget, PendingQuestion
+from .questions import parse_question_answer, selected_labels, selection_keys
 from .security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
 from .streams import StreamManager
@@ -82,6 +83,7 @@ class HerdrDiscordBot(commands.Bot):
                 config=self.config,
                 store=self.store,
                 client=self.client,
+                question_view_factory=self._question_view_for_event,
             )
             self._stream_task = asyncio.create_task(self.stream_manager.run_forever())
             LOG.info("Started output relay")
@@ -124,6 +126,10 @@ class HerdrDiscordBot(commands.Bot):
         await super().close()
 
     def _card_view_for_event(self, target: str) -> discord.ui.View | None:
+        if self.store.get_pending_question(target) is not None:
+            # Claude question choices use their own view; a generic Enter button
+            # would silently choose the first option.
+            return None
         try:
             target_info = self.client.resolve_target(target)
         except Exception:
@@ -136,6 +142,9 @@ class HerdrDiscordBot(commands.Bot):
             target_str=target,
             target_info=target_info,
         )
+
+    def _question_view_for_event(self, question: PendingQuestion) -> discord.ui.View:
+        return QuestionChoiceView(bot=self, question=question)
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
@@ -171,13 +180,25 @@ class HerdrDiscordBot(commands.Bot):
             payload_preview=truncate(content, max_chars=200),
         )
         try:
-            self.security.ensure_send_allowed(message.author.id, location, content)
-            keys = _parse_special_keys(content)
-            if keys is not None:
-                await asyncio.to_thread(self.client.send_keys, binding.herdr_target, keys)
-                audit_fields["action"] = "key_send"
+            pending_question = self.store.get_pending_question(binding.herdr_target)
+            if pending_question is not None and content.isdecimal():
+                selected = parse_question_answer(content, pending_question)
+                if selected is None:
+                    raise ApprovalError(
+                        f"Choose a number from 1 to {len(pending_question.options)}."
+                    )
+                self.security.ensure_approve_allowed(message.author.id, location)
+                labels = await self._answer_pending_question(pending_question, selected)
+                audit_fields["action"] = "question_select"
+                audit_fields["payload_preview"] = labels
             else:
-                await asyncio.to_thread(self.client.send, binding.herdr_target, content)
+                self.security.ensure_send_allowed(message.author.id, location, content)
+                keys = _parse_special_keys(content)
+                if keys is not None:
+                    await asyncio.to_thread(self.client.send_keys, binding.herdr_target, keys)
+                    audit_fields["action"] = "key_send"
+                else:
+                    await asyncio.to_thread(self.client.send, binding.herdr_target, content)
             self.store.add_audit(AuditEntry(result="ok", **audit_fields))
             await _react(message, "✅")
         except Exception as exc:
@@ -186,6 +207,20 @@ class HerdrDiscordBot(commands.Bot):
             )
             await _react(message, "⚠️")
         return True
+
+    async def _answer_pending_question(
+        self, question: PendingQuestion, selected: tuple[int, ...]
+    ) -> str:
+        current = self.store.get_pending_question(question.pane_id)
+        if current is None or current.event_id != question.event_id:
+            raise ApprovalError("This question is no longer pending.")
+        target_info = await asyncio.to_thread(self.client.resolve_target, question.pane_id)
+        ensure_blocked_for_approval(target_info)
+        await asyncio.to_thread(
+            self.client.send_keys, question.pane_id, selection_keys(question, selected)
+        )
+        self.store.clear_pending_question(question.pane_id, event_id=question.event_id)
+        return selected_labels(question, selected)
 
     async def _handle_control_command(self, message: discord.Message) -> None:
         content = message.content
@@ -409,6 +444,70 @@ def _parse_special_keys(content: str) -> tuple[str, ...] | None:
 
 
 CARD_TIMEOUT_SECONDS = 600
+QUESTION_COMPONENT_MAX_OPTIONS = 25
+
+
+class QuestionChoiceView(discord.ui.View):
+    def __init__(self, *, bot: HerdrDiscordBot, question: PendingQuestion):
+        super().__init__(timeout=CARD_TIMEOUT_SECONDS)
+        self.bot = bot
+        self.question = question
+        if not question.multi_select and len(question.options) <= 5:
+            for index, option in enumerate(question.options):
+                button = discord.ui.Button(
+                    label=_question_button_label(index, option.label),
+                    style=discord.ButtonStyle.primary,
+                )
+                button.callback = self._button_callback(index)
+                self.add_item(button)
+        elif len(question.options) <= QUESTION_COMPONENT_MAX_OPTIONS:
+            select = discord.ui.Select(
+                placeholder="Choose option(s)…",
+                min_values=1,
+                max_values=len(question.options) if question.multi_select else 1,
+                options=[
+                    discord.SelectOption(
+                        label=_question_button_label(index, option.label),
+                        value=str(index),
+                        description=(option.description or "")[:100] or None,
+                    )
+                    for index, option in enumerate(question.options)
+                ],
+            )
+            select.callback = self._select_callback
+            self.add_item(select)
+
+    def _button_callback(self, index: int):
+        async def callback(interaction: discord.Interaction) -> None:
+            await self._answer(interaction, (index,))
+
+        return callback
+
+    async def _select_callback(self, interaction: discord.Interaction) -> None:
+        values = self.children[0].values  # type: ignore[union-attr]
+        await self._answer(interaction, tuple(int(value) for value in values))
+
+    async def _answer(
+        self, interaction: discord.Interaction, selected: tuple[int, ...]
+    ) -> None:
+        try:
+            self.bot.security.ensure_approve_user_allowed(interaction.user.id)
+            labels = await self.bot._answer_pending_question(self.question, selected)
+            _audit_action(
+                self.bot,
+                interaction,
+                None,
+                "question_select",
+                self.question.pane_id,
+                "ok",
+                preview=labels,
+            )
+            for child in self.children:
+                child.disabled = True
+            await interaction.response.edit_message(view=self)
+            await interaction.followup.send(f"Selected: {labels}", ephemeral=True)
+        except Exception as exc:
+            await _send_error(interaction, exc)
 
 
 class TargetCardView(discord.ui.View):
@@ -440,6 +539,8 @@ class TargetCardView(discord.ui.View):
                 self.bot.security.ensure_approve_allowed(interaction.user.id, self.location)
             else:
                 self.bot.security.ensure_approve_user_allowed(interaction.user.id)
+            if self.bot.store.get_pending_question(self.target_str) is not None:
+                raise ApprovalError("Use the Claude question choices instead of Approve.")
             target_info = self.bot.client.resolve_target(self.target_str)
             ensure_blocked_for_approval(target_info)
             strategy = strategy_for(self.bot.config, target_info.agent_name)
@@ -634,6 +735,10 @@ def _location_from_message(message: discord.Message) -> DiscordLocation:
         channel_id=int(channel_id),
         thread_id=int(thread_id) if thread_id else None,
     )
+
+
+def _question_button_label(index: int, label: str) -> str:
+    return f"{index + 1}. {label}"[:80]
 
 
 async def _send_error(interaction: discord.Interaction, exc: Exception) -> None:

@@ -6,16 +6,18 @@ import json
 import logging
 from pathlib import Path
 import time
+from collections.abc import Callable
 
 import discord
 
 from .config import AppConfig
 from .formatter import split_tail_chunks, wrap_code_block
 from .herdr_client import HerdrClient
-from .models import HerdrTarget
+from .models import HerdrTarget, PendingQuestion, QuestionOption
 from .store import Store
 
 LOG = logging.getLogger(__name__)
+QUESTION_VIEW_FACTORY = Callable[[PendingQuestion], discord.ui.View | None]
 
 
 def compute_stream_diff(prev_tail: str | None, current_tail: str) -> str:
@@ -71,6 +73,8 @@ class HookOutputEvent:
     agent: str
     pane_id: str
     text: str
+    kind: str = "response"
+    question: PendingQuestion | None = None
 
 
 def load_hook_output_event(path: Path, *, max_bytes: int) -> HookOutputEvent:
@@ -87,7 +91,54 @@ def load_hook_output_event(path: Path, *, max_bytes: int) -> HookOutputEvent:
         raise ValueError("event_id, agent, pane_id, and text must be non-empty strings")
     if len(values["event_id"]) > 200 or len(values["agent"]) > 50:
         raise ValueError("event identifier or agent name is too long")
-    return HookOutputEvent(**values)
+    kind = payload.get("kind", "response")
+    if kind not in {"response", "question"}:
+        raise ValueError("unsupported event kind")
+    question = _load_question(payload.get("question"), pane_id=values["pane_id"], event_id=values["event_id"])
+    if kind == "question" and question is None:
+        raise ValueError("question event is missing a valid question")
+    return HookOutputEvent(**values, kind=kind, question=question)
+
+
+def _load_question(
+    value: object, *, pane_id: str, event_id: str
+) -> PendingQuestion | None:
+    if not isinstance(value, dict):
+        return None
+    prompt = value.get("prompt")
+    options_data = value.get("options")
+    if not isinstance(prompt, str) or not prompt.strip() or not isinstance(options_data, list):
+        return None
+    options = tuple(
+        QuestionOption(
+            label=option["label"].strip(),
+            description=(
+                option["description"].strip()
+                if isinstance(option.get("description"), str)
+                and option["description"].strip()
+                else None
+            ),
+        )
+        for option in options_data
+        if isinstance(option, dict)
+        and isinstance(option.get("label"), str)
+        and option["label"].strip()
+    )
+    if not options:
+        return None
+    return PendingQuestion(
+        pane_id=pane_id,
+        event_id=event_id,
+        prompt=prompt.strip(),
+        options=options,
+        multi_select=value.get("multi_select") is True,
+    )
+
+
+def _hook_event_text(event: HookOutputEvent) -> str:
+    if event.kind == "question":
+        return f"[Claude asks]\n{event.text}"
+    return event.text
 
 
 class StreamManager:
@@ -100,11 +151,13 @@ class StreamManager:
         config: AppConfig,
         store: Store,
         client: HerdrClient,
+        question_view_factory: QUESTION_VIEW_FACTORY | None = None,
     ):
         self.bot = bot
         self.config = config
         self.store = store
         self.client = client
+        self.question_view_factory = question_view_factory
         self._stopped = asyncio.Event()
         self._prev_recent: dict[str, str] = {}
         self._prev_visible: dict[str, str] = {}
@@ -197,9 +250,23 @@ class StreamManager:
             thread = await self._fetch_thread(int(thread_id))
             if thread is None:
                 continue
-            if not await self._send_diff(thread, thread_id, event.text):
+            if event.kind == "question" and event.question is not None:
+                self.store.upsert_pending_question(event.question)
+                view = (
+                    self.question_view_factory(event.question)
+                    if self.question_view_factory
+                    else None
+                )
+                delivered = await self._send_text(
+                    thread, thread_id, _hook_event_text(event), view=view
+                )
+            else:
+                delivered = await self._send_diff(thread, thread_id, event.text)
+            if not delivered:
                 continue
             self.store.mark_event_seen(dedupe_key)
+            if event.kind == "response":
+                self.store.clear_pending_question(event.pane_id)
             await asyncio.to_thread(path.unlink, missing_ok=True)
             LOG.info("Delivered %s hook output for pane %s", event.agent, event.pane_id)
 
@@ -302,9 +369,21 @@ class StreamManager:
     async def _send_diff(
         self, thread: discord.Thread, thread_id: int | str, diff: str
     ) -> bool:
-        for chunk in split_tail_chunks(diff, max_chars=self.config.max_output_chars):
+        return await self._send_text(thread, thread_id, diff)
+
+    async def _send_text(
+        self,
+        thread: discord.Thread,
+        thread_id: int | str,
+        text: str,
+        *,
+        view: discord.ui.View | None = None,
+    ) -> bool:
+        for index, chunk in enumerate(
+            split_tail_chunks(text, max_chars=self.config.max_output_chars)
+        ):
             try:
-                await thread.send(wrap_code_block(chunk))
+                await thread.send(wrap_code_block(chunk), view=view if index == 0 else None)
             except discord.HTTPException:
                 LOG.warning("Failed to post stream chunk to thread %s", thread_id)
                 return False

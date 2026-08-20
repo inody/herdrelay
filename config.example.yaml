@@ -35,6 +35,7 @@ watcher:
   reconnect_delay_seconds: 5
   resubscribe_interval_seconds: 300
   include_output: true
+  blocked_notification_delay_seconds: 1.5 # lets agent question hooks arrive first
   blocked_tail_lines: 80
   done_tail_lines: 60
 dangerous_text_blocklist:

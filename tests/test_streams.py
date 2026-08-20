@@ -7,6 +7,7 @@ from herdr_discord_bridge.config import AppConfig, StreamConfig
 from herdr_discord_bridge.store import Store
 from herdr_discord_bridge.streams import (
     StreamManager,
+    _hook_event_text,
     _last_lines,
     compute_stream_diff,
     load_hook_output_event,
@@ -89,6 +90,31 @@ def test_load_hook_output_event(tmp_path):
     assert event.agent == "claude"
     assert event.pane_id == "w1:p1"
     assert event.text == "complete response"
+
+
+def test_question_hook_event_is_labeled_for_discord(tmp_path):
+    path = tmp_path / "question.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "event_id": "question-1",
+                "agent": "claude",
+                "pane_id": "w1:p1",
+                "kind": "question",
+                "question": {
+                    "prompt": "Which option?",
+                    "options": [{"label": "One"}, {"label": "Two"}],
+                    "multi_select": False,
+                },
+                "text": "Which option?",
+            }
+        )
+    )
+
+    event = load_hook_output_event(path, max_bytes=1000)
+
+    assert _hook_event_text(event) == "[Claude asks]\nWhich option?"
 
 
 def test_load_hook_output_event_rejects_oversize_file(tmp_path):

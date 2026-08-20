@@ -24,7 +24,8 @@ Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
   The thread is auto-bound to its pane.
 - **Output relay**: agent adapters post completed responses into the bound
   thread. Claude Code and Codex use Stop hooks; Pi uses an `agent_settled`
-  extension. None of these adapters reads terminal contents.
+  extension. Claude's `AskUserQuestion` prompt and choices are also posted
+  before its approval card. None of these adapters reads terminal contents.
 - **Thread post send**: any normal message posted in a bound thread is sent to
   its pane (no need to reply — just type).
 - **Approvals**: blocked panes post an approval card (Approve / Deny buttons,
@@ -198,6 +199,7 @@ watcher:
   reconnect_delay_seconds: 5
   resubscribe_interval_seconds: 300
   include_output: true         # read and attach a tail to status notifications
+  blocked_notification_delay_seconds: 1.5 # lets question hooks arrive first
   blocked_tail_lines: 80
   done_tail_lines: 60
 
@@ -293,9 +295,11 @@ Hook mode is agent-neutral. An adapter atomically places a `.json` file in
 
 HerdRelay handles pane/thread lookup, Discord chunking, retries, and persistent
 deduplication. `scripts/agent_stop_hook.py` handles Claude Code and Codex Stop
-events; `integrations/pi-herdrelay-output.ts` handles Pi's `agent_settled`
-event. Additional agents can use the same protocol without changing the
-Discord relay or reading terminal contents.
+events and Claude `AskUserQuestion` prompts. Single-choice questions become
+choice buttons (and accept a matching numeric thread post such as `2`); multiple
+choices use a Discord select menu. `integrations/pi-herdrelay-output.ts` handles
+Pi's `agent_settled` event. Additional agents can use the same protocol without
+changing the Discord relay or reading terminal contents.
 
 ### Herdr 0.8 fullscreen redraw workaround
 
