@@ -12,10 +12,49 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
 DEFAULT_INBOX = "~/.cache/herdrelay/agent-output"
+
+
+def resolve_pane_id(
+    environ: dict[str, str], *, allow_herdr_lookup: bool = False, cwd: object = None
+) -> str:
+    """Find the Herdr pane that owns a hook invocation.
+
+    A standalone agent inherits ``HERDR_PANE_ID``. Codex's shared app-server
+    does not, so when its current working directory identifies exactly one
+    Codex pane, use Herdr's metadata (never terminal output) as a fallback.
+    """
+    pane_id = environ.get("HERDR_PANE_ID", "").strip()
+    if pane_id or not allow_herdr_lookup or not isinstance(cwd, str) or not cwd:
+        return pane_id
+    try:
+        result = subprocess.run(
+            ["herdr", "pane", "list"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        payload = json.loads(result.stdout)
+        panes = payload.get("result", {}).get("panes", [])
+        target_cwd = str(Path(cwd).resolve())
+        matches = [
+            pane.get("pane_id", "")
+            for pane in panes
+            if isinstance(pane, dict)
+            and pane.get("agent") == "codex"
+            and isinstance(pane.get("cwd"), str)
+            and str(Path(pane["cwd"]).resolve()) == target_cwd
+            and isinstance(pane.get("pane_id"), str)
+            and pane["pane_id"].strip()
+        ]
+        return matches[0] if len(matches) == 1 else ""
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return ""
 
 
 def build_event(
@@ -23,7 +62,11 @@ def build_event(
 ) -> dict[str, object] | None:
     if not isinstance(data, dict) or data.get("hook_event_name") != "Stop":
         return None
-    pane_id = environ.get("HERDR_PANE_ID", "").strip()
+    pane_id = resolve_pane_id(
+        environ,
+        allow_herdr_lookup=agent == "codex",
+        cwd=data.get("cwd"),
+    )
     message = data.get("last_assistant_message")
     session_id = data.get("session_id")
     if not pane_id or not isinstance(message, str) or not message.strip():
@@ -56,7 +99,7 @@ def build_question_event(
         return None
     if data.get("tool_name") != "AskUserQuestion":
         return None
-    pane_id = environ.get("HERDR_PANE_ID", "").strip()
+    pane_id = resolve_pane_id(environ)
     tool_input = data.get("tool_input")
     text = format_ask_user_question(tool_input)
     question = first_ask_user_question(tool_input)

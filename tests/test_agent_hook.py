@@ -4,6 +4,7 @@ import stat
 import sys
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+import agent_stop_hook  # noqa: E402
 from agent_stop_hook import (  # noqa: E402
     build_event,
     build_question_event,
@@ -47,6 +48,29 @@ def test_build_event_supports_codex_stop_payload(tmp_path):
     assert event is not None
     assert event["agent"] == "codex"
     assert event["text"] == "Codex response"
+
+
+def test_codex_event_finds_unique_pane_with_herdr_metadata(tmp_path, monkeypatch):
+    class Result:
+        stdout = json.dumps(
+            {
+                "result": {
+                    "panes": [
+                        {"pane_id": "wM:p3", "agent": "codex", "cwd": "/work/project"},
+                        {"pane_id": "wM:p2", "agent": "claude", "cwd": "/work/project"},
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr(agent_stop_hook.subprocess, "run", lambda *args, **kwargs: Result())
+    data = stop_input(tmp_path)
+    data["cwd"] = "/work/project"
+
+    event = build_event(data, {}, agent="codex")
+
+    assert event is not None
+    assert event["pane_id"] == "wM:p3"
 
 
 def test_build_question_event_formats_claude_ask_user_question():
