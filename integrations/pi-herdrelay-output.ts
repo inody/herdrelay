@@ -50,6 +50,10 @@ export default function (pi: ExtensionAPI) {
   let pending: PendingResponse | undefined;
   let deliveredEventId: string | undefined;
 
+  pi.on("before_agent_start", (event) => ({
+    systemPrompt: `${event.systemPrompt}\n\n## HerdRelay remote-question policy\nThis Pi session runs through HerdRelay and Discord. When a decision, clarification, or permission is needed, do not perform the dependent action. Instead, finish the current turn with a concise ordinary assistant message containing the question, relevant context, and numbered options when useful. Explicitly ask the user to reply in the Discord thread, then wait for that next message.`,
+  }));
+
   pi.on("message_end", (event, ctx) => {
     if (ctx.hasUI !== true) return;
     const text = assistantText(event.message);
