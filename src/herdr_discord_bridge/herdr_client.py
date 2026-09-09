@@ -39,6 +39,27 @@ class HerdrClient:
                 workspace_labels=workspace_labels,
             )
 
+    def list_panes(self) -> list[HerdrTarget]:
+        """List all live panes, including shells without a detected agent.
+
+        Reject malformed snapshots: callers use absence here to archive threads.
+        """
+        payload = self.cli.pane_list()
+        result = payload.get("result", payload) if isinstance(payload, dict) else payload
+        items = result.get("panes") if isinstance(result, dict) else result
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("pane_id"), str)
+            or not item["pane_id"].strip()
+            for item in items
+        ):
+            raise HerdrCliError("Herdr did not return a valid pane list")
+        return normalize_targets(
+            items,
+            preferred_kind="pane",
+            workspace_labels=self.list_workspaces(),
+        )
+
     def list_workspaces(self) -> dict[str, str]:
         """Return a mapping of workspace_id -> human-readable label."""
         try:

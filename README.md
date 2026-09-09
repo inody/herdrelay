@@ -19,9 +19,11 @@ Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
         ←── approvals/denies ─  card buttons
 ```
 
-- **Auto threads**: each Herdr pane gets one Discord thread under
-  `thread_parent_channel_id`, named `alias/agent` (prefixed `🔴` while blocked).
-  The thread is auto-bound to its pane.
+- **Auto threads**: each Herdr pane with a detected agent gets one Discord
+  thread under `thread_parent_channel_id`, named `alias/agent` (prefixed `🔴`
+  while blocked). The thread is auto-bound to its pane. Existing threads and
+  their names survive agent exits or detection loss while the pane remains;
+  empty shells do not create new threads.
 - **Output relay**: agent adapters post completed responses into the bound
   thread. Claude Code and Codex use Stop hooks; Pi uses an `agent_settled`
   extension. In Herdr Pi sessions, important questions are ordinary text replies
@@ -280,7 +282,7 @@ three gzip-compressed backups.
 ## Operational notes
 
 - `.env`, `config.yaml`, and the SQLite database are gitignored.
-- Sending uses the Herdr 0.8 CLI (`agent prompt`). Hook-mode output relay does
+- Sending uses the Herdr 0.8/0.9 CLI (`agent prompt`). Hook-mode output relay does
   not call `pane read` or `agent read`. The optional legacy `poll` mode does,
   and its `visible` fallback can capture pager/TUI output such as `/usage`.
   Status notifications use the raw socket API.
@@ -288,6 +290,17 @@ three gzip-compressed backups.
   changes do not rename threads (Discord rate-limits channel edits).
 - Notification dedupe is stored in SQLite using `pane_id + status + tail hash`.
 - Pane ↔ thread mappings are stored in SQLite (`agent_threads`).
+- Thread archival uses a successful `pane list` snapshot, not the detected-agent
+  list. A restart that restores shells without agents does not change their
+  threads' names or archive states. Previously archived threads are reactivated
+  only when an agent returns. Failed or malformed pane snapshots do not trigger
+  archival. Once an agent returns, its existing thread is reused.
+- Status subscriptions include existing shell panes so agents launched there
+  later are monitored. With no panes, the watcher waits and retries without
+  sending an empty subscription or logging repeated crash tracebacks.
+- This does not restart agents or enable shell input: with
+  `allow_pane_send_fallback: false`, ordinary messages still require an agent.
+  After a Herdr restart, resume agents in their existing panes as needed.
 
 ### Agent output adapters
 

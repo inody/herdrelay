@@ -67,7 +67,9 @@ class ThreadManager:
 
     async def sync(self) -> None:
         parent = await self._parent_channel()
-        targets = await asyncio.to_thread(self.client.list_targets)
+        # Agent exit or temporary detection loss does not close the pane.
+        # A failed pane snapshot propagates before any Discord mutations.
+        targets = await asyncio.to_thread(self.client.list_panes)
         active_pane_ids = {t.target for t in targets if t.target}
         for target in targets:
             if not target.target:
@@ -79,6 +81,10 @@ class ThreadManager:
         await self._archive_stale_threads(parent, active_pane_ids)
 
     async def _sync_target(self, parent: discord.TextChannel, target: HerdrTarget) -> None:
+        # Keep existing names, bindings, and archive states while the pane is a
+        # shell. Only a detected agent should create or reactivate a thread.
+        if not target.agent_name:
+            return
         pane_id = target.target
         name = thread_name(target)
         alias = target_alias(target)

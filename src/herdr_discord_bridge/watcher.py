@@ -49,6 +49,7 @@ class EventWatcher:
         self.client = client
         self.card_view_factory = card_view_factory
         self._stopped = asyncio.Event()
+        self._waiting_for_panes = False
 
     def stop(self) -> None:
         self._stopped.set()
@@ -64,13 +65,20 @@ class EventWatcher:
                 await self._sleep_reconnect()
 
     async def _run_once(self) -> None:
+        subscriptions = await asyncio.to_thread(
+            build_agent_status_subscriptions, self.client, self.config
+        )
+        if not subscriptions:
+            if not self._waiting_for_panes:
+                LOG.info("No Herdr panes to watch; waiting for panes")
+            self._waiting_for_panes = True
+            await self._sleep_reconnect()
+            return
+        self._waiting_for_panes = False
         socket_path = resolve_socket_path(self.config)
         LOG.info("Connecting Herdr event watcher to %s", socket_path)
         reader, writer = await asyncio.open_unix_connection(socket_path)
         try:
-            subscriptions = await asyncio.to_thread(
-                build_agent_status_subscriptions, self.client, self.config
-            )
             request = {
                 "id": "discord_bridge_events",
                 "method": "events.subscribe",
@@ -217,7 +225,9 @@ def resolve_socket_path(config: AppConfig) -> str:
 def build_agent_status_subscriptions(client: HerdrClient, config: AppConfig) -> list[dict[str, str]]:
     statuses = tuple(status.casefold() for status in config.watcher.statuses)
     subscriptions = []
-    for target in client.list_targets():
+    # Subscribe before agent detection so later launches in existing shells
+    # are covered even when periodic resubscription is disabled.
+    for target in client.list_panes():
         if not target.target:
             continue
         for status in statuses:
@@ -228,8 +238,6 @@ def build_agent_status_subscriptions(client: HerdrClient, config: AppConfig) -> 
                     "agent_status": status,
                 }
             )
-    if not subscriptions:
-        raise RuntimeError("No Herdr targets available for event subscriptions")
     return subscriptions
 
 

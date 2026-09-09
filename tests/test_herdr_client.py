@@ -1,4 +1,9 @@
+from unittest.mock import Mock
+
+import pytest
+
 from herdr_discord_bridge.config import AppConfig
+from herdr_discord_bridge.herdr_cli import HerdrCliError
 from herdr_discord_bridge.herdr_client import HerdrClient, normalize_targets
 
 
@@ -124,6 +129,59 @@ def test_list_targets_attaches_workspace_labels():
     assert targets["w1:p1"].workspace_label == "cbo_mppi"
     assert targets["w7:p3"].workspace_label == "herdr-chat-bridge"
     assert targets["w7:p3"].status == "blocked"
+
+
+def test_list_panes_includes_shells_without_querying_agent_list():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    client.cli = Mock()
+    client.cli.workspace_list.return_value = {
+        "result": {"workspaces": [{"workspace_id": "w1", "label": "project"}]}
+    }
+    client.cli.pane_list.return_value = {"result": {"panes": [
+        {"pane_id": "w1:p1", "workspace_id": "w1", "agent": None, "agent_status": "unknown"},
+        {"pane_id": "w1:p2", "workspace_id": "w1", "agent": "pi", "agent_status": "idle"},
+    ]}}
+
+    targets = client.list_panes()
+
+    assert [target.target for target in targets] == ["w1:p1", "w1:p2"]
+    assert targets[0].agent_name is None
+    assert targets[0].workspace_label == "project"
+    assert targets[1].agent_name == "pi"
+    client.cli.agent_list.assert_not_called()
+
+
+def test_list_panes_accepts_successful_empty_snapshot():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    client.cli = Mock()
+    client.cli.pane_list.return_value = {"result": {"panes": []}}
+    client.cli.workspace_list.return_value = {"result": {"workspaces": []}}
+
+    assert client.list_panes() == []
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"result": {}}, {"result": {"agents": []}},
+    {"result": {"panes": None}}, {"error": {"code": "server_not_running"}},
+    {"result": {"panes": [{"agent": "pi"}]}},
+    {"result": {"panes": [None]}}, {"result": {"panes": [{"pane_id": " "}]}},
+])
+def test_list_panes_rejects_invalid_snapshot_instead_of_reporting_all_panes_gone(payload):
+    client = HerdrClient(AppConfig(discord_token="token"))
+    client.cli = Mock()
+    client.cli.pane_list.return_value = payload
+
+    with pytest.raises(HerdrCliError, match="valid pane list"):
+        client.list_panes()
+
+
+def test_list_panes_propagates_cli_failure():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    client.cli = Mock()
+    client.cli.pane_list.side_effect = HerdrCliError("socket unavailable")
+
+    with pytest.raises(HerdrCliError, match="socket unavailable"):
+        client.list_panes()
 
 
 class ReadFakeCli:
