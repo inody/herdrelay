@@ -350,6 +350,19 @@ class Store:
                     (pane_id, event_id),
                 )
 
+    def clear_pending_questions_except(self, pane_ids: set[str]) -> None:
+        """Drop pending questions for panes that no longer exist."""
+        with self._connect() as conn:
+            stale = [
+                row["pane_id"]
+                for row in conn.execute("SELECT pane_id FROM pending_questions")
+                if row["pane_id"] not in pane_ids
+            ]
+            conn.executemany(
+                "DELETE FROM pending_questions WHERE pane_id = ?",
+                [(pane_id,) for pane_id in stale],
+            )
+
     def upsert_agent_thread(
         self,
         *,

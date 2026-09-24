@@ -16,17 +16,27 @@ MARKER = "herdrelay-claude-stop-hook"
 DEFAULT_SETTINGS = Path("~/.claude/settings.json").expanduser()
 
 
+# Claude hook event -> (matcher, hook --event). UserPromptSubmit has no matcher.
+HOOK_EVENTS: dict[str, tuple[str | None, str]] = {
+    "Stop": ("*", "stop"),
+    "PreToolUse": ("AskUserQuestion", "question"),
+    "PostToolUse": ("AskUserQuestion", "question-resolved"),
+    "UserPromptSubmit": (None, "question-resolved"),
+}
+
+
 def hook_entry(hook_script: Path, *, event_name: str) -> dict[str, object]:
+    matcher, relay_event = HOOK_EVENTS[event_name]
     command = f"/usr/bin/env python3 {shlex.quote(str(hook_script))} --agent claude"
-    matcher = "*"
-    if event_name == "PreToolUse":
-        command += " --event question"
-        matcher = "AskUserQuestion"
+    if relay_event != "stop":
+        command += f" --event {relay_event}"
     command += f" # {MARKER}"
-    return {
-        "matcher": matcher,
+    entry: dict[str, object] = {
         "hooks": [{"type": "command", "command": command, "timeout": 5}],
     }
+    if matcher is not None:
+        entry = {"matcher": matcher, **entry}
+    return entry
 
 
 def is_herdrelay_group(value: object) -> bool:
@@ -54,7 +64,7 @@ def update_settings(
         raise ValueError("settings.json field 'hooks' must be an object")
 
     changed = False
-    for event_name in ("Stop", "PreToolUse"):
+    for event_name in HOOK_EVENTS:
         groups = hooks.get(event_name)
         if groups is None:
             if not install:

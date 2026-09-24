@@ -125,6 +125,43 @@ def build_question_event(
     }
 
 
+def build_question_resolved_event(
+    data: object, environ: dict[str, str]
+) -> dict[str, object] | None:
+    """Build a relay event saying the pane's Claude question is no longer open.
+
+    PostToolUse fires once AskUserQuestion is answered in any way. A rejected
+    question never reaches PostToolUse, so UserPromptSubmit also resolves it.
+    """
+    if not isinstance(data, dict):
+        return None
+    event_name = data.get("hook_event_name")
+    if event_name == "PostToolUse":
+        if data.get("tool_name") != "AskUserQuestion":
+            return None
+    elif event_name != "UserPromptSubmit":
+        return None
+    pane_id = environ.get("HERDR_PANE_ID", "").strip()
+    if not pane_id:
+        return None
+    session_id = data.get("session_id")
+    if not isinstance(session_id, str):
+        session_id = ""
+    # Each resolution is a distinct occurrence, even for a repeated prompt.
+    identity = "\0".join(
+        ("claude-question-resolved", session_id, str(event_name), str(time.time_ns()))
+    )
+    return {
+        "version": 1,
+        "event_id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
+        "agent": "claude",
+        "pane_id": pane_id,
+        "session_id": session_id,
+        "kind": "question_resolved",
+        "created_at": time.time(),
+    }
+
+
 def first_ask_user_question(tool_input: object) -> dict[str, object] | None:
     if not isinstance(tool_input, dict):
         return None
@@ -236,15 +273,19 @@ def write_event(event: dict[str, object], inbox: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--agent", choices=("claude", "codex"), default="claude")
-    parser.add_argument("--event", choices=("stop", "question"), default="stop")
+    parser.add_argument(
+        "--event", choices=("stop", "question", "question-resolved"), default="stop"
+    )
     args, _unknown = parser.parse_known_args()
     try:
         data = json.load(sys.stdin)
-        event = (
-            build_question_event(data, dict(os.environ))
-            if args.event == "question"
-            else build_event(data, dict(os.environ), agent=args.agent)
-        )
+        environ = dict(os.environ)
+        if args.event == "question":
+            event = build_question_event(data, environ)
+        elif args.event == "question-resolved":
+            event = build_question_resolved_event(data, environ)
+        else:
+            event = build_event(data, environ, agent=args.agent)
         if event is not None:
             inbox = Path(
                 os.environ.get("HERDRELAY_HOOK_INBOX", DEFAULT_INBOX)

@@ -8,6 +8,7 @@ import agent_stop_hook  # noqa: E402
 from agent_stop_hook import (  # noqa: E402
     build_event,
     build_question_event,
+    build_question_resolved_event,
     format_ask_user_question,
     write_event,
 )
@@ -158,3 +159,53 @@ def test_install_and_uninstall_preserve_other_hooks(tmp_path):
     assert not update_settings(settings, install=True, hook_script=script)
     assert update_settings(settings, install=False, hook_script=script)
     assert settings["hooks"]["Stop"][0]["hooks"][0]["command"] == "echo existing"
+
+
+def test_answered_question_emits_resolution_event():
+    event = build_question_resolved_event(
+        {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "AskUserQuestion",
+            "session_id": "session-1",
+        },
+        {"HERDR_PANE_ID": "w1:p2"},
+    )
+
+    assert event is not None
+    assert event["kind"] == "question_resolved"
+    assert event["pane_id"] == "w1:p2"
+    assert "text" not in event
+
+
+def test_next_prompt_resolves_a_rejected_question():
+    data = {"hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "hi"}
+    first = build_question_resolved_event(data, {"HERDR_PANE_ID": "w1:p2"})
+    second = build_question_resolved_event(data, {"HERDR_PANE_ID": "w1:p2"})
+
+    assert first is not None and second is not None
+    # A repeated prompt must not be dropped as a duplicate delivery.
+    assert first["event_id"] != second["event_id"]
+
+
+def test_resolution_event_ignores_other_tools_and_panes_outside_herdr():
+    other_tool = {"hook_event_name": "PostToolUse", "tool_name": "Bash"}
+    prompt = {"hook_event_name": "UserPromptSubmit"}
+
+    assert build_question_resolved_event(other_tool, {"HERDR_PANE_ID": "w1:p2"}) is None
+    assert build_question_resolved_event(prompt, {}) is None
+
+
+def test_install_registers_question_resolution_hooks(tmp_path):
+    settings: dict = {}
+    script = tmp_path / "agent_stop_hook.py"
+
+    assert update_settings(settings, install=True, hook_script=script)
+
+    post = settings["hooks"]["PostToolUse"][0]
+    assert post["matcher"] == "AskUserQuestion"
+    assert "--event question-resolved" in post["hooks"][0]["command"]
+    prompt = settings["hooks"]["UserPromptSubmit"][0]
+    assert "matcher" not in prompt
+    assert "--event question-resolved" in prompt["hooks"][0]["command"]
+    assert update_settings(settings, install=False, hook_script=script)
+    assert "hooks" not in settings

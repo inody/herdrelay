@@ -144,7 +144,7 @@ allowlisted Discord user.
    python3 scripts/manage_codex_hook.py install
    ```
    Run `/reload` in existing Pi sessions. Restart existing Claude Code and
-   Codex sessions so they load their new Stop hooks. Each command also supports
+   Codex sessions so they load their new hooks. Each command also supports
    `uninstall`.
 
    Codex hooks are experimental and must be enabled in `~/.codex/config.toml`:
@@ -321,7 +321,10 @@ HerdRelay handles pane/thread lookup, Discord chunking, retries, and persistent
 deduplication. `scripts/agent_stop_hook.py` handles Claude Code and Codex Stop
 events and Claude `AskUserQuestion` prompts. Single-choice questions become
 choice buttons (and accept a matching numeric thread post such as `2`); multiple
-choices use a Discord select menu. `integrations/pi-herdrelay-output.ts` handles
+choices use a Discord select menu. Claude's `PostToolUse` and `UserPromptSubmit`
+hooks mark the question resolved, so a question answered in the terminal or
+dismissed with Esc stops capturing numeric thread posts and hiding Approve/Deny
+buttons. `integrations/pi-herdrelay-output.ts` handles
 Pi's `agent_settled` event. Pi asks in an ordinary final text response and
 waits for a Discord thread reply; this project does not depend on Pi's optional
 modal `ask_user` package. Codex hooks run in its shared app-server, which does

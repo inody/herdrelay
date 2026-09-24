@@ -4,6 +4,7 @@ import json
 import pytest
 
 from herdr_discord_bridge.config import AppConfig, StreamConfig
+from herdr_discord_bridge.models import PendingQuestion, QuestionOption
 from herdr_discord_bridge.store import Store
 from herdr_discord_bridge.streams import (
     StreamManager,
@@ -163,3 +164,90 @@ async def test_hook_event_is_delivered_once_and_removed(tmp_path, monkeypatch):
     assert store.has_event_key("agent-output:claude:turn-1")
     thread.send.assert_awaited_once()
     assert "complete response" in thread.send.await_args.args[0]
+
+
+def _hook_manager(tmp_path, inbox, store):
+    return StreamManager(
+        bot=None,  # type: ignore[arg-type]
+        config=AppConfig(
+            discord_token="token",
+            streaming=StreamConfig(mode="hooks", hook_inbox_path=str(inbox)),
+        ),
+        store=store,
+        client=None,  # type: ignore[arg-type]
+    )
+
+
+def _pending(pane_id="w1:p1", event_id="question-1"):
+    return PendingQuestion(
+        pane_id=pane_id,
+        event_id=event_id,
+        prompt="Which option?",
+        options=(QuestionOption("One"), QuestionOption("Two")),
+    )
+
+
+def _write_event(path, mtime_ns, **fields):
+    import os
+
+    path.write_text(json.dumps({"version": 1, "agent": "claude", **fields}))
+    os.utime(path, ns=(mtime_ns, mtime_ns))
+
+
+@pytest.mark.asyncio
+async def test_resolution_event_clears_pending_question_without_posting(tmp_path, monkeypatch):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    store = Store(tmp_path / "store.sqlite3")
+    store.upsert_pending_question(_pending())
+    _write_event(
+        inbox / "resolved.json",
+        1_000,
+        event_id="resolved-1",
+        pane_id="w1:p1",
+        kind="question_resolved",
+    )
+    manager = _hook_manager(tmp_path, inbox, store)
+    fetch_thread = AsyncMock()
+    monkeypatch.setattr(manager, "_fetch_thread", fetch_thread)
+
+    await manager._drain_hook_events(inbox)
+
+    assert store.get_pending_question("w1:p1") is None
+    fetch_thread.assert_not_awaited()
+    assert list(inbox.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_hook_events_are_processed_in_arrival_order(tmp_path, monkeypatch):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    store = Store(tmp_path / "store.sqlite3")
+    store.upsert_agent_thread(pane_id="w1:p1", thread_id=123, guild_id=456, alias="agent")
+    store.upsert_pending_question(_pending(event_id="old-question"))
+    # Name order is the reverse of arrival order: the resolution of the old
+    # question arrived first, then Claude asked a new one.
+    _write_event(
+        inbox / "b-resolved.json",
+        1_000,
+        event_id="resolved-1",
+        pane_id="w1:p1",
+        kind="question_resolved",
+    )
+    _write_event(
+        inbox / "a-question.json",
+        2_000,
+        event_id="new-question",
+        pane_id="w1:p1",
+        kind="question",
+        text="Which option?",
+        question={"prompt": "Which option?", "options": [{"label": "One"}]},
+    )
+    manager = _hook_manager(tmp_path, inbox, store)
+    monkeypatch.setattr(manager, "_fetch_thread", AsyncMock(return_value=AsyncMock()))
+
+    await manager._drain_hook_events(inbox)
+
+    pending = store.get_pending_question("w1:p1")
+    assert pending is not None
+    assert pending.event_id == "new-question"

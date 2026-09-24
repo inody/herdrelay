@@ -111,3 +111,21 @@ def test_agent_thread_upsert_and_get(tmp_path):
     store.upsert_agent_thread(pane_id="w7:p5", thread_id=222, guild_id=1, alias="herdr/claude")
 
     assert store.get_agent_thread("w7:p5") == "222"
+
+
+def test_pending_questions_for_closed_panes_are_cleared(tmp_path):
+    store = Store(tmp_path / "bridge.sqlite3")
+    for pane_id in ("w1:p1", "w2:p1"):
+        store.upsert_pending_question(
+            PendingQuestion(
+                pane_id=pane_id,
+                event_id=f"question-{pane_id}",
+                prompt="Choose",
+                options=(QuestionOption("One"),),
+            )
+        )
+
+    store.clear_pending_questions_except({"w1:p1"})
+
+    assert store.get_pending_question("w1:p1") is not None
+    assert store.get_pending_question("w2:p1") is None

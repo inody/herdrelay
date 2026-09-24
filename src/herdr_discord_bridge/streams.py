@@ -84,16 +84,19 @@ def load_hook_output_event(path: Path, *, max_bytes: int) -> HookOutputEvent:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or payload.get("version") != 1:
         raise ValueError("unsupported event format")
-    values = {
-        key: payload.get(key) for key in ("event_id", "agent", "pane_id", "text")
-    }
+    kind = payload.get("kind", "response")
+    if kind not in {"response", "question", "question_resolved"}:
+        raise ValueError("unsupported event kind")
+    # Resolution events carry no message; they only close a pending question.
+    required = ("event_id", "agent", "pane_id")
+    if kind != "question_resolved":
+        required += ("text",)
+    values = {key: payload.get(key) for key in required}
     if not all(isinstance(value, str) and value for value in values.values()):
-        raise ValueError("event_id, agent, pane_id, and text must be non-empty strings")
+        raise ValueError(f"{', '.join(required)} must be non-empty strings")
+    values.setdefault("text", "")
     if len(values["event_id"]) > 200 or len(values["agent"]) > 50:
         raise ValueError("event identifier or agent name is too long")
-    kind = payload.get("kind", "response")
-    if kind not in {"response", "question"}:
-        raise ValueError("unsupported event kind")
     question = _load_question(payload.get("question"), pane_id=values["pane_id"], event_id=values["event_id"])
     if kind == "question" and question is None:
         raise ValueError("question event is missing a valid question")
@@ -133,6 +136,20 @@ def _load_question(
         options=options,
         multi_select=value.get("multi_select") is True,
     )
+
+
+def _inbox_events_in_arrival_order(inbox: Path) -> list[Path]:
+    """List event files oldest first so a resolution never precedes its question.
+
+    Event file names are content hashes, so name order is arbitrary.
+    """
+    stamped: list[tuple[int, str, Path]] = []
+    for path in inbox.glob("*.json"):
+        try:
+            stamped.append((path.stat().st_mtime_ns, path.name, path))
+        except FileNotFoundError:
+            continue
+    return [path for _mtime, _name, path in sorted(stamped)]
 
 
 def _hook_event_text(event: HookOutputEvent) -> str:
@@ -212,7 +229,7 @@ class StreamManager:
                 pass
 
     async def _drain_hook_events(self, inbox: Path) -> None:
-        paths = await asyncio.to_thread(lambda: sorted(inbox.glob("*.json")))
+        paths = await asyncio.to_thread(_inbox_events_in_arrival_order, inbox)
         for path in paths:
             try:
                 event = await asyncio.to_thread(
@@ -229,6 +246,11 @@ class StreamManager:
 
             dedupe_key = f"agent-output:{event.agent}:{event.event_id}"
             if self.store.has_event_key(dedupe_key):
+                await asyncio.to_thread(path.unlink, missing_ok=True)
+                continue
+
+            if event.kind == "question_resolved":
+                self.store.clear_pending_question(event.pane_id)
                 await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue
 

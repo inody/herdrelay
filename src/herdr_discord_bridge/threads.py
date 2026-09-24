@@ -79,6 +79,7 @@ class ThreadManager:
             except Exception:
                 LOG.exception("Failed to sync thread for %s", target.target)
         await self._archive_stale_threads(parent, active_pane_ids)
+        self.store.clear_pending_questions_except(active_pane_ids)
 
     async def _sync_target(self, parent: discord.TextChannel, target: HerdrTarget) -> None:
         # Keep existing names, bindings, and archive states while the pane is a
