@@ -314,31 +314,13 @@ class Store:
             ).fetchone()
         if row is None:
             return None
-        try:
-            raw_options = json.loads(row["options_json"])
-            options = tuple(
-                QuestionOption(
-                    label=str(option["label"]),
-                    description=(
-                        str(option["description"])
-                        if option.get("description") is not None
-                        else None
-                    ),
-                )
-                for option in raw_options
-                if isinstance(option, dict) and isinstance(option.get("label"), str)
-            )
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return None
-        if not options:
-            return None
-        return PendingQuestion(
-            pane_id=str(row["pane_id"]),
-            event_id=str(row["event_id"]),
-            prompt=str(row["prompt"]),
-            options=options,
-            multi_select=bool(row["multi_select"]),
-        )
+        return _pending_question(row)
+
+    def list_pending_questions(self) -> list[PendingQuestion]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM pending_questions").fetchall()
+        questions = (_pending_question(row) for row in rows)
+        return [question for question in questions if question is not None]
 
     def clear_pending_question(self, pane_id: str, *, event_id: str | None = None) -> None:
         with self._connect() as conn:
@@ -401,6 +383,34 @@ class Store:
                 "SELECT pane_id, thread_id FROM agent_threads"
             ).fetchall()
         return {str(row["pane_id"]): str(row["thread_id"]) for row in rows}
+
+
+def _pending_question(row: sqlite3.Row) -> PendingQuestion | None:
+    try:
+        raw_options = json.loads(row["options_json"])
+        options = tuple(
+            QuestionOption(
+                label=str(option["label"]),
+                description=(
+                    str(option["description"])
+                    if option.get("description") is not None
+                    else None
+                ),
+            )
+            for option in raw_options
+            if isinstance(option, dict) and isinstance(option.get("label"), str)
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not options:
+        return None
+    return PendingQuestion(
+        pane_id=str(row["pane_id"]),
+        event_id=str(row["event_id"]),
+        prompt=str(row["prompt"]),
+        options=options,
+        multi_select=bool(row["multi_select"]),
+    )
 
 
 def _binding(row: sqlite3.Row) -> Binding:

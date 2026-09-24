@@ -77,6 +77,10 @@ class HerdrDiscordBot(commands.Bot):
             )
             self._thread_task = asyncio.create_task(self.thread_manager.run_forever())
             LOG.info("Started auto thread manager")
+        # Claude waits on a question indefinitely, so its choices must keep
+        # working after a restart.
+        for question in self.store.list_pending_questions():
+            self.add_view(QuestionChoiceView(bot=self, question=question))
         if self.config.enable_streaming:
             self.stream_manager = StreamManager(
                 bot=self,
@@ -466,20 +470,31 @@ QUESTION_COMPONENT_MAX_OPTIONS = 25
 
 
 class QuestionChoiceView(discord.ui.View):
+    """Choices for a pending Claude question.
+
+    The view never times out and uses custom IDs derived from the question, so
+    it can be re-registered after a restart: Claude waits for the answer as
+    long as it takes, and an expired view makes Discord fail every click
+    without reaching the bot.
+    """
+
     def __init__(self, *, bot: HerdrDiscordBot, question: PendingQuestion):
-        super().__init__(timeout=CARD_TIMEOUT_SECONDS)
+        super().__init__(timeout=None)
         self.bot = bot
         self.question = question
+        id_prefix = f"herdrelay:question:{question.event_id[:64]}"
         if not question.multi_select and len(question.options) <= 5:
             for index, option in enumerate(question.options):
                 button = discord.ui.Button(
                     label=_question_button_label(index, option.label),
                     style=discord.ButtonStyle.primary,
+                    custom_id=f"{id_prefix}:{index}",
                 )
                 button.callback = self._button_callback(index)
                 self.add_item(button)
         elif len(question.options) <= QUESTION_COMPONENT_MAX_OPTIONS:
             select = discord.ui.Select(
+                custom_id=f"{id_prefix}:select",
                 placeholder="Choose option(s)…",
                 min_values=1,
                 max_values=len(question.options) if question.multi_select else 1,
@@ -522,6 +537,7 @@ class QuestionChoiceView(discord.ui.View):
             )
             for child in self.children:
                 child.disabled = True
+            self.stop()
             await interaction.response.edit_message(view=self)
             await interaction.followup.send(f"Selected: {labels}", ephemeral=True)
         except Exception as exc:

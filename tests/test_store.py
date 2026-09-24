@@ -129,3 +129,18 @@ def test_pending_questions_for_closed_panes_are_cleared(tmp_path):
 
     assert store.get_pending_question("w1:p1") is not None
     assert store.get_pending_question("w2:p1") is None
+
+
+def test_list_pending_questions_returns_every_pane(tmp_path):
+    store = Store(tmp_path / "bridge.sqlite3")
+    for pane_id in ("w1:p1", "w2:p1"):
+        store.upsert_pending_question(
+            PendingQuestion(
+                pane_id=pane_id,
+                event_id=f"question-{pane_id}",
+                prompt="Choose",
+                options=(QuestionOption("One"),),
+            )
+        )
+
+    assert {q.pane_id for q in store.list_pending_questions()} == {"w1:p1", "w2:p1"}
