@@ -193,9 +193,18 @@ class HerdrDiscordBot(commands.Bot):
                 audit_fields["payload_preview"] = labels
             else:
                 self.security.ensure_send_allowed(message.author.id, location, content)
-                keys = _parse_special_keys(content)
-                if keys is not None:
-                    await asyncio.to_thread(self.client.send_keys, binding.herdr_target, keys)
+                key_name = _special_key_name(content)
+                if key_name in SPECIAL_KEYS:
+                    await asyncio.to_thread(
+                        self.client.send_keys, binding.herdr_target, SPECIAL_KEYS[key_name]
+                    )
+                    audit_fields["action"] = "key_send"
+                elif key_name in SPECIAL_KEY_SEQUENCES:
+                    await asyncio.to_thread(
+                        self.client.send_raw_text,
+                        binding.herdr_target,
+                        SPECIAL_KEY_SEQUENCES[key_name],
+                    )
                     audit_fields["action"] = "key_send"
                 else:
                     await asyncio.to_thread(self.client.send, binding.herdr_target, content)
@@ -429,18 +438,27 @@ SPECIAL_KEYS: dict[str, tuple[str, ...]] = {
     "ctrlc": ("C-c",),
     "backspace": ("BS",),
     "bs": ("BS",),
-    "pgup": ("PageUp",),
-    "pgdn": ("PageDown",),
-    "home": ("Home",),
-    "end": ("End",),
+}
+
+# Herdr 0.9 has no key names for these, so send the terminal's own escape
+# sequences as text. Herdr does not wrap send-text in bracketed paste, so TUIs
+# receive them as key presses.
+SPECIAL_KEY_SEQUENCES: dict[str, str] = {
+    "pgup": "\x1b[5~",
+    "pgdn": "\x1b[6~",
+    "home": "\x1b[H",
+    "end": "\x1b[F",
 }
 
 
-def _parse_special_keys(content: str) -> tuple[str, ...] | None:
-    """Return key sequence if *content* is a special-key command (!esc, etc.)."""
+def _special_key_name(content: str) -> str | None:
+    """Return the special-key name if *content* is a command like ``!esc``."""
     if not content.startswith("!"):
         return None
-    return SPECIAL_KEYS.get(content[1:].strip().lower())
+    name = content[1:].strip().lower()
+    if name in SPECIAL_KEYS or name in SPECIAL_KEY_SEQUENCES:
+        return name
+    return None
 
 
 CARD_TIMEOUT_SECONDS = 600

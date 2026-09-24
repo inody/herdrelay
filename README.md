@@ -48,7 +48,7 @@ Each Herdr pane has its own Discord thread (auto-created under
 - **Post in a thread** to send text to its pane. Harness slash commands
   (`/status`, `/compact`, …) work by typing them as normal messages.
 - **Special keys**: type `!esc`, `!enter`, `!up`, `!down`, `!left`, `!right`,
-  `!tab`, `!space`, `!ctrl-c`, `!backspace`, `!pgup`, `!pgdn` to send those
+  `!tab`, `!space`, `!ctrl-c`, `!backspace`, `!pgup`, `!pgdn`, `!home`, `!end` to send those
   keys instead of text — useful for escaping a pager (e.g. Claude's `/usage`
   shows "esc to exit") or navigating a TUI (e.g. `/model`).
 - **Control Herdr** by mentioning the bot (`@herdr`):

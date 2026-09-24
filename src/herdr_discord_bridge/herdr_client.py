@@ -100,6 +100,10 @@ class HerdrClient:
     def send_keys(self, target: str, keys: Iterable[str]) -> None:
         self.cli.pane_send_keys(target, *tuple(keys))
 
+    def send_raw_text(self, target: str, text: str) -> None:
+        """Type *text* into the pane without pressing Enter."""
+        self.cli.pane_send_text(target, text)
+
     def send_text_enter(self, target: str, text: str) -> None:
         self.cli.pane_run(target, text)
 
