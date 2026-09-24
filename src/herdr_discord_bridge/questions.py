@@ -20,14 +20,18 @@ def parse_question_answer(text: str, question: PendingQuestion) -> tuple[int, ..
 
 
 def selection_keys(question: PendingQuestion, selected: Iterable[int]) -> tuple[str, ...]:
-    """Return TUI keys that select indexes in a fresh Claude question dialog."""
+    """Return TUI keys that select indexes in a fresh Claude question dialog.
+
+    A fresh dialog focuses the first option. Herdr has no Home key, so the
+    sequence moves down from there instead of resetting the cursor first.
+    """
     indexes = tuple(sorted(set(selected)))
     if not indexes or any(index < 0 or index >= len(question.options) for index in indexes):
         raise ValueError("selection is outside the available question options")
     if not question.multi_select and len(indexes) != 1:
         raise ValueError("a single-choice question needs exactly one selection")
 
-    keys: list[str] = ["Home"]
+    keys: list[str] = []
     position = 0
     for index in indexes:
         keys.extend("Down" for _ in range(index - position))

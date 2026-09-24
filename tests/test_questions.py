@@ -29,18 +29,29 @@ def test_numeric_answer_accepts_multiple_choices_for_multi_select():
 
 
 def test_selection_keys_moves_to_correct_single_choice():
-    assert selection_keys(question(), (2,)) == ("Home", "Down", "Down", "Enter")
+    assert selection_keys(question(), (2,)) == ("Down", "Down", "Enter")
 
 
 def test_selection_keys_toggles_multiple_choices_before_confirming():
     assert selection_keys(question(multi_select=True), (0, 2)) == (
-        "Home",
         "Space",
         "Down",
         "Down",
         "Space",
         "Enter",
     )
+
+
+def test_selection_keys_selects_first_option_without_moving():
+    assert selection_keys(question(), (0,)) == ("Enter",)
+
+
+def test_selection_keys_only_uses_keys_herdr_supports():
+    # Herdr 0.9 rejects Home/End/PageUp with "unsupported key".
+    supported = {"Up", "Down", "Space", "Enter"}
+    for multi_select in (False, True):
+        for selected in ((0,), (1,), (2,)):
+            assert set(selection_keys(question(multi_select=multi_select), selected)) <= supported
 
 
 def test_selection_keys_rejects_invalid_single_selection():
