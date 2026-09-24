@@ -239,3 +239,18 @@ class AgentWithWorkspaceFakeCli(WorkspaceFakeCli):
                 ]
             }
         }
+
+
+def test_send_keys_pauses_between_keys_when_asked(monkeypatch):
+    from herdr_discord_bridge import herdr_client as module
+
+    sent = []
+    sleeps = []
+    client = module.HerdrClient.__new__(module.HerdrClient)
+    client.cli = type("Cli", (), {"pane_send_keys": lambda self, target, *keys: sent.append(keys)})()
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    client.send_keys("w1:p1", ("Down", "Space", "Enter"), interval_seconds=0.5)
+
+    assert sent == [("Down",), ("Space",), ("Enter",)]
+    assert sleeps == [0.5, 0.5]

@@ -32,12 +32,29 @@ def test_selection_keys_moves_to_correct_single_choice():
     assert selection_keys(question(), (2,)) == ("Down", "Down", "Enter")
 
 
-def test_selection_keys_toggles_multiple_choices_before_confirming():
+def test_selection_keys_toggles_choices_then_submits_and_confirms_review():
+    # Rows: One, Two, Three, "Type something", Submit. Enter on Submit opens a
+    # review screen, and the second Enter chooses "Submit answers".
     assert selection_keys(question(multi_select=True), (0, 2)) == (
         "Space",
         "Down",
         "Down",
         "Space",
+        "Down",
+        "Down",
+        "Enter",
+        "Enter",
+    )
+
+
+def test_selection_keys_reaches_submit_from_the_first_option():
+    assert selection_keys(question(multi_select=True), (0,)) == (
+        "Space",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Enter",
         "Enter",
     )
 

@@ -21,7 +21,12 @@ from .formatter import (
 )
 from .herdr_client import HerdrClient, TargetResolutionError
 from .models import AuditEntry, HerdrTarget, PendingQuestion
-from .questions import parse_question_answer, selected_labels, selection_keys
+from .questions import (
+    QUESTION_KEY_INTERVAL_SECONDS,
+    parse_question_answer,
+    selected_labels,
+    selection_keys,
+)
 from .security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
 from .streams import StreamManager
@@ -229,10 +234,20 @@ class HerdrDiscordBot(commands.Bot):
             raise ApprovalError("This question is no longer pending.")
         target_info = await asyncio.to_thread(self.client.resolve_target, question.pane_id)
         ensure_blocked_for_approval(target_info)
-        await asyncio.to_thread(
-            self.client.send_keys, question.pane_id, selection_keys(question, selected)
-        )
+        keys = selection_keys(question, selected)
+        # Claim the question before the slow key sequence so a second click
+        # cannot type a competing answer into the same dialog.
         self.store.clear_pending_question(question.pane_id, event_id=question.event_id)
+        try:
+            await asyncio.to_thread(
+                self.client.send_keys,
+                question.pane_id,
+                keys,
+                interval_seconds=QUESTION_KEY_INTERVAL_SECONDS,
+            )
+        except Exception:
+            self.store.upsert_pending_question(question)
+            raise
         return selected_labels(question, selected)
 
     async def _handle_control_command(self, message: discord.Message) -> None:
@@ -525,6 +540,8 @@ class QuestionChoiceView(discord.ui.View):
     ) -> None:
         try:
             self.bot.security.ensure_approve_user_allowed(interaction.user.id)
+            # Typing the answer takes longer than Discord's 3-second reply window.
+            await interaction.response.defer()
             labels = await self.bot._answer_pending_question(self.question, selected)
             _audit_action(
                 self.bot,
@@ -538,7 +555,7 @@ class QuestionChoiceView(discord.ui.View):
             for child in self.children:
                 child.disabled = True
             self.stop()
-            await interaction.response.edit_message(view=self)
+            await interaction.edit_original_response(view=self)
             await interaction.followup.send(f"Selected: {labels}", ephemeral=True)
         except Exception as exc:
             await _send_error(interaction, exc)

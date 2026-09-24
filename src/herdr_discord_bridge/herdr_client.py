@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import time
 from typing import Any
 
 from .config import AppConfig
@@ -97,8 +98,16 @@ class HerdrClient:
                 raise
         self.cli.pane_run(target, message)
 
-    def send_keys(self, target: str, keys: Iterable[str]) -> None:
-        self.cli.pane_send_keys(target, *tuple(keys))
+    def send_keys(
+        self, target: str, keys: Iterable[str], *, interval_seconds: float = 0
+    ) -> None:
+        if interval_seconds <= 0:
+            self.cli.pane_send_keys(target, *tuple(keys))
+            return
+        for index, key in enumerate(keys):
+            if index:
+                time.sleep(interval_seconds)
+            self.cli.pane_send_keys(target, key)
 
     def send_raw_text(self, target: str, text: str) -> None:
         """Type *text* into the pane without pressing Enter."""
