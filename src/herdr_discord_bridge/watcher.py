@@ -22,6 +22,12 @@ from .store import Store
 LOG = logging.getLogger(__name__)
 
 APPROVAL_VIEW_FACTORY = Callable[[str], discord.ui.View | None]
+TOPOLOGY_EVENTS = ("pane.created", "pane.closed", "pane.moved")
+# Lifecycle filters are dotted; Herdr 0.9.5 emits snake_case lifecycle frames.
+EVENT_NAME_ALIASES = {
+    event_type.replace(".", "_"): event_type
+    for event_type in (*TOPOLOGY_EVENTS, "pane.agent_status_changed")
+}
 
 
 @dataclass(frozen=True)
@@ -75,6 +81,8 @@ class EventWatcher:
             await self._sleep_reconnect()
             return
         self._waiting_for_panes = False
+        subscribed_panes = {subscription["pane_id"] for subscription in subscriptions}
+        subscriptions.extend({"type": event_type} for event_type in TOPOLOGY_EVENTS)
         socket_path = resolve_socket_path(self.config)
         LOG.info("Connecting Herdr event watcher to %s", socket_path)
         reader, writer = await asyncio.open_unix_connection(socket_path)
@@ -98,12 +106,22 @@ class EventWatcher:
                     continue
                 if not line:
                     raise ConnectionError("Herdr event stream closed")
-                await self._handle_line(line)
+                outcome = await self._handle_line(line)
+                if outcome == "topology_changed":
+                    LOG.info("Herdr pane topology changed; refreshing subscriptions")
+                    return
+                if outcome == "subscribed":
+                    # Creation can race the pre-subscription snapshot. Check
+                    # again after the ACK; subsequent changes are in the stream.
+                    panes = await asyncio.to_thread(self.client.list_panes)
+                    if {pane.target for pane in panes} != subscribed_panes:
+                        LOG.info("Herdr panes changed during subscription setup; refreshing")
+                        return
         finally:
             writer.close()
             await writer.wait_closed()
 
-    async def _handle_line(self, line: bytes) -> None:
+    async def _handle_line(self, line: bytes) -> str | None:
         try:
             payload = json.loads(line.decode())
         except json.JSONDecodeError:
@@ -113,7 +131,9 @@ class EventWatcher:
             raise RuntimeError(f"Herdr event stream error: {payload['error']}")
         if isinstance(payload, dict) and payload.get("id") == "discord_bridge_events":
             LOG.info("Herdr event watcher subscribed")
-            return
+            return "subscribed"
+        if isinstance(payload, dict) and _canonical_event_type(payload) in TOPOLOGY_EVENTS:
+            return "topology_changed"
 
         event = parse_agent_status_event(payload)
         if not event:
@@ -251,8 +271,7 @@ def parse_agent_status_event(payload: Any) -> AgentStatusEvent | None:
         return None
     event = _event_payload(payload)
     details = _nested_dict(event, "payload") or _nested_dict(event, "data") or event
-    event_type = _first_str(event, "type", "event", "name") or _first_str(payload, "type", "event", "name")
-    if event_type != "pane.agent_status_changed":
+    if _canonical_event_type(payload) != "pane.agent_status_changed":
         return None
 
     pane_id = (
@@ -309,6 +328,14 @@ def event_dedupe_key(event: AgentStatusEvent, output: str) -> str:
 def event_legacy_dedupe_prefix(event: AgentStatusEvent, output: str) -> str:
     digest = hashlib.sha256(output.encode(errors="replace")).hexdigest()[:16]
     return f"{event.pane_id}:{event.status}:{digest}"
+
+
+def _canonical_event_type(payload: dict[str, Any]) -> str | None:
+    event = _event_payload(payload)
+    event_type = _first_str(event, "type", "event", "name") or _first_str(payload, "type", "event", "name")
+    if event_type is None:
+        return None
+    return EVENT_NAME_ALIASES.get(event_type, event_type)
 
 
 def _event_payload(payload: dict[str, Any]) -> dict[str, Any]:

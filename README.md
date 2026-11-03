@@ -28,11 +28,11 @@ Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
   thread as ordinary message text, without adding code-block fences. Newlines
   and agent-authored Markdown are preserved; long output is split to fit Discord,
   and relayed text cannot trigger mentions. Claude Code and Codex use Stop hooks;
-  Pi uses an `agent_settled`
-  extension. In Herdr Pi sessions, important questions are ordinary text replies
-  so they can be answered from Discord; Claude's `AskUserQuestion` prompt and
-  choices are posted before its approval card. None of these adapters reads
-  terminal contents.
+  Pi uses an `agent_settled` extension for interactive TUI sessions only.
+  The Pi adapter does not modify prompts or tell the user where to reply;
+  ordinary text questions can be answered from the terminal or Discord.
+  Claude's `AskUserQuestion` prompt and choices are posted before its approval
+  card. None of these adapters reads terminal contents.
 - **Thread post send**: any normal message posted in a bound thread is sent to
   its pane (no need to reply — just type).
 - **Approvals**: blocked panes post an approval card (Approve / Deny buttons,
@@ -77,6 +77,9 @@ allowlisted Discord user.
 - `uv` for dependency installation.
 - A Discord server with a bot installed.
 - Herdr running locally with at least one pane or agent visible.
+
+Compatibility checks target Herdr 0.9.5 and Pi 1.5.0. The Pi output adapter
+requires `ExtensionContext.mode`; contexts without it are ignored.
 
 ## Discord setup
 
@@ -299,8 +302,11 @@ three gzip-compressed backups.
   only when an agent returns. Failed or malformed pane snapshots do not trigger
   archival. Once an agent returns, its existing thread is reused.
 - Status subscriptions include existing shell panes so agents launched there
-  later are monitored. With no panes, the watcher waits and retries without
-  sending an empty subscription or logging repeated crash tracebacks.
+  later are monitored. Pane creation, closure, and movement events trigger a
+  refresh even with `resubscribe_interval_seconds: 0`. A post-acknowledgement
+  snapshot catches topology changes during subscription setup. With no panes,
+  the watcher waits and retries without sending an empty subscription or
+  logging repeated crash tracebacks.
 - This does not restart agents or enable shell input: with
   `allow_pane_send_fallback: false`, ordinary messages still require an agent.
   After a Herdr restart, resume agents in their existing panes as needed.
@@ -328,14 +334,29 @@ choices use a Discord select menu. Claude's `PostToolUse` and `UserPromptSubmit`
 hooks mark the question resolved, so a question answered in the terminal or
 dismissed with Esc stops capturing numeric thread posts and hiding Approve/Deny
 buttons. `integrations/pi-herdrelay-output.ts` handles
-Pi's `agent_settled` event. Pi asks in an ordinary final text response and
-waits for a Discord thread reply; this project does not depend on Pi's optional
-modal `ask_user` package. Codex hooks run in its shared app-server, which does
-not inherit `HERDR_PANE_ID`; HerdRelay resolves the hook to the only Codex pane
+Pi's `agent_settled` event. It requires `ctx.mode === "tui"`; RPC, JSON, print,
+SDK/unknown contexts are excluded even if they inherit Herdr's pane environment.
+In particular, `ctx.hasUI` is not a TUI check because it is also true in RPC mode.
+The adapter only relays output: it never injects a system prompt or forces a
+Discord reply. This project does not depend on Pi's optional modal `ask_user`
+package. After reinstalling the adapter, run `/reload` in existing Pi sessions
+(or start a new Pi process) to load it. Codex hooks run in its shared app-server,
+which does not inherit `HERDR_PANE_ID`; HerdRelay resolves the hook to the only Codex pane
 with the same cwd using Herdr pane metadata. If multiple Codex panes share that
 cwd, it intentionally does not deliver an ambiguous response. Additional agents
 can use the same protocol without changing the Discord relay or reading terminal
 contents.
+
+### Tests
+
+Run `uv run pytest -q` for the Python tests and Pi adapter regression tests.
+The adapter tests need Node.js 22.6 or newer (they are skipped without it).
+They execute the actual TypeScript adapter with isolated event contexts and
+inboxes, without contacting a model or Discord. To run them directly:
+
+```bash
+node --experimental-strip-types --test tests/pi_output_adapter.test.mjs
+```
 
 ### Herdr 0.8 fullscreen redraw workaround
 
@@ -354,7 +375,8 @@ watcher:
 
 Hook mode receives completed responses directly from agent-specific adapters;
 it never reads terminal output. The watcher settings disable done cards,
-watcher tail reads, and periodic subscription reconnects. New panes will not
-receive watcher notifications until HerdRelay restarts, but auto-thread
-creation and hook output relay continue. Set `enable_watcher: false` to disable
-status subscriptions, or `enable_streaming: false` to disable response relay.
+watcher tail reads, and periodic subscription reconnects. Topology-triggered
+subscription refreshes remain enabled so new panes are monitored without a
+HerdRelay restart. Auto-thread creation and hook output relay continue.
+Set `enable_watcher: false` to disable status subscriptions, or
+`enable_streaming: false` to disable response relay.

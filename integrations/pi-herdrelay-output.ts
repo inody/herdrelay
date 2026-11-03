@@ -1,5 +1,6 @@
 // HerdRelay Pi output adapter
 // HERDRELAY_ADAPTER_ID=pi-output-v1
+// HERDRELAY_ADAPTER_VERSION=2
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
@@ -50,12 +51,10 @@ export default function (pi: ExtensionAPI) {
   let pending: PendingResponse | undefined;
   let deliveredEventId: string | undefined;
 
-  pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n## HerdRelay remote-question policy\nThis Pi session runs through HerdRelay and Discord. When a decision, clarification, or permission is needed, do not perform the dependent action. Instead, finish the current turn with a concise ordinary assistant message containing the question, relevant context, and numbered options when useful. Explicitly ask the user to reply in the Discord thread, then wait for that next message.`,
-  }));
-
+  // Relay output without modifying prompts or assuming where the user types.
+  // RPC also has hasUI=true and may inherit the parent pane's environment.
   pi.on("message_end", (event, ctx) => {
-    if (ctx.hasUI !== true) return;
+    if (ctx.mode !== "tui") return;
     const text = assistantText(event.message);
     if (!text) return;
     const sessionId = ctx.sessionManager.getSessionId();
@@ -67,7 +66,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    if (ctx.hasUI !== true || !pending || pending.eventId === deliveredEventId) return;
+    if (ctx.mode !== "tui" || !pending || pending.eventId === deliveredEventId) return;
     const response = pending;
     pending = undefined;
     try {

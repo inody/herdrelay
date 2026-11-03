@@ -70,6 +70,16 @@ def test_parse_agent_status_event_from_pane_snapshot():
     assert event.agent_name == "claude"
 
 
+def test_parse_agent_status_event_herdr_095_wire_format():
+    event = parse_agent_status_event({
+        "data": {"agent": "pi", "agent_status": "blocked", "pane_id": "w1:p5", "workspace_id": "w1"},
+        "event": "pane.agent_status_changed",
+    })
+
+    assert event is not None
+    assert (event.pane_id, event.status, event.agent_name) == ("w1:p5", "blocked", "pi")
+
+
 def test_parse_agent_status_event_ignores_other_events():
     assert parse_agent_status_event({"type": "pane.created", "pane_id": "w1:p1"}) is None
 
@@ -223,7 +233,10 @@ async def test_empty_watcher_waits_then_subscribes_when_a_pane_appears(monkeypat
     connection.assert_awaited_once()
     request = json.loads(writer.write.call_args.args[0])
     assert request["method"] == "events.subscribe"
-    assert {s["pane_id"] for s in request["params"]["subscriptions"]} == {"w1:p1"}
+    assert {s["pane_id"] for s in request["params"]["subscriptions"] if "pane_id" in s} == {"w1:p1"}
+    assert {s["type"] for s in request["params"]["subscriptions"] if "pane_id" not in s} == {
+        "pane.created", "pane.closed", "pane.moved",
+    }
     assert not watcher._waiting_for_panes
     writer.close.assert_called_once()
     writer.wait_closed.assert_awaited_once()
@@ -241,6 +254,123 @@ async def test_empty_watcher_can_stop_without_waiting_full_reconnect_delay():
     watcher.stop()
 
     await asyncio.wait_for(watcher._run_once(), timeout=1)
+
+
+def _event_line(event):
+    return (json.dumps(event) + "\n").encode()
+
+
+def _socket_pair(*events):
+    reader = Mock(readline=AsyncMock(side_effect=[_event_line(event) for event in events]))
+    writer = Mock(drain=AsyncMock(), wait_closed=AsyncMock())
+    return reader, writer
+
+
+def _watcher(client):
+    return EventWatcher(
+        bot=None, store=None, client=client,
+        config=AppConfig(discord_token="token", watcher=WatcherConfig(
+            statuses=("blocked",), resubscribe_interval_seconds=0,
+        )),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type", [
+    "pane.created", "pane.closed", "pane.moved",
+    "pane_created", "pane_closed", "pane_moved",
+])
+@pytest.mark.parametrize("nested", [False, True])
+async def test_topology_events_request_refresh_without_notifying_discord(event_type, nested):
+    watcher = _watcher(Mock())
+    watcher._notify = AsyncMock()
+    event = {"event": event_type, "data": {"pane_id": "w1:p2"}}
+    if nested:
+        event = {"event": {"type": event_type, "payload": {"pane_id": "w1:p2"}}}
+
+    assert await watcher._handle_line(_event_line(event)) == "topology_changed"
+    watcher._notify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wire_style", ["dotted", "snake_case"])
+@pytest.mark.parametrize("event_type, old_ids, new_ids", [
+    ("pane.created", ["w1:p1"], ["w1:p1", "w1:p2"]),
+    ("pane.closed", ["w1:p1", "w1:p2"], ["w1:p2"]),
+    ("pane.moved", ["w1:p1"], ["w2:p1"]),
+])
+async def test_topology_refreshes_filters_with_periodic_reconnect_disabled(
+    monkeypatch, event_type, old_ids, new_ids, wire_style,
+):
+    before = [HerdrTarget(target=pane_id) for pane_id in old_ids]
+    after = [HerdrTarget(target=pane_id) for pane_id in new_ids]
+    client = Mock()
+    client.list_panes.side_effect = [before, before, after, after]
+    watcher = _watcher(client)
+    ack = {"id": "discord_bridge_events", "result": {}}
+    wire_type = event_type.replace(".", "_") if wire_style == "snake_case" else event_type
+    first = _socket_pair(ack, {"event": wire_type, "data": {"type": wire_type}})
+    second = _socket_pair(ack, {
+        "event": "pane.agent_status_changed",
+        "data": {"pane_id": new_ids[-1], "agent_status": "blocked", "agent": "pi"},
+    })
+    connect = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr(asyncio, "open_unix_connection", connect)
+    notifications = []
+    async def notify(event):
+        notifications.append(event)
+        watcher.stop()
+    watcher._notify = notify
+
+    await watcher._run_once()
+    await watcher._run_once()
+
+    assert connect.await_count == 2
+    for pair, expected_ids in [(first, old_ids), (second, new_ids)]:
+        writer = pair[1]
+        subscriptions = json.loads(writer.write.call_args.args[0])["params"]["subscriptions"]
+        assert {s["pane_id"] for s in subscriptions if "pane_id" in s} == set(expected_ids)
+        writer.close.assert_called_once()
+        writer.wait_closed.assert_awaited_once()
+    assert len(notifications) == 1
+    assert notifications[0].pane_id == new_ids[-1]
+    assert notifications[0].status == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_post_ack_snapshot_closes_discovery_subscription_gap(monkeypatch):
+    client = Mock()
+    client.list_panes.side_effect = [
+        [HerdrTarget(target="w1:p1")],
+        [HerdrTarget(target="w1:p1"), HerdrTarget(target="w1:p2")],
+    ]
+    watcher = _watcher(client)
+    reader, writer = _socket_pair({"id": "discord_bridge_events", "result": {}})
+    monkeypatch.setattr(asyncio, "open_unix_connection", AsyncMock(return_value=(reader, writer)))
+
+    await watcher._run_once()
+
+    assert client.list_panes.call_count == 2
+    reader.readline.assert_awaited_once()
+    writer.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_events_lost_error_closes_socket_for_retry(monkeypatch):
+    client = Mock()
+    client.list_panes.return_value = [HerdrTarget(target="w1:p1")]
+    watcher = _watcher(client)
+    reader, writer = _socket_pair(
+        {"id": "discord_bridge_events", "result": {}},
+        {"error": {"code": "events_lost", "message": "subscriber fell behind"}},
+    )
+    monkeypatch.setattr(asyncio, "open_unix_connection", AsyncMock(return_value=(reader, writer)))
+
+    with pytest.raises(RuntimeError, match="events_lost"):
+        await watcher._run_once()
+
+    writer.close.assert_called_once()
+    writer.wait_closed.assert_awaited_once()
 
 
 class StateMarkerClient:
