@@ -39,6 +39,23 @@ def wrap_code_block(text: str) -> str:
     return f"```text\n{clean}\n```"
 
 
+def split_text_chunks(text: str, *, max_chars: int = 1900) -> list[str]:
+    """Split plain text without removing newlines or adding Markdown fences."""
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        if end < len(text):
+            newline = text.rfind("\n", start, end)
+            if newline >= start and text[start : newline + 1].strip():
+                end = newline + 1
+        chunks.append(text[start:end])
+        start = end
+    return chunks
+
+
 def split_tail_chunks(text: str, *, max_chars: int = 1900) -> list[str]:
     """Split text into chunks that each fit in a Discord code block message."""
     budget = max_chars - len("```text\n") - len("\n```")

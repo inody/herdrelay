@@ -163,7 +163,85 @@ async def test_hook_event_is_delivered_once_and_removed(tmp_path, monkeypatch):
     assert not event_path.exists()
     assert store.has_event_key("agent-output:claude:turn-1")
     thread.send.assert_awaited_once()
-    assert "complete response" in thread.send.await_args.args[0]
+    assert thread.send.await_args.args[0] == "complete response"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["hooks", "poll"])
+async def test_agent_output_is_plain_text_with_newlines_and_no_added_fences(mode):
+    manager = StreamManager(
+        bot=None, config=AppConfig(discord_token="token", streaming=StreamConfig(mode=mode)),
+        store=None, client=None,
+    )
+    thread = AsyncMock()
+    text = "1行目\n\n2行目\n@everyone <@123>\n"
+
+    assert await manager._send_diff(thread, 123, text)
+
+    thread.send.assert_awaited_once()
+    assert thread.send.await_args.args[0] == text
+    assert thread.send.await_args.kwargs["allowed_mentions"].to_dict() == {"parse": []}
+
+
+@pytest.mark.asyncio
+async def test_long_plain_output_preserves_newlines_and_attaches_view_only_once():
+    manager = StreamManager(
+        bot=None, config=AppConfig(discord_token="token", max_output_chars=9000),
+        store=None, client=None,
+    )
+    thread = AsyncMock()
+    text = "最初の行\n\n" + "長" * 4200 + "\n最後の行\n"
+    view = object()
+
+    assert await manager._send_text(thread, 123, text, view=view)
+
+    calls = thread.send.await_args_list
+    assert len(calls) > 1
+    assert "".join(call.args[0] for call in calls) == text
+    assert all(len(call.args[0]) <= 2000 for call in calls)
+    assert calls[0].kwargs["view"] is view
+    assert all(call.kwargs["view"] is None for call in calls[1:])
+
+
+@pytest.mark.asyncio
+async def test_agent_authored_markdown_is_not_rewritten_or_wrapped():
+    manager = StreamManager(
+        bot=None, config=AppConfig(discord_token="token"), store=None, client=None,
+    )
+    thread = AsyncMock()
+    text = "**説明**\n```python\nprint('hello')\n```"
+
+    assert await manager._send_diff(thread, 123, text)
+
+    assert thread.send.await_args.args[0] == text
+
+
+@pytest.mark.asyncio
+async def test_blank_only_chunk_keeps_newlines_without_empty_message_rejection():
+    manager = StreamManager(
+        bot=None, config=AppConfig(discord_token="token", max_output_chars=9000),
+        store=None, client=None,
+    )
+    thread = AsyncMock()
+    text = "x" * 1999 + "\n" * 2100
+
+    assert await manager._send_diff(thread, 123, text)
+
+    chunks = [call.args[0] for call in thread.send.await_args_list]
+    assert all(chunk.strip() and len(chunk) <= 2000 for chunk in chunks)
+    assert "".join(chunks).replace("\u200b", "") == text
+
+
+@pytest.mark.asyncio
+async def test_blank_output_does_not_send_an_empty_discord_message():
+    manager = StreamManager(
+        bot=None, config=AppConfig(discord_token="token"), store=None, client=None,
+    )
+    thread = AsyncMock()
+
+    assert await manager._send_diff(thread, 123, "\n \n")
+
+    thread.send.assert_not_awaited()
 
 
 def _hook_manager(tmp_path, inbox, store):

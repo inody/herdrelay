@@ -1,6 +1,9 @@
+import pytest
+
 from herdr_discord_bridge.formatter import (
     format_tail,
     split_tail_chunks,
+    split_text_chunks,
     target_alias,
 )
 from herdr_discord_bridge.models import HerdrTarget
@@ -28,6 +31,40 @@ def test_split_tail_chunks_splits_a_single_oversized_line():
 
     assert "".join(chunks) == text
     assert all(len(chunk) <= 1988 for chunk in chunks)
+
+
+@pytest.mark.parametrize("text", [
+    "最初の行\n\n次の行\n",
+    "\n先頭と末尾にも改行\n",
+    "一行が長い文章" * 1000,
+    "短い行\n" * 1000,
+    "コード例\n```python\nprint('hello')\n```\n",
+    "",
+])
+def test_split_text_chunks_preserves_original_text_and_newlines(text):
+    chunks = split_text_chunks(text, max_chars=100)
+
+    assert "".join(chunks) == text
+    assert all(0 < len(chunk) <= 100 for chunk in chunks)
+
+
+def test_split_text_chunks_prefers_line_boundaries():
+    assert split_text_chunks("first\nsecond\nthird", max_chars=13) == [
+        "first\nsecond\n", "third",
+    ]
+
+
+def test_split_text_chunks_does_not_split_off_leading_blank_lines():
+    text = "\n\n" + "x" * 150
+    chunks = split_text_chunks(text, max_chars=100)
+
+    assert "".join(chunks) == text
+    assert all(chunk.strip() for chunk in chunks)
+
+
+def test_split_text_chunks_rejects_invalid_budget():
+    with pytest.raises(ValueError, match="positive"):
+        split_text_chunks("hello", max_chars=0)
 
 
 def test_target_alias_prefers_workspace_label():

@@ -11,7 +11,7 @@ from collections.abc import Callable
 import discord
 
 from .config import AppConfig
-from .formatter import split_tail_chunks, wrap_code_block
+from .formatter import split_text_chunks
 from .herdr_client import HerdrClient
 from .models import HerdrTarget, PendingQuestion, QuestionOption
 from .store import Store
@@ -401,11 +401,20 @@ class StreamManager:
         *,
         view: discord.ui.View | None = None,
     ) -> bool:
+        if not text.strip():
+            return True
         for index, chunk in enumerate(
-            split_tail_chunks(text, max_chars=self.config.max_output_chars)
+            # Reserve one character for a blank-only chunk's invisible marker.
+            split_text_chunks(text, max_chars=min(self.config.max_output_chars, 1999))
         ):
+            # Discord rejects whitespace-only messages; retain their newlines.
+            content = chunk if chunk.strip() else "\u200b" + chunk
             try:
-                await thread.send(wrap_code_block(chunk), view=view if index == 0 else None)
+                await thread.send(
+                    content,
+                    view=view if index == 0 else None,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
             except discord.HTTPException:
                 LOG.warning("Failed to post stream chunk to thread %s", thread_id)
                 return False

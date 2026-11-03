@@ -25,7 +25,10 @@ Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
   their names survive agent exits or detection loss while the pane remains;
   empty shells do not create new threads.
 - **Output relay**: agent adapters post completed responses into the bound
-  thread. Claude Code and Codex use Stop hooks; Pi uses an `agent_settled`
+  thread as ordinary message text, without adding code-block fences. Newlines
+  and agent-authored Markdown are preserved; long output is split to fit Discord,
+  and relayed text cannot trigger mentions. Claude Code and Codex use Stop hooks;
+  Pi uses an `agent_settled`
   extension. In Herdr Pi sessions, important questions are ordinary text replies
   so they can be answered from Discord; Claude's `AskUserQuestion` prompt and
   choices are posted before its approval card. None of these adapters reads
