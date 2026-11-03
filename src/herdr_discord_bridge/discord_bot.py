@@ -259,24 +259,58 @@ class HerdrDiscordBot(commands.Bot):
                 .strip()
             )
         parts = content.split()
-        if not parts:
-            await message.reply(self._control_help())
-            return
-        cmd = parts[0].lower()
+        cmd = parts[0].lower() if parts else "help"
+        if cmd == "?":
+            cmd = "help"
         args = parts[1:]
+        location = _location_from_message(message)
         try:
+            # Check before dispatch, including help/unknown commands. In
+            # particular, do not resolve a bound pane or read Herdr first.
+            self.security.ensure_read_allowed(location)
             if cmd == "start":
+                self.security.ensure_send_allowed(message.author.id, location, content)
                 await self._control_start(message, args)
             elif cmd == "stop":
+                self.security.ensure_stop_allowed(message.author.id, location)
                 await self._control_stop(message, args)
             elif cmd == "list":
                 await self._control_list(message)
-            elif cmd in ("help", "?"):
+                self._audit_control_command(message, cmd, "ok")
+            elif cmd == "help":
                 await message.reply(self._control_help())
+                self._audit_control_command(message, cmd, "ok")
             else:
-                await message.reply(f"Unknown command `{cmd}`. Try: start, close, list, help")
+                raise ValueError(f"Unknown command `{cmd}`. Try: start, stop, list, help")
         except Exception as exc:
-            await message.reply(f"Error: {exc}")
+            result = "denied" if isinstance(exc, SecurityError) else "error"
+            try:
+                self._audit_control_command(
+                    message, cmd, f"{result}: {exc}",
+                    target=args[0] if cmd == "stop" and args else None,
+                )
+            except Exception:
+                LOG.exception("Failed to audit rejected/failed mention command")
+            await message.reply(
+                f"Error: {exc}", allowed_mentions=discord.AllowedMentions.none(),
+                mention_author=False,
+            )
+
+    def _audit_control_command(
+        self, message: discord.Message, command: str, result: str, *, target: str | None = None,
+    ) -> None:
+        location = _location_from_message(message)
+        action = command if command in {"start", "stop", "list", "help"} else "unknown"
+        self.store.add_audit(AuditEntry(
+            discord_user_id=str(message.author.id),
+            guild_id=str(location.guild_id) if location.guild_id is not None else None,
+            channel_id=str(location.channel_id),
+            thread_id=str(location.thread_id) if location.thread_id is not None else None,
+            action=f"control_{action}",
+            herdr_target=target,
+            payload_preview=truncate(message.content, max_chars=200),
+            result=truncate(result, max_chars=500),
+        ))
 
     async def _inherited_context(
         self, message: discord.Message
@@ -302,10 +336,12 @@ class HerdrDiscordBot(commands.Bot):
 
     async def _control_start(self, message: discord.Message, args: list[str]) -> None:
         if not args:
-            await message.reply(
+            raise ValueError(
                 "Usage: `@herdr start <name> [--cwd PATH] [--workspace ID] [--tab ID] [--split right|down] [-- <argv...>]`"
             )
-            return
+        # Persist intent before any Herdr calls. If auditing is unavailable,
+        # fail closed rather than making an unrecorded mutation.
+        self._audit_control_command(message, "start", "attempt")
         name = args[0]
         rest = args[1:]
         cwd: str | None = None
@@ -360,6 +396,7 @@ class HerdrDiscordBot(commands.Bot):
             source_pane=source_pane,
         )
         pane_id = started.pane_id
+        self._audit_control_command(message, "start", "ok", target=pane_id)
         details = []
         if cwd:
             details.append(f"cwd `{cwd}`")
@@ -404,11 +441,10 @@ class HerdrDiscordBot(commands.Bot):
                 if binding:
                     pane_id = binding.herdr_target
         if pane_id is None:
-            await message.reply(
-                "Usage: `@herdr stop <pane_id>` (or run inside a pane thread)"
-            )
-            return
+            raise ValueError("Usage: `@herdr stop <pane_id>` (or run inside a pane thread)")
+        self._audit_control_command(message, "stop", "attempt", target=pane_id)
         await asyncio.to_thread(self.client.pane_close, pane_id)
+        self._audit_control_command(message, "stop", "ok", target=pane_id)
         await message.reply(f"Stopped `{pane_id}`.")
 
     async def _control_list(self, message: discord.Message) -> None:
@@ -431,10 +467,11 @@ class HerdrDiscordBot(commands.Bot):
             "@herdr start <name> [options] [-- <argv...>]    Start a pane (agent)\n"
             "  options: --cwd PATH --workspace ID --tab ID --split right|down\n"
             "  inside a pane thread: inherits that pane's workspace/tab/cwd\n"
-            "  elsewhere: herdr's focused workspace/tab; argv defaults to <name>\n"
+            "  <name> selects the Herdr agent kind; -- passes its arguments\n"
+            "  elsewhere: splits the focused pane, or creates a workspace\n"
             "@herdr stop [<pane_id>]                          Stop (close) a pane\n"
             "  inside a pane thread: closes that thread's pane (no arg needed)\n"
-            "@herdr list                                      List panes/agents\n"
+            "@herdr list                                      List detected agents\n"
             "@herdr help                                      Show this help\n"
             "```\n"
             "Inside a pane thread, just type to send to the pane. "
