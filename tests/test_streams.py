@@ -1,6 +1,8 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 import json
+import time
 
+import discord
 import pytest
 
 from herdr_discord_bridge.config import AppConfig, StreamConfig
@@ -91,6 +93,22 @@ def test_load_hook_output_event(tmp_path):
     assert event.agent == "claude"
     assert event.pane_id == "w1:p1"
     assert event.text == "complete response"
+
+
+def test_human_input_event_requires_no_prompt_text(tmp_path):
+    path = tmp_path / "activity.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "event_id": "input-1",
+        "agent": "pi",
+        "pane_id": "w1:p1",
+        "kind": "human_input",
+    }))
+
+    event = load_hook_output_event(path, max_bytes=1000)
+
+    assert event.kind == "human_input"
+    assert event.text == ""
 
 
 def test_question_hook_event_is_labeled_for_discord(tmp_path):
@@ -244,11 +262,12 @@ async def test_blank_output_does_not_send_an_empty_discord_message():
     thread.send.assert_not_awaited()
 
 
-def _hook_manager(tmp_path, inbox, store):
+def _hook_manager(tmp_path, inbox, store, *, allowed_user_ids=frozenset()):
     return StreamManager(
         bot=None,  # type: ignore[arg-type]
         config=AppConfig(
             discord_token="token",
+            allowed_user_ids=allowed_user_ids,
             streaming=StreamConfig(mode="hooks", hook_inbox_path=str(inbox)),
         ),
         store=store,
@@ -270,6 +289,79 @@ def _write_event(path, mtime_ns, **fields):
 
     path.write_text(json.dumps({"version": 1, "agent": "claude", **fields}))
     os.utime(path, ns=(mtime_ns, mtime_ns))
+
+
+@pytest.mark.asyncio
+async def test_human_input_adds_allowed_users_without_posting(tmp_path, monkeypatch):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    store = Store(tmp_path / "store.sqlite3")
+    store.upsert_agent_thread(pane_id="w1:p1", thread_id=123, guild_id=456, alias="agent")
+    _write_event(
+        inbox / "activity.json", 1_000,
+        event_id="input-1", pane_id="w1:p1", kind="human_input", agent="pi",
+    )
+    manager = _hook_manager(
+        tmp_path, inbox, store, allowed_user_ids=frozenset({222, 111})
+    )
+    thread = AsyncMock()
+    monkeypatch.setattr(manager, "_fetch_thread", AsyncMock(return_value=thread))
+
+    await manager._drain_hook_events(inbox)
+
+    assert [call.args[0].id for call in thread.add_user.await_args_list] == [111, 222]
+    thread.send.assert_not_awaited()
+    assert store.has_event_key("agent-output:pi:input-1")
+    assert list(inbox.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_human_input_waits_for_thread_mapping(tmp_path, monkeypatch):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    store = Store(tmp_path / "store.sqlite3")
+    event_path = inbox / "activity.json"
+    _write_event(
+        event_path, time.time_ns(),
+        event_id="input-1", pane_id="w1:p1", kind="human_input", agent="pi",
+    )
+    manager = _hook_manager(
+        tmp_path, inbox, store, allowed_user_ids=frozenset({111})
+    )
+    fetch_thread = AsyncMock()
+    monkeypatch.setattr(manager, "_fetch_thread", fetch_thread)
+
+    await manager._drain_hook_events(inbox)
+
+    assert event_path.exists()
+    assert not store.has_event_key("agent-output:pi:input-1")
+    fetch_thread.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_human_input_retries_when_discord_membership_fails(tmp_path, monkeypatch):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    store = Store(tmp_path / "store.sqlite3")
+    store.upsert_agent_thread(pane_id="w1:p1", thread_id=123, guild_id=456, alias="agent")
+    event_path = inbox / "activity.json"
+    _write_event(
+        event_path, time.time_ns(),
+        event_id="input-1", pane_id="w1:p1", kind="human_input", agent="pi",
+    )
+    manager = _hook_manager(
+        tmp_path, inbox, store, allowed_user_ids=frozenset({111})
+    )
+    response = Mock(status=403, reason="Forbidden")
+    thread = AsyncMock()
+    thread.add_user.side_effect = discord.HTTPException(response, "denied")
+    monkeypatch.setattr(manager, "_fetch_thread", AsyncMock(return_value=thread))
+
+    await manager._drain_hook_events(inbox)
+
+    assert event_path.exists()
+    assert not store.has_event_key("agent-output:pi:input-1")
+    thread.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

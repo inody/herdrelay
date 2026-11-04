@@ -98,9 +98,43 @@ test("settlement handler independently checks TUI mode", async (t) => {
   assert.equal((await adapter.events()).length, 1);
 });
 
+test("interactive TUI input emits a visibility event without storing prompt text", async (t) => {
+  const adapter = await setup(t);
+  const prompt = "private prompt text";
+  await adapter.emit("input", { text: prompt, source: "interactive" }, context());
+  const [event] = await adapter.events();
+  assert.equal(event.kind, "human_input");
+  assert.equal(event.agent, "pi");
+  assert.equal(event.pane_id, "test:p1");
+  assert.equal(event.session_id, "session-1");
+  assert.equal(event.text, undefined);
+  assert.doesNotMatch(JSON.stringify(event), /private prompt text/);
+});
+
+for (const [mode, source] of [
+  ["rpc", "interactive"], ["json", "interactive"], ["print", "interactive"],
+  ["tui", "rpc"], ["tui", "extension"],
+]) {
+  test(`does not mark input from mode=${mode}, source=${source} as human TUI activity`, async (t) => {
+    const adapter = await setup(t);
+    await adapter.emit("input", { text: "ignored", source }, context(mode));
+    assert.deepEqual(await adapter.events(), []);
+  });
+}
+
+test("assistant continuations and subagent activity alone do not emit visibility events", async (t) => {
+  const adapter = await setup(t);
+  await adapter.emit("message_end", response("autonomous output"), context());
+  await adapter.emit("agent_settled", {}, context());
+  const events = await adapter.events();
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, undefined);
+  assert.equal(events[0].text, "autonomous output");
+});
+
 test("adapter never installs a prompt override or tells the agent to use Discord", async (t) => {
   const adapter = await setup(t);
-  assert.deepEqual([...adapter.handlers.keys()].sort(), ["agent_settled", "message_end"]);
+  assert.deepEqual([...adapter.handlers.keys()].sort(), ["agent_settled", "input", "message_end"]);
   const event = { systemPrompt: "Original instructions", systemPromptOptions: { sections: [] } };
   assert.equal(await adapter.emit("before_agent_start", event, context()), undefined);
   assert.equal(event.systemPrompt, "Original instructions");

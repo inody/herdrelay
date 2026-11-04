@@ -85,11 +85,11 @@ def load_hook_output_event(path: Path, *, max_bytes: int) -> HookOutputEvent:
     if not isinstance(payload, dict) or payload.get("version") != 1:
         raise ValueError("unsupported event format")
     kind = payload.get("kind", "response")
-    if kind not in {"response", "question", "question_resolved"}:
+    if kind not in {"response", "question", "question_resolved", "human_input"}:
         raise ValueError("unsupported event kind")
-    # Resolution events carry no message; they only close a pending question.
+    # Resolution and activity events carry no message.
     required = ("event_id", "agent", "pane_id")
-    if kind != "question_resolved":
+    if kind not in {"question_resolved", "human_input"}:
         required += ("text",)
     values = {key: payload.get(key) for key in required}
     if not all(isinstance(value, str) and value for value in values.values()):
@@ -272,6 +272,13 @@ class StreamManager:
             thread = await self._fetch_thread(int(thread_id))
             if thread is None:
                 continue
+            if event.kind == "human_input":
+                if not await self._add_allowed_users(thread, thread_id):
+                    continue
+                self.store.mark_event_seen(dedupe_key)
+                await asyncio.to_thread(path.unlink, missing_ok=True)
+                LOG.info("Made pane %s visible after interactive Pi input", event.pane_id)
+                continue
             if event.kind == "question" and event.question is not None:
                 self.store.upsert_pending_question(event.question)
                 view = (
@@ -387,6 +394,17 @@ class StreamManager:
             )
         except Exception:
             LOG.exception("Failed to seed visible tail for streaming %s", pane_id)
+
+    async def _add_allowed_users(
+        self, thread: discord.Thread, thread_id: int | str
+    ) -> bool:
+        for user_id in sorted(self.config.allowed_user_ids):
+            try:
+                await thread.add_user(discord.Object(id=user_id))
+            except discord.HTTPException:
+                LOG.warning("Failed to add user %s to thread %s", user_id, thread_id)
+                return False
+        return True
 
     async def _send_diff(
         self, thread: discord.Thread, thread_id: int | str, diff: str

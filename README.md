@@ -27,9 +27,11 @@ Herdr pane (agent)  ←→  Discord thread  (auto-created, auto-bound)
   thread as ordinary message text, without adding code-block fences. Newlines
   and agent-authored Markdown are preserved; long output is split to fit Discord,
   and relayed text cannot trigger mentions. Claude Code and Codex use Stop hooks;
-  Pi uses an `agent_settled` extension for interactive TUI sessions only.
-  The Pi adapter does not modify prompts or tell the user where to reply;
-  ordinary text questions can be answered from the terminal or Discord.
+  Pi uses an extension for interactive TUI sessions only. Its `input` event
+  marks prompts whose source is `interactive`, and `agent_settled` relays the
+  completed response. The adapter does not modify prompts or tell the user
+  where to reply; ordinary text questions can be answered from the terminal or
+  Discord.
   Supported Claude `AskUserQuestion` prompts get dedicated choice controls;
   the watcher briefly delays blocked notifications to let question hooks arrive.
   None of these adapters reads terminal contents.
@@ -51,7 +53,10 @@ There are no slash commands — this keeps `/status`, `/compact`, `/usage`
 (Codex), and other harness commands usable as plain text inside threads.
 Agent threads are auto-created under `thread_parent_channel_id` when
 `enable_auto_threads: true`. Existing threads remain bound when an agent exits
-but its pane stays open.
+but its pane stays open. Creation alone does not add the allowed users to a
+public thread: for Pi, an allowed user is added when that session receives an
+interactive TUI input, so unused or autonomous-only Pi sessions do not fill the
+Discord sidebar.
 
 - **Post in a thread** to send text to its pane. Harness slash commands
   (`/status`, `/compact`, …) work by typing them as normal messages.
@@ -430,13 +435,28 @@ not already been changed manually; avoid mixing terminal navigation with
 Discord choice buttons for the same question.
 
 `integrations/pi-herdrelay-output.ts` handles
-Pi's `agent_settled` event. It requires `ctx.mode === "tui"`; RPC, JSON, print,
+Pi's `input` and `agent_settled` events. A `human_input` adapter event is emitted
+only for `ctx.mode === "tui"` with `event.source === "interactive"`; it contains
+no prompt text and makes `allowed_user_ids` members of the existing Discord
+thread without posting a message. RPC and extension-generated input, retries,
+continuations, and tool/subagent activity do not make a thread appear in the
+Discord sidebar. Input delivered by typing into the Pi TUI—including text
+forwarded into that terminal from a bound Discord thread—is interactive input.
+
+Output relay also requires `ctx.mode === "tui"`; RPC, JSON, print,
 SDK/unknown contexts are excluded even if they inherit Herdr's pane environment.
 In particular, `ctx.hasUI` is not a TUI check because it is also true in RPC mode.
 The adapter only relays output: it never injects a system prompt or forces a
 Discord reply. This project does not depend on Pi's optional modal `ask_user`
 package. After reinstalling the adapter, run `/reload` in existing Pi sessions
-(or start a new Pi process) to load it. Codex hooks run in its shared app-server,
+(or start a new Pi process) to load it. Sessions that have not reloaded cannot
+emit the new interactive-input marker; they become eligible after reload and
+then after the next submitted prompt. Adding a member does not let HerdRelay set
+an arbitrary Discord sidebar order. Threads move naturally with Discord message
+activity when their relayed response arrives. Existing memberships are not
+removed automatically.
+
+Codex hooks run in its shared app-server,
 which does not inherit `HERDR_PANE_ID`; HerdRelay resolves the hook to the only Codex pane
 with the same cwd using Herdr pane metadata. If multiple Codex panes share that
 cwd, it intentionally does not deliver an ambiguous response. Additional agents
