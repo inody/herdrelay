@@ -34,6 +34,7 @@ from .runtime import InterruptRuntime, RuntimeClient
 from .security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
 from .streams import StreamManager
+from .telegram_service import TelegramReadOnlyService
 from .threads import ThreadManager
 from .watcher import EventWatcher
 
@@ -56,6 +57,8 @@ class HerdrDiscordBot(commands.Bot):
         self._thread_task: asyncio.Task | None = None
         self.stream_manager: StreamManager | None = None
         self._stream_task: asyncio.Task | None = None
+        self.telegram_service: TelegramReadOnlyService | None = None
+        self._telegram_task: asyncio.Task | None = None
 
     async def setup_hook(self) -> None:
         # Sync the (empty) command tree so Discord drops any previously
@@ -105,6 +108,16 @@ class HerdrDiscordBot(commands.Bot):
             )
             self._stream_task = asyncio.create_task(self.stream_manager.run_forever())
             LOG.info("Started output relay")
+        if self.config.telegram.enabled:
+            self.telegram_service = TelegramReadOnlyService(
+                config=self.config,
+                store=self.store,
+                client=self.client,
+            )
+            self._telegram_task = asyncio.create_task(
+                self.telegram_service.run_forever()
+            )
+            LOG.info("Started read-only Telegram transport")
 
     async def on_ready(self) -> None:
         # Nickname the bot "herdr" so @he autocomplete points here.
@@ -141,6 +154,16 @@ class HerdrDiscordBot(commands.Bot):
                 await self._stream_task
             except asyncio.CancelledError:
                 pass
+        if self.telegram_service:
+            self.telegram_service.stop()
+        if self._telegram_task:
+            self._telegram_task.cancel()
+            try:
+                await self._telegram_task
+            except asyncio.CancelledError:
+                pass
+        if self.telegram_service:
+            await self.telegram_service.close()
         await super().close()
 
     def _card_view_for_event(self, target: str) -> discord.ui.View | None:

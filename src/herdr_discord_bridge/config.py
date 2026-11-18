@@ -35,6 +35,18 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class TelegramConfig:
+    enabled: bool = False
+    token: str = field(default="", repr=False)
+    mode: str = "forum"
+    allowed_chat_ids: frozenset[int] = frozenset()
+    allowed_user_ids: frozenset[int] = frozenset()
+    poll_timeout_seconds: int = 25
+    request_timeout_seconds: float = 35
+    reconnect_delay_seconds: float = 5
+
+
+@dataclass(frozen=True)
 class ApprovalStrategy:
     method: str
     text: str | None = None
@@ -94,6 +106,7 @@ class AppConfig:
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
     auto_threads: AutoThreadsConfig = field(default_factory=AutoThreadsConfig)
     streaming: StreamConfig = field(default_factory=StreamConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
     approval: dict[str, ApprovalStrategy] = field(default_factory=dict)
     deny: dict[str, ApprovalStrategy] = field(default_factory=dict)
     stop: ApprovalStrategy | None = None
@@ -119,6 +132,12 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     core_data = runtime_data.get("core") or {}
     if not isinstance(core_data, dict):
         raise ValueError("runtime.core must be a YAML mapping")
+    transports_data = data.get("transports") or {}
+    if not isinstance(transports_data, dict):
+        raise ValueError("transports must be a YAML mapping")
+    telegram_data = transports_data.get("telegram") or {}
+    if not isinstance(telegram_data, dict):
+        raise ValueError("transports.telegram must be a YAML mapping")
     herdr_data = data.get("herdr") or {}
     watcher_data = data.get("watcher") or {}
     auto_threads_data = data.get("auto_threads") or {}
@@ -142,7 +161,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         enable_auto_threads=bool(data.get("enable_auto_threads", False)),
         enable_streaming=bool(data.get("enable_streaming", False)),
         allow_pane_send_fallback=bool(data.get("allow_pane_send_fallback", False)),
-        dangerous_text_blocklist=tuple(str(item) for item in data.get("dangerous_text_blocklist") or ()),
+        dangerous_text_blocklist=tuple(
+            str(item) for item in data.get("dangerous_text_blocklist") or ()
+        ),
         runtime=RuntimeConfig(
             provider=_runtime_provider(runtime_data.get("provider")),
             core=HcRuntimeConfig(
@@ -220,12 +241,53 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
                 streaming_data.get("hook_max_event_age_seconds", 86_400)
             ),
         ),
+        telegram=TelegramConfig(
+            enabled=bool(telegram_data.get("enabled", False)),
+            token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+            mode=str(telegram_data.get("mode") or "forum").casefold(),
+            allowed_chat_ids=_id_set(telegram_data.get("allowed_chat_ids")),
+            allowed_user_ids=_id_set(telegram_data.get("allowed_user_ids")),
+            poll_timeout_seconds=int(
+                telegram_data.get("poll_timeout_seconds", 25)
+            ),
+            request_timeout_seconds=float(
+                telegram_data.get("request_timeout_seconds", 35)
+            ),
+            reconnect_delay_seconds=float(
+                telegram_data.get("reconnect_delay_seconds", 5)
+            ),
+        ),
         approval=_approval_strategies(approval_data),
         deny=_approval_strategies(data.get("deny") or {}),
         stop=_single_strategy(data.get("stop")),
     )
     _validate_runtime_features(config)
+    _validate_telegram(config)
     return config
+
+
+def _validate_telegram(config: AppConfig) -> None:
+    telegram = config.telegram
+    if not telegram.enabled:
+        return
+    if config.runtime.provider != "herdr-core":
+        raise ValueError("Telegram currently requires runtime.provider=herdr-core")
+    if not telegram.token:
+        raise ValueError("TELEGRAM_BOT_TOKEN is required when Telegram is enabled")
+    if telegram.mode != "forum":
+        raise ValueError("transports.telegram.mode currently supports only 'forum'")
+    if not telegram.allowed_chat_ids:
+        raise ValueError("Telegram requires at least one allowed_chat_id")
+    if not telegram.allowed_user_ids:
+        raise ValueError("Telegram requires at least one allowed_user_id")
+    if not 1 <= telegram.poll_timeout_seconds <= 50:
+        raise ValueError("Telegram poll_timeout_seconds must be between 1 and 50")
+    if telegram.request_timeout_seconds <= telegram.poll_timeout_seconds:
+        raise ValueError(
+            "Telegram request_timeout_seconds must exceed poll_timeout_seconds"
+        )
+    if telegram.reconnect_delay_seconds <= 0:
+        raise ValueError("Telegram reconnect_delay_seconds must be positive")
 
 
 def _validate_runtime_features(config: AppConfig) -> None:

@@ -98,12 +98,14 @@ At a useful operational level:
 5. `database_path` stores pane/thread bindings, audit entries, event dedupe
    keys, and pending Claude questions.
 
-The current release uses the legacy Herdr TUI and Discord. A proposed migration
-makes Herdr Core the runtime authority and adds Telegram as a second transport,
-with Apple Watch notification and short-reply use cases. See
+The stable default remains the legacy Herdr TUI with Discord. An explicit
+experimental path now supports an existing Herdr Core socket, Core status
+events, normal prompt submission, interrupt, and a read-only Telegram forum
+poller with `/agents` and `/help`. Telegram status delivery, topic lifecycle,
+prompt submission, and interrupt remain planned. See
 [Herdr Core and Telegram architecture](docs/core-telegram-design.md) and the
-[implementation plan](docs/core-telegram-plan.md). These documents describe
-planned work, not currently available configuration or commands.
+[implementation plan](docs/core-telegram-plan.md) for the current boundary and
+remaining stages.
 
 ## Prerequisites
 
@@ -404,6 +406,11 @@ If `database_path` is omitted, the code retains the legacy default
 
 ### Nested groups
 
+- `runtime.provider`: `herdr-tui` (default) or experimental `herdr-core`.
+- `runtime.core`: existing socket selection, timeouts, visibility policy, and
+  exact `allowed_terminal_addresses`; an empty Core target list denies all.
+- `transports.telegram`: experimental read-only forum transport. Enabling it
+  requires exact nonempty chat/user allowlists and `TELEGRAM_BOT_TOKEN`.
 - `auto_threads.refresh_seconds`: pane/thread reconciliation interval.
 - `streaming.mode`: `hooks` (recommended) or `poll`.
 - `streaming.refresh_seconds`, `tail_lines`, `initial_tail_lines`, and
@@ -430,6 +437,7 @@ Environment variables:
 | Variable | Meaning |
 |---|---|
 | `DISCORD_TOKEN` | Required Discord bot token |
+| `TELEGRAM_BOT_TOKEN` | Required only when `transports.telegram.enabled` is true |
 | `HERDR_SOCKET_PATH` | Optional socket for a non-default local Herdr session |
 | `HERDR_SESSION` | Used by the watcher to derive a named local session socket when no explicit path is set |
 | `HERDRELAY_HOOK_INBOX` | Adapter-side override; must match the configured inbox |
@@ -439,11 +447,16 @@ and lower-noise watcher settings.
 
 ## Security and limitations
 
-Treat the Discord parent channel as remote terminal access.
+Treat every enabled Discord or Telegram destination as remote terminal access.
 
-- Restrict the bot with both Discord channel permissions and the configured
-  guild, channel, and user allowlists. Empty guild/channel lists are permissive;
-  an empty user list denies guarded writes.
+- Restrict Discord with both channel permissions and the configured guild,
+  channel, and user allowlists. Empty Discord guild/channel lists are
+  permissive; an empty user list denies guarded writes.
+- Telegram currently supports read-only `/agents` and `/help` commands through
+  outbound long polling. It requires an allowlisted forum supergroup and exact
+  user/chat IDs; ordinary Telegram text performs no Core mutation.
+- Telegram bots cannot use Secret Chats. Messages and agent metadata sent there
+  are stored by Telegram's cloud service.
 - Automatic pane threads are **public threads** within the parent channel, not
   private threads. Discord permissions remain the primary visibility boundary.
 - `dangerous_text_blocklist` is a substring filter, not command parsing, policy

@@ -10,6 +10,16 @@ runtime:
     include_connected_machines: false
     allowed_terminal_addresses: [] # empty denies all Core targets; list exact t-addresses
 
+transports:
+  telegram:
+    enabled: false
+    mode: forum
+    allowed_chat_ids: []
+    allowed_user_ids: []
+    poll_timeout_seconds: 25
+    request_timeout_seconds: 35
+    reconnect_delay_seconds: 5
+
 allowed_guild_ids: []
 allowed_channel_ids: []
 allowed_user_ids: []

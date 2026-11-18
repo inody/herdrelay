@@ -124,6 +124,83 @@ def test_load_config_accepts_core_event_watcher(tmp_path, monkeypatch):
 
 
 
+def test_load_config_reads_enabled_telegram_transport(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-secret")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+runtime:
+  provider: herdr-core
+transports:
+  telegram:
+    enabled: true
+    mode: forum
+    allowed_chat_ids: [-100123]
+    allowed_user_ids: [42]
+    poll_timeout_seconds: 20
+    request_timeout_seconds: 30
+    reconnect_delay_seconds: 2
+"""
+    )
+
+    config = load_config(config_path)
+
+    assert config.telegram.enabled is True
+    assert config.telegram.token == "telegram-secret"
+    assert config.telegram.allowed_chat_ids == frozenset({-100123})
+    assert config.telegram.allowed_user_ids == frozenset({42})
+    assert config.telegram.poll_timeout_seconds == 20
+    assert config.telegram.request_timeout_seconds == 30
+    assert "telegram-secret" not in repr(config.telegram)
+
+
+@pytest.mark.parametrize(
+    "runtime, telegram, message",
+    [
+        (
+            "herdr-core",
+            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]",
+            "TELEGRAM_BOT_TOKEN",
+        ),
+        (
+            "herdr-tui",
+            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]",
+            "requires runtime.provider",
+        ),
+        ("herdr-core", "allowed_user_ids: [2]", "allowed_chat_id"),
+        ("herdr-core", "allowed_chat_ids: [-1]", "allowed_user_id"),
+        (
+            "herdr-core",
+            "mode: direct\n    allowed_chat_ids: [-1]\n    allowed_user_ids: [2]",
+            "only 'forum'",
+        ),
+    ],
+)
+def test_load_config_rejects_unsafe_telegram_settings(
+    tmp_path, monkeypatch, runtime, telegram, message
+):
+    monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    if "TELEGRAM_BOT_TOKEN" not in message:
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f"""
+runtime:
+  provider: {runtime}
+transports:
+  telegram:
+    enabled: true
+    {telegram}
+"""
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_config(config_path)
+
+
+
 def test_load_config_rejects_invalid_core_runtime_values(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     config_path = tmp_path / "config.yaml"
