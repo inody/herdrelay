@@ -153,7 +153,7 @@ Hook mode watches `streaming.hook_inbox_path` for JSON files, oldest first. The
 built-in adapters atomically rename a temporary file into the inbox so HerdRelay
 does not read a partial event.
 
-A normal response event has this format:
+A legacy TUI response event has this format:
 
 ```json
 {
@@ -165,6 +165,26 @@ A normal response event has this format:
 }
 ```
 
+A Core-aware response uses version 2 and pins the Core identity as well as the
+terminal address:
+
+```json
+{
+  "version": 2,
+  "event_id": "stable-id-for-this-turn",
+  "runtime": "herdr-core",
+  "core_id": "stable-core-id",
+  "target": "t12",
+  "agent": "pi",
+  "text": "complete assistant response"
+}
+```
+
+The Pi adapter prefers `HC_TERMINAL_ID`. It reads the stable Core ID from
+`HERDRELAY_CORE_ID` when explicitly supplied, otherwise from `core.json` beside
+`HC_TERMINAL_SOCKET`. If a Core terminal lacks a verifiable Core identity, the
+adapter emits nothing instead of falling back to an inherited legacy pane ID.
+
 Supported `kind` values are:
 
 - `response` (default): relay `text` and clear any pending question;
@@ -174,15 +194,20 @@ Supported `kind` values are:
 
 Validation and retention rules:
 
-- `version` must be `1`.
-- Required identifiers must be non-empty strings; event IDs are limited to 200
-  characters and agent names to 50.
+- `version` must be `1` or `2`.
+- Version 1 requires only `pane_id` and rejects conflicting Core identity.
+- Version 2 requires `runtime: herdr-core`, `core_id`, and `target`, and rejects
+  a conflicting legacy `pane_id`.
+- Required identifiers must be non-empty strings; event IDs, Core IDs, and
+  target addresses are limited to 200 characters and agent names to 50.
 - Files larger than `hook_max_event_bytes`, invalid JSON, and malformed events
   are deleted.
 - A valid event without a pane/thread mapping waits until the mapping appears or
   `hook_max_event_age_seconds` elapses.
 - Delivered and duplicate events are deleted.
-- Response dedupe uses `agent-output:<agent>:<event_id>` in SQLite.
+- Legacy Discord response dedupe uses `agent-output:<agent>:<event_id>`.
+- Telegram response dedupe is destination-specific and includes the chat and
+  topic IDs, so delivery to one transport does not suppress another route.
 - Text is posted as ordinary Discord message content with original newlines and
   agent-authored Markdown. HerdRelay adds no code fences and disables mentions.
 - Long output is split at line boundaries where possible. Delivery is not

@@ -18,6 +18,7 @@ from .models import TransportAuditEntry
 from .runtime import RuntimeClient
 from .store import Store
 from .telegram_api import TelegramApiError, TelegramBotApi
+from .telegram_output import TelegramOutputRelay
 from .telegram_updates import (
     TelegramUpdatePolicy,
     parse_inbound_callback,
@@ -50,10 +51,17 @@ class TelegramService:
             request_timeout_seconds=self.telegram.request_timeout_seconds,
         )
         self.policy = TelegramUpdatePolicy(self.telegram)
+        self.output_relay = (
+            TelegramOutputRelay(config=config, store=store, api=self.api)
+            if config.enable_streaming and config.streaming.mode == "hooks"
+            else None
+        )
         self._stopped = asyncio.Event()
 
     def stop(self) -> None:
         self._stopped.set()
+        if self.output_relay is not None:
+            self.output_relay.stop()
 
     async def close(self) -> None:
         self.stop()
@@ -63,6 +71,8 @@ class TelegramService:
         tasks = [asyncio.create_task(self._poll_forever())]
         if self.core_client is not None:
             tasks.append(asyncio.create_task(self._status_forever()))
+        if self.output_relay is not None:
+            tasks.append(asyncio.create_task(self.output_relay.run_forever()))
         try:
             await self._stopped.wait()
         finally:

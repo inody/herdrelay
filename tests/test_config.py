@@ -95,10 +95,7 @@ def test_load_config_rejects_unknown_runtime_provider(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "body, message",
-    [
-        ("enable_approve: true", "enable_approve"),
-        ("enable_streaming: true", "streaming.mode=poll"),
-    ],
+    [("enable_approve: true", "enable_approve")],
 )
 def test_load_config_rejects_unimplemented_core_features(
     tmp_path, monkeypatch, body, message
@@ -109,6 +106,19 @@ def test_load_config_rejects_unimplemented_core_features(
 
     with pytest.raises(ValueError, match=message):
         load_config(config_path)
+
+
+def test_load_config_accepts_core_hook_streaming(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "runtime:\n  provider: herdr-core\n"
+        "enable_streaming: true\nstreaming:\n  mode: hooks\n"
+    )
+
+    config = load_config(config_path)
+    assert config.enable_streaming is True
+    assert config.streaming.mode == "hooks"
 
 
 def test_load_config_accepts_core_event_watcher(tmp_path, monkeypatch):

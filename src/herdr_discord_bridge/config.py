@@ -353,10 +353,6 @@ def _validate_runtime_features(config: AppConfig) -> None:
         raise ValueError(
             "enable_approve is disabled for Herdr Core until guarded actions exist"
         )
-    if config.enable_streaming and config.streaming.mode != "poll":
-        raise ValueError(
-            "Herdr Core streaming currently requires streaming.mode=poll"
-        )
 
 
 def _runtime_provider(value: Any) -> str:

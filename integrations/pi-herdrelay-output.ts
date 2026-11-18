@@ -1,15 +1,44 @@
 // HerdRelay Pi output adapter
 // HERDRELAY_ADAPTER_ID=pi-output-v1
-// HERDRELAY_ADAPTER_VERSION=3
+// HERDRELAY_ADAPTER_VERSION=4
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
-const paneId = process.env.HERDR_PANE_ID;
-const enabled = process.env.HERDR_ENV === "1" && !!paneId;
+type AdapterIdentity =
+  | { version: 1; paneId: string }
+  | { version: 2; coreId: string; target: string };
+
+function coreIdentity(): AdapterIdentity | undefined {
+  const target = process.env.HC_TERMINAL_ID?.trim();
+  if (!target) return undefined;
+  const explicit = process.env.HERDRELAY_CORE_ID?.trim();
+  if (explicit) return { version: 2, coreId: explicit, target };
+  const socket = process.env.HC_TERMINAL_SOCKET?.trim();
+  if (!socket) return undefined;
+  try {
+    const item = JSON.parse(readFileSync(join(dirname(socket), "core.json"), "utf8"));
+    const coreId = typeof item?.id === "string" ? item.id.trim() : "";
+    return coreId ? { version: 2, coreId, target } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function adapterIdentity(): AdapterIdentity | undefined {
+  const coreTargetPresent = !!process.env.HC_TERMINAL_ID?.trim();
+  if (coreTargetPresent) return coreIdentity();
+  const paneId = process.env.HERDR_PANE_ID?.trim();
+  if (process.env.HERDR_ENV === "1" && paneId) return { version: 1, paneId };
+  return undefined;
+}
+
+const identity = adapterIdentity();
+const enabled = identity !== undefined;
 const inbox = process.env.HERDRELAY_HOOK_INBOX
   ?? join(homedir(), ".cache", "herdrelay", "agent-output");
 
@@ -37,11 +66,15 @@ async function emitEvent(event: Record<string, unknown> & { event_id: string }):
 }
 
 function eventBase(eventId: string, sessionId: string) {
+  if (!identity) throw new Error("HerdRelay adapter identity is unavailable");
+  const target = identity.version === 2
+    ? { runtime: "herdr-core", core_id: identity.coreId, target: identity.target }
+    : { pane_id: identity.paneId };
   return {
-    version: 1,
+    version: identity.version,
     event_id: eventId,
     agent: "pi",
-    pane_id: paneId,
+    ...target,
     session_id: sessionId,
     created_at: Date.now() / 1000,
   };

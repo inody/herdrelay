@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
@@ -12,7 +11,13 @@ import discord
 
 from .config import AppConfig
 from .formatter import split_text_chunks
-from .models import HerdrTarget, PendingQuestion, QuestionOption
+from .domain import RuntimeKind
+from .models import HerdrTarget, PendingQuestion
+from .output_events import (
+    HookOutputEvent,
+    inbox_events_in_arrival_order,
+    load_hook_output_event,
+)
 from .runtime import RuntimeClient
 from .store import Store
 
@@ -65,91 +70,6 @@ def _last_lines(text: str, count: int) -> str:
     if count <= 0:
         return ""
     return "\n".join(text.split("\n")[-count:])
-
-
-@dataclass(frozen=True)
-class HookOutputEvent:
-    event_id: str
-    agent: str
-    pane_id: str
-    text: str
-    kind: str = "response"
-    question: PendingQuestion | None = None
-
-
-def load_hook_output_event(path: Path, *, max_bytes: int) -> HookOutputEvent:
-    """Load and validate one agent-adapter output event."""
-    if path.stat().st_size > max_bytes:
-        raise ValueError(f"event exceeds {max_bytes} bytes")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("version") != 1:
-        raise ValueError("unsupported event format")
-    kind = payload.get("kind", "response")
-    if kind not in {"response", "question", "question_resolved", "human_input"}:
-        raise ValueError("unsupported event kind")
-    # Resolution and activity events carry no message.
-    required = ("event_id", "agent", "pane_id")
-    if kind not in {"question_resolved", "human_input"}:
-        required += ("text",)
-    values = {key: payload.get(key) for key in required}
-    if not all(isinstance(value, str) and value for value in values.values()):
-        raise ValueError(f"{', '.join(required)} must be non-empty strings")
-    values.setdefault("text", "")
-    if len(values["event_id"]) > 200 or len(values["agent"]) > 50:
-        raise ValueError("event identifier or agent name is too long")
-    question = _load_question(payload.get("question"), pane_id=values["pane_id"], event_id=values["event_id"])
-    if kind == "question" and question is None:
-        raise ValueError("question event is missing a valid question")
-    return HookOutputEvent(**values, kind=kind, question=question)
-
-
-def _load_question(
-    value: object, *, pane_id: str, event_id: str
-) -> PendingQuestion | None:
-    if not isinstance(value, dict):
-        return None
-    prompt = value.get("prompt")
-    options_data = value.get("options")
-    if not isinstance(prompt, str) or not prompt.strip() or not isinstance(options_data, list):
-        return None
-    options = tuple(
-        QuestionOption(
-            label=option["label"].strip(),
-            description=(
-                option["description"].strip()
-                if isinstance(option.get("description"), str)
-                and option["description"].strip()
-                else None
-            ),
-        )
-        for option in options_data
-        if isinstance(option, dict)
-        and isinstance(option.get("label"), str)
-        and option["label"].strip()
-    )
-    if not options:
-        return None
-    return PendingQuestion(
-        pane_id=pane_id,
-        event_id=event_id,
-        prompt=prompt.strip(),
-        options=options,
-        multi_select=value.get("multi_select") is True,
-    )
-
-
-def _inbox_events_in_arrival_order(inbox: Path) -> list[Path]:
-    """List event files oldest first so a resolution never precedes its question.
-
-    Event file names are content hashes, so name order is arbitrary.
-    """
-    stamped: list[tuple[int, str, Path]] = []
-    for path in inbox.glob("*.json"):
-        try:
-            stamped.append((path.stat().st_mtime_ns, path.name, path))
-        except FileNotFoundError:
-            continue
-    return [path for _mtime, _name, path in sorted(stamped)]
 
 
 def _hook_event_text(event: HookOutputEvent) -> str:
@@ -229,7 +149,7 @@ class StreamManager:
                 pass
 
     async def _drain_hook_events(self, inbox: Path) -> None:
-        paths = await asyncio.to_thread(_inbox_events_in_arrival_order, inbox)
+        paths = await asyncio.to_thread(inbox_events_in_arrival_order, inbox)
         for path in paths:
             try:
                 event = await asyncio.to_thread(
@@ -242,6 +162,12 @@ class StreamManager:
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 LOG.warning("Discarding invalid agent hook event %s: %s", path.name, exc)
                 await asyncio.to_thread(path.unlink, missing_ok=True)
+                continue
+
+            if event.target.runtime is RuntimeKind.HERDR_CORE:
+                # Core-aware events are consumed by the Telegram output relay.
+                # Legacy Discord routing remains pane-based until Core thread
+                # bindings carry normalized target identities.
                 continue
 
             dedupe_key = f"agent-output:{event.agent}:{event.event_id}"

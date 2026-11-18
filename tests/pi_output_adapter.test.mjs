@@ -1,19 +1,33 @@
 // Run with Node >=22.6: node --experimental-strip-types --test tests/pi_output_adapter.test.mjs
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 let serial = 0;
 
-async function setup(t, { herdr = "1", pane = "test:p1" } = {}) {
+async function setup(t, {
+  herdr = "1", pane = "test:p1", coreTarget, coreId, coreFileId,
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "herdrelay-pi-test-"));
-  const keys = ["HERDR_ENV", "HERDR_PANE_ID", "HERDRELAY_HOOK_INBOX"];
+  const keys = [
+    "HERDR_ENV", "HERDR_PANE_ID", "HERDRELAY_HOOK_INBOX",
+    "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HERDRELAY_CORE_ID",
+  ];
   const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
   process.env.HERDR_ENV = herdr;
   process.env.HERDR_PANE_ID = pane;
   process.env.HERDRELAY_HOOK_INBOX = join(root, "inbox");
+  if (coreTarget !== undefined) process.env.HC_TERMINAL_ID = coreTarget;
+  if (coreId !== undefined) process.env.HERDRELAY_CORE_ID = coreId;
+  if (coreFileId !== undefined) {
+    const coreHome = join(root, "core");
+    await mkdir(coreHome, { recursive: true });
+    await writeFile(join(coreHome, "core.json"), JSON.stringify({ id: coreFileId }));
+    process.env.HC_TERMINAL_SOCKET = join(coreHome, "default.sock");
+  }
   t.after(async () => {
     for (const key of keys) {
       if (original[key] === undefined) delete process.env[key];
@@ -73,6 +87,39 @@ test("TUI relays only after settlement, once, with correct identity and private 
   await unlink(file);
   await adapter.emit("message_end", response(), ctx);
   await adapter.emit("agent_settled", { aborted: false }, ctx);
+  assert.deepEqual(await adapter.events(), []);
+});
+
+test("Core TUI emits version 2 identity from the Core metadata file", async (t) => {
+  const adapter = await setup(t, {
+    coreTarget: "t12", coreFileId: "core-123", herdr: "1", pane: "legacy:p1",
+  });
+  await adapter.emit("message_end", response(), context());
+  await adapter.emit("agent_settled", {}, context());
+  const [event] = await adapter.events();
+  assert.equal(event.version, 2);
+  assert.equal(event.runtime, "herdr-core");
+  assert.equal(event.core_id, "core-123");
+  assert.equal(event.target, "t12");
+  assert.equal(event.pane_id, undefined);
+});
+
+test("explicit Core identity takes precedence over local metadata", async (t) => {
+  const adapter = await setup(t, {
+    coreTarget: "t7", coreId: "explicit-core", coreFileId: "file-core",
+  });
+  await adapter.emit("message_end", response(), context());
+  await adapter.emit("agent_settled", {}, context());
+  const [event] = await adapter.events();
+  assert.equal(event.core_id, "explicit-core");
+  assert.equal(event.target, "t7");
+});
+
+test("Core terminal without Core identity is rejected instead of using inherited legacy identity", async (t) => {
+  const adapter = await setup(t, {
+    coreTarget: "t9", herdr: "1", pane: "legacy:p1",
+  });
+  assert.equal(adapter.handlers.size, 0);
   assert.deepEqual(await adapter.events(), []);
 });
 

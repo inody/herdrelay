@@ -410,10 +410,12 @@ If `database_path` is omitted, the code retains the legacy default
 - `runtime.provider`: `herdr-tui` (default) or experimental `herdr-core`.
 - `runtime.core`: existing socket selection, timeouts, visibility policy, and
   exact `allowed_terminal_addresses`; an empty Core target list denies all.
-- `transports.telegram`: experimental read-only forum transport. Enabling it
-  requires exact nonempty chat/user allowlists, `forum_chat_id`, and
+- `transports.telegram`: experimental forum transport. Enabling it requires
+  exact nonempty chat/user allowlists, `forum_chat_id`, and
   `TELEGRAM_BOT_TOKEN`; `statuses` is limited to `blocked` and `done`, while
   transport-specific `enable_send` and `enable_interrupt` default to false.
+  With `enable_streaming: true` and `streaming.mode: hooks`, Core-aware version
+  2 adapter responses are delivered to the exact persisted terminal topic.
   Interrupt confirmations are actor/topic bound, single-use, and expire after
   `confirmation_ttl_seconds`. Per-minute actor, chat, and target mutation limits
   are configured independently.
@@ -458,9 +460,9 @@ Treat every enabled Discord or Telegram destination as remote terminal access.
 - Restrict Discord with both channel permissions and the configured guild,
   channel, and user allowlists. Empty Discord guild/channel lists are
   permissive; an empty user list denies guarded writes.
-- Telegram supports `/agents`, `/help`, and status-only blocked/done
-  notifications in persisted forum topics. It requires an allowlisted forum
-  supergroup and exact user/chat IDs. Ordinary text performs no Core mutation
+- Telegram supports `/agents`, `/help`, blocked/done notifications, and
+  Core-aware adapter responses in persisted forum topics. It requires an
+  allowlisted forum supergroup and exact user/chat IDs. Ordinary text performs no Core mutation
   unless `transports.telegram.enable_send` is explicitly enabled. `/interrupt`
   additionally requires `enable_interrupt` and a one-time confirmation button.
 - Telegram prompt and interrupt mutations are atomically claimed and audited
@@ -512,8 +514,9 @@ uv run herdrelay-telegram --config /path/to/telegram-config.yaml
 The standalone command does not require `DISCORD_TOKEN`, but it still requires
 an enabled `transports.telegram` block, `TELEGRAM_BOT_TOKEN`, an experimental
 Herdr Core runtime, exact chat/user/terminal allowlists, and a separate stable
-SQLite database. Use it for isolated acceptance testing before enabling
-Telegram in the Discord service.
+SQLite database. Set `enable_streaming: true` with `streaming.mode: hooks` to
+relay version 2 Core adapter responses. Use it for isolated acceptance testing
+before enabling Telegram in the Discord service.
 
 On macOS, install the supplied user LaunchAgent:
 

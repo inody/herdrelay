@@ -95,6 +95,70 @@ def test_load_hook_output_event(tmp_path):
     assert event.text == "complete response"
 
 
+def test_load_core_hook_output_event_v2(tmp_path):
+    path = tmp_path / "event-v2.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "event_id": "turn-2",
+                "runtime": "herdr-core",
+                "core_id": "core-1",
+                "target": "t12",
+                "agent": "pi",
+                "text": "complete response",
+            }
+        )
+    )
+
+    event = load_hook_output_event(path, max_bytes=1000)
+
+    assert event.version == 2
+    assert event.target.runtime.value == "herdr-core"
+    assert event.target.controller_core_id == "core-1"
+    assert event.target.address == "t12"
+    assert event.pane_id == "t12"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "version": 2,
+            "event_id": "bad-1",
+            "runtime": "herdr-core",
+            "target": "t12",
+            "agent": "pi",
+            "text": "response",
+        },
+        {
+            "version": 2,
+            "event_id": "bad-2",
+            "runtime": "herdr-core",
+            "core_id": "core-1",
+            "target": "t12",
+            "pane_id": "legacy:p1",
+            "agent": "pi",
+            "text": "response",
+        },
+        {
+            "version": 1,
+            "event_id": "bad-3",
+            "pane_id": "legacy:p1",
+            "core_id": "core-1",
+            "agent": "pi",
+            "text": "response",
+        },
+    ],
+)
+def test_hook_output_event_rejects_missing_or_conflicting_identity(tmp_path, payload):
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError):
+        load_hook_output_event(path, max_bytes=1000)
+
+
 def test_human_input_event_requires_no_prompt_text(tmp_path):
     path = tmp_path / "activity.json"
     path.write_text(json.dumps({
@@ -182,6 +246,42 @@ async def test_hook_event_is_delivered_once_and_removed(tmp_path, monkeypatch):
     assert store.has_event_key("agent-output:claude:turn-1")
     thread.send.assert_awaited_once()
     assert thread.send.await_args.args[0] == "complete response"
+
+
+@pytest.mark.asyncio
+async def test_discord_hook_consumer_leaves_core_v2_event_for_telegram(tmp_path, monkeypatch):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    event_path = inbox / "event-v2.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "event_id": "turn-2",
+                "runtime": "herdr-core",
+                "core_id": "core-1",
+                "target": "t12",
+                "agent": "pi",
+                "text": "complete response",
+            }
+        )
+    )
+    manager = StreamManager(
+        bot=None,  # type: ignore[arg-type]
+        config=AppConfig(
+            discord_token="token",
+            streaming=StreamConfig(mode="hooks", hook_inbox_path=str(inbox)),
+        ),
+        store=Store(tmp_path / "store.sqlite3"),
+        client=None,  # type: ignore[arg-type]
+    )
+    fetch_thread = AsyncMock()
+    monkeypatch.setattr(manager, "_fetch_thread", fetch_thread)
+
+    await manager._drain_hook_events(inbox)
+
+    assert event_path.exists()
+    fetch_thread.assert_not_awaited()
 
 
 @pytest.mark.asyncio
