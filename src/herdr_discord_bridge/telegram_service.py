@@ -5,10 +5,13 @@ import logging
 from typing import Any
 
 from .config import AppConfig
-from .formatter import target_alias
+from .domain import MutationOutcomeUnknownError, TargetKey
+from .formatter import target_alias, truncate
 from .hc_client import HcClient
 from .hc_events import HcEventStream, HcStatusTransition, HcTerminalState
 from .hc_protocol import HcEventNotification
+from .hc_rpc import HcRpcError
+from .models import TransportAuditEntry
 from .runtime import RuntimeClient
 from .store import Store
 from .telegram_api import TelegramApiError, TelegramBotApi
@@ -98,11 +101,14 @@ class TelegramReadOnlyService:
             if self.store.has_event_key(dedupe_key):
                 self._save_offset(update_id + 1)
                 continue
+            claimed_mutation = False
             try:
-                await self._handle_update(update)
+                claimed_mutation = await self._handle_update(
+                    update, event_key=dedupe_key
+                )
             except ValueError as exc:
                 LOG.warning("Discarding invalid Telegram update %s: %s", update_id, exc)
-            if not self.store.mark_event_seen(dedupe_key):
+            if not claimed_mutation and not self.store.mark_event_seen(dedupe_key):
                 LOG.info("Telegram update %s was already handled", update_id)
             self._save_offset(update_id + 1)
 
@@ -282,10 +288,12 @@ class TelegramReadOnlyService:
         assert refreshed is not None
         return refreshed
 
-    async def _handle_update(self, update: dict[str, Any]) -> None:
+    async def _handle_update(
+        self, update: dict[str, Any], *, event_key: str
+    ) -> bool:
         message = parse_inbound_message(update)
         if message is None or not self.policy.authorized(message):
-            return
+            return False
         command = message.command
         if command in {"agents", "list"}:
             targets = await asyncio.to_thread(self.client.list_targets)
@@ -301,12 +309,21 @@ class TelegramReadOnlyService:
                     )
                 text = "Agents\n" + "\n".join(lines)
         elif command in {"help", "start"}:
+            prompt_help = (
+                "Plain text in a bound topic submits a prompt."
+                if self.telegram.enable_send
+                else "Prompt submission is disabled."
+            )
             text = (
-                "HerdRelay Telegram (read-only)\n"
+                "HerdRelay Telegram\n"
                 "/agents — list allowlisted agents\n"
                 "/help — show this message\n"
-                "Prompt submission and interrupt are not enabled yet."
+                f"{prompt_help}\nInterrupt is not enabled yet."
             )
+        elif command is not None:
+            text = "Unknown command. Use /agents or /help."
+        elif self.telegram.enable_send:
+            return await self._send_prompt(message, event_key=event_key)
         else:
             text = (
                 "Telegram is currently read-only. Use /agents or /help; "
@@ -317,6 +334,130 @@ class TelegramReadOnlyService:
             message_thread_id=message.message_thread_id,
             text=text,
         )
+        return False
+
+    async def _send_prompt(self, message, *, event_key: str) -> bool:
+        if self.core_client is None:
+            await self._feedback(message, "Core runtime is unavailable.")
+            return False
+        if message.message_thread_id is None:
+            await self._feedback(
+                message, "Send prompts inside a bound agent forum topic."
+            )
+            return False
+        route = self.store.get_telegram_topic_by_destination(
+            chat_id=message.chat_id, thread_id=message.message_thread_id
+        )
+        if route is None or route.closed:
+            await self._feedback(message, "This forum topic is not bound to a live agent.")
+            return False
+        text = message.text.strip()
+        if len(text) > self.config.max_message_chars:
+            await self._feedback(
+                message,
+                f"Message exceeds the {self.config.max_message_chars}-character limit.",
+            )
+            return False
+        lowered = text.casefold()
+        blocked = next(
+            (
+                item
+                for item in self.config.dangerous_text_blocklist
+                if item.casefold() in lowered
+            ),
+            None,
+        )
+        if blocked is not None:
+            await self._feedback(message, "Message was rejected by the text blocklist.")
+            return False
+
+        targets = await asyncio.to_thread(self.core_client.list_targets)
+        if self.core_client.core_id != route.core_id:
+            await self._feedback(
+                message,
+                "This topic belongs to a different Core instance; no prompt was sent.",
+            )
+            return False
+        target = next(
+            (item for item in targets if item.target == route.terminal_address),
+            None,
+        )
+        if target is None or not target.agent_name:
+            await self._feedback(message, "The bound Core agent is not currently live.")
+            return False
+
+        target_key = TargetKey.core(
+            controller_core_id=route.core_id,
+            address=route.terminal_address,
+        ).to_storage_key()
+        audit_id = self.store.claim_transport_mutation(
+            event_key=event_key,
+            entry=TransportAuditEntry(
+                transport="telegram",
+                actor_id=str(message.user_id),
+                container_id=str(message.chat_id),
+                conversation_id=str(message.message_thread_id),
+                action="send_text",
+                target_key=target_key,
+                payload_preview=truncate(text, max_chars=200),
+                outcome="attempt",
+            ),
+        )
+        if audit_id is None:
+            return True
+
+        try:
+            receipt = await asyncio.to_thread(
+                self.core_client.send_with_receipt,
+                route.terminal_address,
+                text,
+            )
+        except MutationOutcomeUnknownError as exc:
+            self.store.finish_transport_audit(
+                audit_id,
+                outcome="outcome_unknown",
+                detail=truncate(str(exc), max_chars=500),
+            )
+            await self._safe_feedback(
+                message,
+                "⚠️ Prompt outcome is unknown. Inspect the agent before retrying.",
+            )
+        except HcRpcError as exc:
+            self.store.finish_transport_audit(
+                audit_id,
+                outcome="rejected" if exc.kind else "failed",
+                detail=truncate(str(exc), max_chars=500),
+            )
+            await self._safe_feedback(message, f"⚠️ Prompt rejected: {exc}")
+        except Exception as exc:
+            self.store.finish_transport_audit(
+                audit_id,
+                outcome="failed",
+                detail=truncate(str(exc), max_chars=500),
+            )
+            await self._safe_feedback(message, "⚠️ Prompt submission failed.")
+        else:
+            self.store.finish_transport_audit(
+                audit_id,
+                outcome="succeeded",
+                detail=truncate(str(receipt.result), max_chars=500),
+                observed_turn=receipt.observed_turn,
+            )
+            await self._safe_feedback(message, "✅ Prompt submitted.")
+        return True
+
+    async def _feedback(self, message, text: str) -> None:
+        await self.api.send_text(
+            chat_id=message.chat_id,
+            message_thread_id=message.message_thread_id,
+            text=text,
+        )
+
+    async def _safe_feedback(self, message, text: str) -> None:
+        try:
+            await self._feedback(message, text)
+        except Exception:
+            LOG.exception("Failed to send Telegram mutation feedback")
 
     def _load_offset(self) -> int | None:
         value = self.store.get_state(OFFSET_STATE_KEY)

@@ -543,6 +543,7 @@ transports:
     allowed_user_ids: []
     forum_chat_id: null
     statuses: [blocked, done]
+    enable_send: false
     notification_detail: status
 ```
 

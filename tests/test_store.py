@@ -115,6 +115,10 @@ def test_telegram_topic_route_upsert_and_close(tmp_path):
     assert route.chat_id == "-1001"
     assert route.thread_id == "77"
     assert route.closed is False
+    by_destination = store.get_telegram_topic_by_destination(
+        chat_id=-1001, thread_id=77
+    )
+    assert by_destination == route
 
     store.set_telegram_topic_closed(
         core_id="core-1", terminal_address="t1", closed=True

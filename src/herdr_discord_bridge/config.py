@@ -43,6 +43,7 @@ class TelegramConfig:
     allowed_user_ids: frozenset[int] = frozenset()
     forum_chat_id: int | None = None
     statuses: tuple[str, ...] = ("blocked", "done")
+    enable_send: bool = False
     poll_timeout_seconds: int = 25
     request_timeout_seconds: float = 35
     reconnect_delay_seconds: float = 5
@@ -254,6 +255,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
                 str(item).casefold()
                 for item in telegram_data.get("statuses", ("blocked", "done"))
             ),
+            enable_send=bool(telegram_data.get("enable_send", False)),
             poll_timeout_seconds=int(
                 telegram_data.get("poll_timeout_seconds", 25)
             ),

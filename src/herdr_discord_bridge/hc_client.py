@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from .config import AppConfig
@@ -11,6 +12,12 @@ from .models import HerdrTarget, StartedAgent
 from .runtime import RuntimeCapabilities
 
 KNOWN_AGENT_APPS = frozenset({"pi", "claude", "codex"})
+
+
+@dataclass(frozen=True, slots=True)
+class HcMutationReceipt:
+    observed_turn: int
+    result: dict[str, Any]
 
 
 class HcUnsupportedOperation(HcRpcError):
@@ -99,6 +106,9 @@ class HcClient:
         return text
 
     def send(self, target: str, message: str) -> None:
+        self.send_with_receipt(target, message)
+
+    def send_with_receipt(self, target: str, message: str) -> HcMutationReceipt:
         self._ensure_target_allowed(target)
         raw = self._call("terminal.get", {"terminal": target, "caller": None})
         terminal = parse_terminal(raw)
@@ -109,7 +119,7 @@ class HcClient:
         projected = self._target_from_terminal(terminal, raw=raw)
         if not projected.agent_name:
             raise HcRpcError(f"Core terminal is not an eligible live agent: {target}")
-        self._call(
+        result = self._call(
             "terminal.send",
             {
                 "terminal": target,
@@ -119,8 +129,12 @@ class HcClient:
                 "wait": False,
             },
         )
+        return HcMutationReceipt(observed_turn=terminal.turn, result=result)
 
     def interrupt(self, target: str) -> dict[str, Any]:
+        return self.interrupt_with_receipt(target).result
+
+    def interrupt_with_receipt(self, target: str) -> HcMutationReceipt:
         self._ensure_target_allowed(target)
         raw = self._call("terminal.get", {"terminal": target, "caller": None})
         terminal = parse_terminal(raw)
@@ -132,7 +146,8 @@ class HcClient:
             raise HcRpcError(
                 f"Core terminal is not interruptible in state {state}: {target}"
             )
-        return self._call("terminal.interrupt", {"terminal": target})
+        result = self._call("terminal.interrupt", {"terminal": target})
+        return HcMutationReceipt(observed_turn=terminal.turn, result=result)
 
     def send_keys(
         self, target: str, keys: Iterable[str], *, interval_seconds: float = 0

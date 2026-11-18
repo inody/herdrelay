@@ -389,6 +389,19 @@ class Store:
             ).fetchone()
         return _telegram_topic(row) if row else None
 
+    def get_telegram_topic_by_destination(
+        self, *, chat_id: int | str, thread_id: int | str
+    ) -> TelegramTopicRoute | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM telegram_topics
+                WHERE chat_id = ? AND thread_id = ?
+                """,
+                (str(chat_id), str(thread_id)),
+            ).fetchone()
+        return _telegram_topic(row) if row else None
+
     def upsert_telegram_topic(
         self,
         *,

@@ -140,6 +140,7 @@ transports:
     allowed_user_ids: [42]
     forum_chat_id: -100123
     statuses: [blocked]
+    enable_send: true
     poll_timeout_seconds: 20
     request_timeout_seconds: 30
     reconnect_delay_seconds: 2
@@ -154,6 +155,7 @@ transports:
     assert config.telegram.allowed_user_ids == frozenset({42})
     assert config.telegram.forum_chat_id == -100123
     assert config.telegram.statuses == ("blocked",)
+    assert config.telegram.enable_send is True
     assert config.telegram.poll_timeout_seconds == 20
     assert config.telegram.request_timeout_seconds == 30
     assert "telegram-secret" not in repr(config.telegram)
@@ -184,7 +186,8 @@ transports:
         ),
         (
             "herdr-core",
-            "mode: direct\n    allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -1",
+            "mode: direct\n    allowed_chat_ids: [-1]\n"
+            "    allowed_user_ids: [2]\n    forum_chat_id: -1",
             "only 'forum'",
         ),
         (
@@ -194,7 +197,8 @@ transports:
         ),
         (
             "herdr-core",
-            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -1\n    statuses: [working]",
+            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n"
+            "    forum_chat_id: -1\n    statuses: [working]",
             "only blocked and done",
         ),
     ],

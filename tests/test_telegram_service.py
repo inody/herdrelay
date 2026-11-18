@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 from pathlib import Path
 
@@ -12,7 +12,8 @@ from herdr_discord_bridge.config import (
     RuntimeConfig,
     TelegramConfig,
 )
-from herdr_discord_bridge.hc_client import HcClient
+from herdr_discord_bridge.domain import MutationOutcomeUnknownError
+from herdr_discord_bridge.hc_client import HcClient, HcMutationReceipt
 from herdr_discord_bridge.hc_events import HcTerminalState
 from herdr_discord_bridge.hc_protocol import (
     decode_notification_line,
@@ -127,6 +128,33 @@ class FakeClient:
                 workspace_label="project",
             )
         ]
+
+
+class FakeMutationClient(HcClient):
+    def __init__(self, app_config, *, error: Exception | None = None):
+        super().__init__(app_config)
+        self.error = error
+        self.sent = []
+
+    def list_targets(self):
+        self._core_id = "core-1"
+        self._core_name = "test-core"
+        return [
+            HerdrTarget(
+                target="t12",
+                agent_name="pi",
+                status="idle",
+                workspace_label="herdrelay",
+            )
+        ]
+
+    def send_with_receipt(self, target, message):
+        self.sent.append((target, message))
+        if self.error is not None:
+            raise self.error
+        return HcMutationReceipt(
+            observed_turn=4, result={"turn": 5, "started": True}
+        )
 
 
 def service(tmp_path, api: FakeApi, client: FakeClient | None = None):
@@ -303,3 +331,113 @@ async def test_existing_closed_topic_is_reopened_and_renamed(tmp_path):
     ]
     assert topic.closed is False
     assert topic.name == "herdrelay/pi · t12"
+
+
+
+def mutation_service(tmp_path, api, *, error=None, route_core_id="core-1"):
+    base = config()
+    app_config = replace(
+        base,
+        telegram=replace(base.telegram, enable_send=True),
+    )
+    client = FakeMutationClient(app_config, error=error)
+    store = Store(tmp_path / "mutation.sqlite3")
+    store.upsert_telegram_topic(
+        core_id=route_core_id,
+        terminal_address="t12",
+        chat_id=-1001,
+        thread_id=77,
+        name="herdrelay/pi · t12",
+    )
+    relay = TelegramReadOnlyService(
+        config=app_config, store=store, client=client, api=api
+    )
+    return relay, client
+
+
+@pytest.mark.asyncio
+async def test_enabled_prompt_send_is_claimed_audited_and_not_repeated(tmp_path):
+    item = update(text="continue")
+    api = FakeApi([[item], [item]])
+    relay, client = mutation_service(tmp_path, api)
+
+    await relay.poll_once()
+    await relay.poll_once()
+
+    assert client.sent == [("t12", "continue")]
+    [audit] = relay.store.list_transport_audits()
+    assert audit["transport"] == "telegram"
+    assert audit["action"] == "send_text"
+    assert audit["outcome"] == "succeeded"
+    assert audit["observed_turn"] == 4
+    assert audit["payload_preview"] == "continue"
+    assert api.sent[-1]["text"] == "✅ Prompt submitted."
+    assert relay.store.get_state(OFFSET_STATE_KEY) == "11"
+
+
+@pytest.mark.asyncio
+async def test_unknown_prompt_outcome_is_never_retried(tmp_path):
+    item = update(text="continue")
+    api = FakeApi([[item], [item]])
+    relay, client = mutation_service(
+        tmp_path,
+        api,
+        error=MutationOutcomeUnknownError("response lost"),
+    )
+
+    await relay.poll_once()
+    await relay.poll_once()
+
+    assert client.sent == [("t12", "continue")]
+    [audit] = relay.store.list_transport_audits()
+    assert audit["outcome"] == "outcome_unknown"
+    assert "unknown" in api.sent[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_feedback_failure_after_prompt_does_not_retry_mutation(tmp_path):
+    api = FakeApi([[update(text="continue")]], fail_send=True)
+    relay, client = mutation_service(tmp_path, api)
+
+    await relay.poll_once()
+
+    assert client.sent == [("t12", "continue")]
+    [audit] = relay.store.list_transport_audits()
+    assert audit["outcome"] == "succeeded"
+    assert relay.store.get_state(OFFSET_STATE_KEY) == "11"
+
+
+@pytest.mark.asyncio
+async def test_enabled_send_still_rejects_unauthorized_and_blocklisted_text(tmp_path):
+    api = FakeApi([[update(user_id=9, text="continue")]])
+    relay, client = mutation_service(tmp_path, api)
+
+    await relay.poll_once()
+
+    assert client.sent == []
+    assert relay.store.list_transport_audits() == []
+    assert api.sent == []
+
+    relay.config = replace(
+        relay.config, dangerous_text_blocklist=("sudo",)
+    )
+    api.batches.append([update(update_id=11, text="sudo reboot")])
+    await relay.poll_once()
+
+    assert client.sent == []
+    assert relay.store.list_transport_audits() == []
+    assert "blocklist" in api.sent[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_prompt_requires_topic_route_matching_current_core(tmp_path):
+    api = FakeApi([[update(text="continue")]])
+    relay, client = mutation_service(
+        tmp_path, api, route_core_id="different-core"
+    )
+
+    await relay.poll_once()
+
+    assert client.sent == []
+    assert relay.store.list_transport_audits() == []
+    assert "different Core" in api.sent[-1]["text"]

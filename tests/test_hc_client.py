@@ -190,10 +190,14 @@ def test_core_client_reads_sends_and_interrupts_without_raw_keys():
     rpc.terminals["t1"] = terminal("t1")
 
     assert client.read("t1", lines=20, fmt="text", source="recent") == "screen"
-    client.send("t1", "continue")
+    send_receipt = client.send_with_receipt("t1", "continue")
     assert rpc.sent == [("t1", "continue")]
+    assert send_receipt.observed_turn == 3
+    assert send_receipt.result["started"] is True
     rpc.terminals["t1"] = terminal("t1", state="working")
-    assert client.interrupt("t1") == {"outcome": "stopped", "key": "esc"}
+    interrupt_receipt = client.interrupt_with_receipt("t1")
+    assert interrupt_receipt.observed_turn == 3
+    assert interrupt_receipt.result == {"outcome": "stopped", "key": "esc"}
 
     send_call = next(params for method, params in rpc.calls if method == "terminal.send")
     assert send_call["force"] is False
