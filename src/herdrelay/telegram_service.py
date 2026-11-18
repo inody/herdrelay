@@ -175,6 +175,7 @@ class TelegramService:
                 "HerdRelay Telegram\n"
                 "/agents — list allowlisted agents\n"
                 "/help — show this message\n"
+                "//command — send /command to the agent\n"
                 f"{prompt_help}\n{interrupt_help}"
             )
         elif command == "interrupt":

@@ -19,10 +19,16 @@ class TelegramInboundMessage:
 
     @property
     def command(self) -> str | None:
-        first = self.text.strip().split(maxsplit=1)[0] if self.text.strip() else ""
-        if not first.startswith("/"):
+        stripped = self.text.strip()
+        first = stripped.split(maxsplit=1)[0] if stripped else ""
+        if not first.startswith("/") or first.startswith("//"):
             return None
         return first[1:].split("@", 1)[0].casefold()
+
+    @property
+    def prompt_text(self) -> str:
+        stripped = self.text.strip()
+        return stripped[1:] if stripped.startswith("//") else stripped
 
 
 @dataclass(frozen=True, slots=True)

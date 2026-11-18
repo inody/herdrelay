@@ -542,6 +542,16 @@ async def test_enabled_prompt_send_is_claimed_audited_and_not_repeated(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_double_slash_command_is_forwarded_to_agent(tmp_path):
+    api = FakeApi([[update(text="//reload")]])
+    relay, client = mutation_service(tmp_path, api)
+
+    await relay.poll_once()
+
+    assert client.sent == [("t12", "/reload")]
+
+
+@pytest.mark.asyncio
 async def test_prompt_rate_limit_is_enforced_per_actor_chat_and_target(tmp_path):
     api = FakeApi(
         [[update(text="first")], [update(update_id=11, text="second")]]

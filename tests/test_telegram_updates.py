@@ -52,6 +52,14 @@ def test_parse_authorized_forum_message_and_normalize_command():
     assert policy().authorized(message) is True
 
 
+def test_double_slash_escapes_agent_command():
+    message = parse_inbound_message(update(text="//reload"))
+
+    assert message is not None
+    assert message.command is None
+    assert message.prompt_text == "/reload"
+
+
 @pytest.mark.parametrize(
     "changes",
     [

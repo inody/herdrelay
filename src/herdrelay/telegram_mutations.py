@@ -302,7 +302,7 @@ class TelegramMutationHandler:
         if route is None or route.closed:
             await self._feedback(message, "This forum topic is not bound to a live agent.")
             return False
-        text = message.text.strip()
+        text = message.prompt_text
         if len(text) > self.config.max_message_chars:
             await self._feedback(
                 message,
