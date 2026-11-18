@@ -546,6 +546,9 @@ transports:
     enable_send: false
     enable_interrupt: false
     confirmation_ttl_seconds: 60
+    actor_mutations_per_minute: 6
+    chat_mutations_per_minute: 12
+    target_mutations_per_minute: 6
     notification_detail: status
 ```
 

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import secrets
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .config import AppConfig
@@ -510,6 +511,20 @@ class TelegramService:
             )
             return False
 
+        rate_limit = self._mutation_rate_limit(
+            actor_id=str(callback.user_id),
+            container_id=str(callback.chat_id),
+            target_key=target_key,
+        )
+        if rate_limit is not None:
+            self._audit_interrupt_rejection(
+                callback, detail=rate_limit, target_key=target_key
+            )
+            await self._safe_answer_callback(
+                callback, "Interrupt rate limit exceeded.", show_alert=True
+            )
+            return False
+
         audit_id = self.store.claim_transport_mutation(
             event_key=event_key,
             entry=TransportAuditEntry(
@@ -650,6 +665,27 @@ class TelegramService:
             controller_core_id=route.core_id,
             address=route.terminal_address,
         ).to_storage_key()
+        rate_limit = self._mutation_rate_limit(
+            actor_id=str(message.user_id),
+            container_id=str(message.chat_id),
+            target_key=target_key,
+        )
+        if rate_limit is not None:
+            self.store.add_transport_audit(
+                TransportAuditEntry(
+                    transport="telegram",
+                    actor_id=str(message.user_id),
+                    container_id=str(message.chat_id),
+                    conversation_id=str(message.message_thread_id),
+                    action="send_text",
+                    target_key=target_key,
+                    payload_preview=truncate(text, max_chars=200),
+                    outcome="rejected",
+                    detail=rate_limit,
+                )
+            )
+            await self._feedback(message, "Mutation rate limit exceeded.")
+            return False
         audit_id = self.store.claim_transport_mutation(
             event_key=event_key,
             entry=TransportAuditEntry(
@@ -718,6 +754,35 @@ class TelegramService:
             await self._feedback(message, text)
         except Exception:
             LOG.exception("Failed to send Telegram mutation feedback")
+
+    def _mutation_rate_limit(
+        self, *, actor_id: str, container_id: str, target_key: str
+    ) -> str | None:
+        since = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+        checks = (
+            (
+                "actor",
+                self.telegram.actor_mutations_per_minute,
+                {"actor_id": actor_id},
+            ),
+            (
+                "chat",
+                self.telegram.chat_mutations_per_minute,
+                {"container_id": container_id},
+            ),
+            (
+                "target",
+                self.telegram.target_mutations_per_minute,
+                {"target_key": target_key},
+            ),
+        )
+        for label, limit, key in checks:
+            count = self.store.count_transport_mutations(
+                transport="telegram", since=since, **key
+            )
+            if count >= limit:
+                return f"rate limit: {label} has {count} mutations in the last minute"
+        return None
 
     def _load_offset(self) -> int | None:
         value = self.store.get_state(OFFSET_STATE_KEY)

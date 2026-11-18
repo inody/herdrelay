@@ -372,6 +372,37 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def count_transport_mutations(
+        self,
+        *,
+        transport: str,
+        since: str,
+        actor_id: str | None = None,
+        container_id: str | None = None,
+        target_key: str | None = None,
+    ) -> int:
+        filters = [
+            ("actor_id", actor_id),
+            ("container_id", container_id),
+            ("target_key", target_key),
+        ]
+        selected = [(column, value) for column, value in filters if value is not None]
+        if len(selected) != 1:
+            raise ValueError("exactly one transport mutation rate-limit key is required")
+        column, value = selected[0]
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS count
+                FROM transport_audit
+                WHERE transport = ? AND timestamp >= ? AND {column} = ?
+                  AND action IN ('send_text', 'interrupt')
+                  AND outcome IN ('attempt', 'succeeded', 'failed', 'outcome_unknown')
+                """,
+                (transport, since, value),
+            ).fetchone()
+        return int(row["count"])
+
     def mark_event_seen(self, key: str) -> bool:
         try:
             with self._connect() as conn:

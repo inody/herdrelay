@@ -143,6 +143,9 @@ transports:
     enable_send: true
     enable_interrupt: true
     confirmation_ttl_seconds: 90
+    actor_mutations_per_minute: 2
+    chat_mutations_per_minute: 3
+    target_mutations_per_minute: 4
     poll_timeout_seconds: 20
     request_timeout_seconds: 30
     reconnect_delay_seconds: 2
@@ -160,6 +163,9 @@ transports:
     assert config.telegram.enable_send is True
     assert config.telegram.enable_interrupt is True
     assert config.telegram.confirmation_ttl_seconds == 90
+    assert config.telegram.actor_mutations_per_minute == 2
+    assert config.telegram.chat_mutations_per_minute == 3
+    assert config.telegram.target_mutations_per_minute == 4
     assert config.telegram.poll_timeout_seconds == 20
     assert config.telegram.request_timeout_seconds == 30
     assert "telegram-secret" not in repr(config.telegram)

@@ -415,7 +415,8 @@ If `database_path` is omitted, the code retains the legacy default
   `TELEGRAM_BOT_TOKEN`; `statuses` is limited to `blocked` and `done`, while
   transport-specific `enable_send` and `enable_interrupt` default to false.
   Interrupt confirmations are actor/topic bound, single-use, and expire after
-  `confirmation_ttl_seconds`.
+  `confirmation_ttl_seconds`. Per-minute actor, chat, and target mutation limits
+  are configured independently.
 - `auto_threads.refresh_seconds`: pane/thread reconciliation interval.
 - `streaming.mode`: `hooks` (recommended) or `poll`.
 - `streaming.refresh_seconds`, `tail_lines`, `initial_tail_lines`, and

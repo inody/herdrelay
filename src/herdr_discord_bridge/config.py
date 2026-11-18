@@ -46,6 +46,9 @@ class TelegramConfig:
     enable_send: bool = False
     enable_interrupt: bool = False
     confirmation_ttl_seconds: int = 60
+    actor_mutations_per_minute: int = 6
+    chat_mutations_per_minute: int = 12
+    target_mutations_per_minute: int = 6
     poll_timeout_seconds: int = 25
     request_timeout_seconds: float = 35
     reconnect_delay_seconds: float = 5
@@ -262,6 +265,15 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             confirmation_ttl_seconds=int(
                 telegram_data.get("confirmation_ttl_seconds", 60)
             ),
+            actor_mutations_per_minute=int(
+                telegram_data.get("actor_mutations_per_minute", 6)
+            ),
+            chat_mutations_per_minute=int(
+                telegram_data.get("chat_mutations_per_minute", 12)
+            ),
+            target_mutations_per_minute=int(
+                telegram_data.get("target_mutations_per_minute", 6)
+            ),
             poll_timeout_seconds=int(
                 telegram_data.get("poll_timeout_seconds", 25)
             ),
@@ -307,6 +319,13 @@ def _validate_telegram(config: AppConfig) -> None:
         raise ValueError(
             "Telegram confirmation_ttl_seconds must be between 10 and 600"
         )
+    for name, value in (
+        ("actor_mutations_per_minute", telegram.actor_mutations_per_minute),
+        ("chat_mutations_per_minute", telegram.chat_mutations_per_minute),
+        ("target_mutations_per_minute", telegram.target_mutations_per_minute),
+    ):
+        if not 1 <= value <= 1000:
+            raise ValueError(f"Telegram {name} must be between 1 and 1000")
     if not 1 <= telegram.poll_timeout_seconds <= 50:
         raise ValueError("Telegram poll_timeout_seconds must be between 1 and 50")
     if telegram.request_timeout_seconds <= telegram.poll_timeout_seconds:

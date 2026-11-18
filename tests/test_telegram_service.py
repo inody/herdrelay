@@ -377,7 +377,13 @@ async def test_existing_closed_topic_is_reopened_and_renamed(tmp_path):
 
 
 def mutation_service(
-    tmp_path, api, *, error=None, route_core_id="core-1", enable_interrupt=False
+    tmp_path,
+    api,
+    *,
+    error=None,
+    route_core_id="core-1",
+    enable_interrupt=False,
+    mutation_limit=6,
 ):
     base = config()
     app_config = replace(
@@ -386,6 +392,9 @@ def mutation_service(
             base.telegram,
             enable_send=True,
             enable_interrupt=enable_interrupt,
+            actor_mutations_per_minute=mutation_limit,
+            chat_mutations_per_minute=mutation_limit,
+            target_mutations_per_minute=mutation_limit,
         ),
     )
     client = FakeMutationClient(app_config, error=error)
@@ -421,6 +430,23 @@ async def test_enabled_prompt_send_is_claimed_audited_and_not_repeated(tmp_path)
     assert audit["payload_preview"] == "continue"
     assert api.sent[-1]["text"] == "✅ Prompt submitted."
     assert relay.store.get_state(OFFSET_STATE_KEY) == "11"
+
+
+@pytest.mark.asyncio
+async def test_prompt_rate_limit_is_enforced_per_actor_chat_and_target(tmp_path):
+    api = FakeApi(
+        [[update(text="first")], [update(update_id=11, text="second")]]
+    )
+    relay, client = mutation_service(tmp_path, api, mutation_limit=1)
+
+    await relay.poll_once()
+    await relay.poll_once()
+
+    assert client.sent == [("t12", "first")]
+    audits = relay.store.list_transport_audits()
+    assert [entry["outcome"] for entry in audits] == ["succeeded", "rejected"]
+    assert audits[-1]["detail"].startswith("rate limit: actor")
+    assert api.sent[-1]["text"] == "Mutation rate limit exceeded."
 
 
 @pytest.mark.asyncio
@@ -527,6 +553,33 @@ async def test_interrupt_requires_one_time_actor_bound_confirmation(tmp_path):
     assert client.interrupted == ["t12"]
     audits = relay.store.list_transport_audits()
     assert [entry["outcome"] for entry in audits] == ["succeeded", "rejected"]
+    assert api.callback_answers[-1]["show_alert"] is True
+
+
+@pytest.mark.asyncio
+async def test_interrupt_uses_the_same_mutation_rate_limits(tmp_path):
+    api = FakeApi(
+        [[update(text="first")], [update(update_id=11, text="/interrupt")]]
+    )
+    relay, client = mutation_service(
+        tmp_path, api, enable_interrupt=True, mutation_limit=1
+    )
+    await relay.poll_once()
+    await relay.poll_once()
+    callback_data = api.sent[-1]["reply_markup"]["inline_keyboard"][0][0][
+        "callback_data"
+    ]
+
+    api.batches.append(
+        [callback_update(update_id=12, callback_id="cb-rate", data=callback_data)]
+    )
+    await relay.poll_once()
+
+    assert client.sent == [("t12", "first")]
+    assert client.interrupted == []
+    audits = relay.store.list_transport_audits()
+    assert [entry["outcome"] for entry in audits] == ["succeeded", "rejected"]
+    assert audits[-1]["detail"].startswith("rate limit: actor")
     assert api.callback_answers[-1]["show_alert"] is True
 
 
