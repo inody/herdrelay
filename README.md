@@ -98,6 +98,13 @@ At a useful operational level:
 5. `database_path` stores pane/thread bindings, audit entries, event dedupe
    keys, and pending Claude questions.
 
+The current release uses the legacy Herdr TUI and Discord. A proposed migration
+makes Herdr Core the runtime authority and adds Telegram as a second transport,
+with Apple Watch notification and short-reply use cases. See
+[Herdr Core and Telegram architecture](docs/core-telegram-design.md) and the
+[implementation plan](docs/core-telegram-plan.md). These documents describe
+planned work, not currently available configuration or commands.
+
 ## Prerequisites
 
 Before starting, have:
@@ -534,5 +541,8 @@ Repository layout:
   security policy, and SQLite store;
 - `integrations/` — Pi extension source;
 - `scripts/` — adapter installers, hook writer, runner, and launchd helpers;
-- `tests/` — unit and regression tests; and
-- `docs/operations.md` — deeper operational behavior.
+- `tests/` — unit and regression tests;
+- `docs/operations.md` — deeper operational behavior;
+- `docs/core-telegram-design.md` — proposed Herdr Core and multi-transport
+  architecture; and
+- `docs/core-telegram-plan.md` — staged implementation and rollout plan.
