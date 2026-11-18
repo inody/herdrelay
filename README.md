@@ -398,8 +398,9 @@ socket. It never types into an existing terminal.
 
 ## Current limitations
 
-- Physical Apple Watch notification, topic navigation, and short-reply behavior
-  still require device acceptance testing.
+- Physical Apple Watch notification and short-reply behavior still require
+  device acceptance testing; use
+  [`docs/apple-watch-acceptance.md`](docs/apple-watch-acceptance.md).
 - Telegram interrupt is Core-only.
 - Legacy TUI with Telegram is best-effort and not live-acceptance tested.
 - New Core terminals must be added to an exact allowlist before exposure.
