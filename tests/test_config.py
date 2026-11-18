@@ -134,6 +134,25 @@ def test_load_config_accepts_core_event_watcher(tmp_path, monkeypatch):
 
 
 
+def test_load_config_can_disable_discord_without_a_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("transports:\n  discord:\n    enabled: false\n")
+
+    config = load_config(config_path)
+
+    assert config.discord.enabled is False
+    assert config.discord_token == ""
+
+
+def test_load_config_keeps_discord_enabled_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
+
+    config = load_config(tmp_path / "missing.yaml")
+
+    assert config.discord.enabled is True
+
+
 def test_load_config_reads_enabled_telegram_transport(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-secret")

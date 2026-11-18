@@ -35,6 +35,11 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class DiscordTransportConfig:
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class TelegramConfig:
     enabled: bool = False
     token: str = field(default="", repr=False)
@@ -114,6 +119,7 @@ class AppConfig:
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
     auto_threads: AutoThreadsConfig = field(default_factory=AutoThreadsConfig)
     streaming: StreamConfig = field(default_factory=StreamConfig)
+    discord: DiscordTransportConfig = field(default_factory=DiscordTransportConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     approval: dict[str, ApprovalStrategy] = field(default_factory=dict)
     deny: dict[str, ApprovalStrategy] = field(default_factory=dict)
@@ -133,8 +139,6 @@ def load_config(
         data = loaded
 
     token = os.environ.get("DISCORD_TOKEN", "")
-    if require_discord_token and not token:
-        raise ValueError("DISCORD_TOKEN is required in .env or environment")
 
     runtime_data = data.get("runtime") or {}
     if not isinstance(runtime_data, dict):
@@ -145,9 +149,17 @@ def load_config(
     transports_data = data.get("transports") or {}
     if not isinstance(transports_data, dict):
         raise ValueError("transports must be a YAML mapping")
+    discord_data = transports_data.get("discord") or {}
+    if not isinstance(discord_data, dict):
+        raise ValueError("transports.discord must be a YAML mapping")
     telegram_data = transports_data.get("telegram") or {}
     if not isinstance(telegram_data, dict):
         raise ValueError("transports.telegram must be a YAML mapping")
+    discord = DiscordTransportConfig(
+        enabled=bool(discord_data.get("enabled", True))
+    )
+    if require_discord_token and discord.enabled and not token:
+        raise ValueError("DISCORD_TOKEN is required when Discord is enabled")
     herdr_data = data.get("herdr") or {}
     watcher_data = data.get("watcher") or {}
     auto_threads_data = data.get("auto_threads") or {}
@@ -251,6 +263,7 @@ def load_config(
                 streaming_data.get("hook_max_event_age_seconds", 86_400)
             ),
         ),
+        discord=discord,
         telegram=TelegramConfig(
             enabled=bool(telegram_data.get("enabled", False)),
             token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),

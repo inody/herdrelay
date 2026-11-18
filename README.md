@@ -412,6 +412,8 @@ If `database_path` is omitted, the code retains the legacy default
 ### Nested groups
 
 - `runtime.provider`: `herdr-tui` (default) or experimental `herdr-core`.
+- `transports.discord.enabled`: defaults to true for existing installations.
+  Set false to run Telegram without opening a Discord gateway connection.
 - `runtime.core`: existing socket selection, timeouts, visibility policy, and
   exact `allowed_terminal_addresses`; an empty Core target list denies all.
 - `transports.telegram`: experimental forum transport. Enabling it requires
@@ -448,7 +450,7 @@ Environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `DISCORD_TOKEN` | Required Discord bot token |
+| `DISCORD_TOKEN` | Required only when `transports.discord.enabled` is true |
 | `TELEGRAM_BOT_TOKEN` | Required only when `transports.telegram.enabled` is true |
 | `HERDR_SOCKET_PATH` | Optional socket for a non-default local Herdr session |
 | `HERDR_SESSION` | Used by the watcher to derive a named local session socket when no explicit path is set |
@@ -509,7 +511,7 @@ Treat every enabled Discord or Telegram destination as remote terminal access.
 
 ## Operations and troubleshooting
 
-Run Discord, plus any enabled secondary transports, in the foreground with:
+Run the configured transports in the foreground with:
 
 ```bash
 scripts/run_bot.sh
@@ -521,7 +523,9 @@ Run Telegram without starting or connecting a Discord client with:
 uv run herdrelay-telegram --config /path/to/telegram-config.yaml
 ```
 
-The standalone command does not require `DISCORD_TOKEN`, but it still requires
+Setting `transports.discord.enabled: false` makes the main `herdrelay` command
+run Telegram alone. The explicit standalone command also does not require
+`DISCORD_TOKEN`, but it still requires
 an enabled `transports.telegram` block, `TELEGRAM_BOT_TOKEN`, an experimental
 Herdr Core runtime, exact chat/user/terminal allowlists, and a separate stable
 SQLite database. Set `enable_streaming: true` with `streaming.mode: hooks` to

@@ -11,6 +11,8 @@ runtime:
     allowed_terminal_addresses: [] # empty denies all Core targets; list exact t-addresses
 
 transports:
+  discord:
+    enabled: true               # backward-compatible default; false runs Telegram only
   telegram:
     enabled: false
     mode: forum
