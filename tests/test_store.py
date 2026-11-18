@@ -241,6 +241,35 @@ def test_pending_question_roundtrip_and_conditional_clear(tmp_path):
     assert store.get_pending_question("w7:p5") is None
 
 
+def test_agent_thread_target_migration_updates_binding_atomically(tmp_path):
+    store = Store(tmp_path / "store.sqlite3")
+    store.upsert_agent_thread(
+        pane_id="t1", thread_id=111, guild_id=1, alias="project"
+    )
+    store.upsert_binding(
+        guild_id=1,
+        channel_id=2,
+        thread_id=111,
+        herdr_target="t1",
+        label="project",
+        created_by=1,
+    )
+    core_target = (
+        '{"address":"t1","controller_core_id":"core-1",'
+        '"origin_core_id":null,"runtime":"herdr-core","v":1}'
+    )
+
+    assert store.migrate_agent_thread_target(
+        old_target="t1", new_target=core_target
+    )
+
+    assert store.get_agent_thread("t1") is None
+    assert store.get_agent_thread(core_target) == "111"
+    binding = store.get_binding(guild_id=1, channel_id=2, thread_id=111)
+    assert binding is not None
+    assert binding.herdr_target == core_target
+
+
 def test_agent_thread_upsert_and_get(tmp_path):
     store = Store(tmp_path / "bridge.sqlite3")
 

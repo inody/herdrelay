@@ -3,8 +3,10 @@ from unittest.mock import Mock
 import pytest
 
 from herdr_discord_bridge.config import AppConfig
+from herdr_discord_bridge.domain import TargetKey
 from herdr_discord_bridge.herdr_cli import HerdrCliError
 from herdr_discord_bridge.herdr_client import HerdrClient, normalize_targets
+from herdr_discord_bridge.models import HerdrTarget
 
 
 def test_normalize_targets_from_result_agents():
@@ -239,6 +241,18 @@ class AgentWithWorkspaceFakeCli(WorkspaceFakeCli):
                 ]
             }
         }
+
+
+def test_legacy_client_preserves_raw_pane_route_identity():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    target = client.target_key("w1:p1")
+    client.resolve_target = Mock(
+        return_value=HerdrTarget(target="w1:p1", agent_name="pi")
+    )
+
+    assert target == TargetKey.legacy("w1:p1")
+    assert target.to_route_value() == "w1:p1"
+    assert client.resolve_target_key(target).target == "w1:p1"
 
 
 def test_send_keys_pauses_between_keys_when_asked(monkeypatch):

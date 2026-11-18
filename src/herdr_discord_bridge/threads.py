@@ -70,7 +70,11 @@ class ThreadManager:
         # Agent exit or temporary detection loss does not close the pane.
         # A failed pane snapshot propagates before any Discord mutations.
         targets = await asyncio.to_thread(self.client.list_panes)
-        active_pane_ids = {t.target for t in targets if t.target}
+        active_pane_ids = {
+            self.client.target_key(t.target).to_route_value()
+            for t in targets
+            if t.target
+        }
         for target in targets:
             if not target.target:
                 continue
@@ -87,16 +91,23 @@ class ThreadManager:
         if not target.agent_name:
             return
         pane_id = target.target
+        route_target = self.client.target_key(pane_id).to_route_value()
         name = thread_name(target)
         alias = target_alias(target)
-        existing = self.store.get_agent_thread(pane_id)
+        existing = self.store.get_agent_thread(route_target)
+        if existing is None and route_target != pane_id:
+            if self.store.migrate_agent_thread_target(
+                old_target=pane_id, new_target=route_target
+            ):
+                existing = self.store.get_agent_thread(route_target)
+                LOG.info("Pinned existing thread route %s to Core identity", pane_id)
         if existing is None:
             thread = await parent.create_thread(
                 name=name,
                 type=discord.ChannelType.public_thread,
             )
             self.store.upsert_agent_thread(
-                pane_id=pane_id,
+                pane_id=route_target,
                 thread_id=thread.id,
                 guild_id=parent.guild.id,
                 alias=alias,
@@ -105,23 +116,25 @@ class ThreadManager:
                 guild_id=parent.guild.id,
                 channel_id=parent.id,
                 thread_id=str(thread.id),
-                herdr_target=pane_id,
+                herdr_target=route_target,
                 label=alias,
                 created_by=str(self.bot.user.id) if self.bot.user else 0,
             )
-            LOG.info("Created thread %s for %s", thread.id, pane_id)
+            LOG.info("Created thread %s for %s", thread.id, route_target)
             return
 
         thread = await self._fetch_thread(parent, int(existing))
         if thread is None:
             LOG.warning(
-                "Thread %s for %s not found; leaving record in place", existing, pane_id
+                "Thread %s for %s not found; leaving record in place",
+                existing,
+                route_target,
             )
             return
         if thread.archived:
             try:
                 await thread.edit(archived=False, reason=f"Pane {pane_id} active again")
-                LOG.info("Unarchived thread %s for %s", thread.id, pane_id)
+                LOG.info("Unarchived thread %s for %s", thread.id, route_target)
             except discord.HTTPException:
                 LOG.warning("Could not unarchive thread %s", thread.id)
         if thread.name == name:
@@ -129,7 +142,7 @@ class ThreadManager:
         try:
             await thread.edit(name=name)
             self.store.upsert_agent_thread(
-                pane_id=pane_id,
+                pane_id=route_target,
                 thread_id=thread.id,
                 guild_id=parent.guild.id,
                 alias=alias,

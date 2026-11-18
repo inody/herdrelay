@@ -49,6 +49,15 @@ def test_legacy_target_key_roundtrips_without_core_identity():
     assert key.origin_core_id is None
 
 
+def test_route_values_keep_legacy_compatibility_and_pin_core_identity():
+    legacy = TargetKey.legacy("w0:p6")
+    core = TargetKey.core(controller_core_id="core-1", address="t1")
+
+    assert legacy.to_route_value() == "w0:p6"
+    assert TargetKey.from_route_value("w0:p6") == legacy
+    assert TargetKey.from_route_value(core.to_route_value()) == core
+
+
 def test_target_key_rejects_cross_runtime_identity_and_unknown_versions():
     with pytest.raises(ValueError, match="controller Core ID"):
         TargetKey(runtime=RuntimeKind.HERDR_CORE, address="t1")

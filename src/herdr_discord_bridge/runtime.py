@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
+from .domain import TargetKey
 from .models import HerdrTarget, StartedAgent
 
 
@@ -33,6 +34,10 @@ class RuntimeClient(Protocol):
     def list_targets(self) -> list[HerdrTarget]: ...
 
     def list_panes(self) -> list[HerdrTarget]: ...
+
+    def target_key(self, target: str) -> TargetKey: ...
+
+    def resolve_target_key(self, key: TargetKey) -> HerdrTarget: ...
 
     def read(
         self,

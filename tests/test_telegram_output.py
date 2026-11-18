@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig, StreamConfig
+from herdr_discord_bridge.config import AppConfig, StreamConfig, TelegramConfig
+from herdr_discord_bridge.domain import TargetKey
 from herdr_discord_bridge.store import Store
+from herdr_discord_bridge.streams import StreamManager
 from herdr_discord_bridge.telegram_output import TelegramOutputRelay
 
 
@@ -48,6 +51,7 @@ def relay(tmp_path, *, max_age=86_400):
             hook_inbox_path=str(inbox),
             hook_max_event_age_seconds=max_age,
         ),
+        telegram=TelegramConfig(enabled=True),
     )
     store = Store(tmp_path / "store.sqlite3")
     api = FakeApi()
@@ -80,6 +84,51 @@ async def test_core_output_is_delivered_to_exact_telegram_topic(tmp_path):
     assert store.has_event_key(
         "agent-output:telegram:-1001:77:pi:event-1"
     )
+
+
+@pytest.mark.asyncio
+async def test_core_output_fans_out_to_discord_and_telegram(tmp_path, monkeypatch):
+    inbox, store, api, output = relay(tmp_path)
+    route_target = TargetKey.core(
+        controller_core_id="core-1", address="t12"
+    ).to_route_value()
+    store.upsert_agent_thread(
+        pane_id=route_target,
+        thread_id=123,
+        guild_id=456,
+        alias="project",
+    )
+    store.upsert_telegram_topic(
+        core_id="core-1",
+        terminal_address="t12",
+        chat_id=-1001,
+        thread_id=77,
+        name="project/pi",
+    )
+    event_path = inbox / "event.json"
+    write_v2(event_path)
+    discord_relay = StreamManager(
+        bot=None,  # type: ignore[arg-type]
+        config=output.config,
+        store=store,
+        client=None,  # type: ignore[arg-type]
+    )
+    thread = AsyncMock()
+    monkeypatch.setattr(
+        discord_relay, "_fetch_thread", AsyncMock(return_value=thread)
+    )
+
+    await discord_relay._drain_hook_events(inbox)
+
+    thread.send.assert_awaited_once()
+    assert event_path.exists()
+    assert store.has_event_key("agent-output:discord:123:pi:event-1")
+
+    await output.drain_once(inbox)
+
+    assert api.sent[0]["text"] == "completed response"
+    assert not event_path.exists()
+    assert store.has_event_key("agent-output:telegram:-1001:77:pi:event-1")
 
 
 @pytest.mark.asyncio

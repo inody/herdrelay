@@ -193,7 +193,8 @@ class EventWatcher:
         LOG.info("Posted %s notification for %s", event.status, event.pane_id)
 
     async def _destination_for(self, pane_id: str) -> discord.abc.Messageable | None:
-        binding = self.store.find_binding_for_target(pane_id)
+        route_target = self.client.target_key(pane_id).to_route_value()
+        binding = self.store.find_binding_for_target(route_target)
         if binding:
             channel = await self._channel_for_binding(binding)
             if channel:

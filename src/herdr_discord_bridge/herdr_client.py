@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from .config import AppConfig
+from .domain import RuntimeKind, TargetKey
 from .herdr_cli import HerdrCli, HerdrCliError
 from .models import HerdrTarget, StartedAgent
 from .runtime import RuntimeCapabilities
@@ -75,6 +76,16 @@ class HerdrClient:
             if workspace_id and label:
                 mapping[workspace_id] = label
         return mapping
+
+    def target_key(self, target: str) -> TargetKey:
+        return TargetKey.legacy(target)
+
+    def resolve_target_key(self, key: TargetKey) -> HerdrTarget:
+        if key.runtime is not RuntimeKind.HERDR_TUI:
+            raise TargetResolutionError(
+                "Core target identity cannot be used with the legacy Herdr TUI"
+            )
+        return self.resolve_target(key.address)
 
     def read(
         self,

@@ -690,6 +690,48 @@ class Store:
                 (pane_id, str(thread_id), str(guild_id), alias, now, now),
             )
 
+    def migrate_agent_thread_target(self, *, old_target: str, new_target: str) -> bool:
+        """Atomically pin an existing experimental raw Core binding."""
+        if old_target == new_target:
+            return False
+        now = _now()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM agent_threads WHERE pane_id = ?", (old_target,)
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute(
+                """
+                INSERT INTO agent_threads (
+                  pane_id, thread_id, guild_id, alias, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(pane_id) DO UPDATE SET
+                  thread_id = excluded.thread_id,
+                  guild_id = excluded.guild_id,
+                  alias = excluded.alias,
+                  updated_at = excluded.updated_at
+                """,
+                (
+                    new_target,
+                    row["thread_id"],
+                    row["guild_id"],
+                    row["alias"],
+                    row["created_at"],
+                    now,
+                ),
+            )
+            conn.execute("DELETE FROM agent_threads WHERE pane_id = ?", (old_target,))
+            conn.execute(
+                "UPDATE bindings SET herdr_target = ?, updated_at = ? WHERE herdr_target = ?",
+                (new_target, now, old_target),
+            )
+            # Structured question controls are not supported for Core targets.
+            conn.execute(
+                "DELETE FROM pending_questions WHERE pane_id = ?", (old_target,)
+            )
+        return True
+
     def get_agent_thread(self, pane_id: str) -> str | None:
         with self._connect() as conn:
             row = conn.execute(

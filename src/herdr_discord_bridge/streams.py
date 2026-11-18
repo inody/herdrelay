@@ -13,6 +13,12 @@ from .config import AppConfig
 from .formatter import split_text_chunks
 from .domain import RuntimeKind
 from .models import HerdrTarget, PendingQuestion
+from .output_delivery import (
+    all_required_deliveries_seen,
+    delivery_seen,
+    discord_delivery_key,
+    mark_delivery_seen,
+)
 from .output_events import (
     HookOutputEvent,
     inbox_events_in_arrival_order,
@@ -164,23 +170,15 @@ class StreamManager:
                 await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue
 
-            if event.target.runtime is RuntimeKind.HERDR_CORE:
-                # Core-aware events are consumed by the Telegram output relay.
-                # Legacy Discord routing remains pane-based until Core thread
-                # bindings carry normalized target identities.
-                continue
-
-            dedupe_key = f"agent-output:{event.agent}:{event.event_id}"
-            if self.store.has_event_key(dedupe_key):
+            route_target = event.target.to_route_value()
+            if (
+                event.kind == "question_resolved"
+                and event.target.runtime is RuntimeKind.HERDR_TUI
+            ):
+                self.store.clear_pending_question(route_target)
                 await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue
-
-            if event.kind == "question_resolved":
-                self.store.clear_pending_question(event.pane_id)
-                await asyncio.to_thread(path.unlink, missing_ok=True)
-                continue
-
-            thread_id = self.store.get_agent_thread(event.pane_id)
+            thread_id = self.store.get_agent_thread(route_target)
             if thread_id is None:
                 try:
                     age = time.time() - path.stat().st_mtime
@@ -188,30 +186,40 @@ class StreamManager:
                     continue
                 if age >= self.config.streaming.hook_max_event_age_seconds:
                     LOG.warning(
-                        "Discarding expired %s output for unbound pane %s",
+                        "Discarding expired %s output for unbound target %s",
                         event.agent,
-                        event.pane_id,
+                        route_target,
                     )
+                    await asyncio.to_thread(path.unlink, missing_ok=True)
+                continue
+
+            dedupe_key = discord_delivery_key(event, thread_id)
+            if delivery_seen(self.store, event, dedupe_key):
+                if all_required_deliveries_seen(
+                    config=self.config, store=self.store, event=event
+                ):
                     await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue
 
             thread = await self._fetch_thread(int(thread_id))
             if thread is None:
                 continue
-            if event.kind == "human_input":
-                if not await self._add_allowed_users(thread, thread_id):
-                    continue
-                self.store.mark_event_seen(dedupe_key)
-                await asyncio.to_thread(path.unlink, missing_ok=True)
-                LOG.info("Made pane %s visible after interactive Pi input", event.pane_id)
-                continue
-            if event.kind == "question" and event.question is not None:
-                self.store.upsert_pending_question(event.question)
-                view = (
-                    self.question_view_factory(event.question)
-                    if self.question_view_factory
-                    else None
-                )
+            if event.kind == "question_resolved":
+                self.store.clear_pending_question(route_target)
+                delivered = True
+            elif event.kind == "human_input":
+                delivered = await self._add_allowed_users(thread, thread_id)
+                if delivered:
+                    LOG.info("Made target %s visible after interactive Pi input", route_target)
+            elif event.kind == "question" and event.question is not None:
+                view = None
+                if event.target.runtime is RuntimeKind.HERDR_TUI:
+                    self.store.upsert_pending_question(event.question)
+                    view = (
+                        self.question_view_factory(event.question)
+                        if self.question_view_factory
+                        else None
+                    )
                 delivered = await self._send_text(
                     thread, thread_id, _hook_event_text(event), view=view
                 )
@@ -219,11 +227,14 @@ class StreamManager:
                 delivered = await self._send_diff(thread, thread_id, event.text)
             if not delivered:
                 continue
-            self.store.mark_event_seen(dedupe_key)
+            mark_delivery_seen(self.store, event, dedupe_key)
             if event.kind == "response":
-                self.store.clear_pending_question(event.pane_id)
-            await asyncio.to_thread(path.unlink, missing_ok=True)
-            LOG.info("Delivered %s hook output for pane %s", event.agent, event.pane_id)
+                self.store.clear_pending_question(route_target)
+            if all_required_deliveries_seen(
+                config=self.config, store=self.store, event=event
+            ):
+                await asyncio.to_thread(path.unlink, missing_ok=True)
+            LOG.info("Delivered %s hook output for target %s", event.agent, route_target)
 
     async def sync(self) -> None:
         targets = await asyncio.to_thread(self.client.list_targets)
@@ -245,7 +256,8 @@ class StreamManager:
 
     async def _stream_target(self, target: HerdrTarget) -> None:
         pane_id = target.target
-        thread_id = self.store.get_agent_thread(pane_id)
+        route_target = self.client.target_key(pane_id).to_route_value()
+        thread_id = self.store.get_agent_thread(route_target)
         if thread_id is None:
             return
         thread = await self._fetch_thread(int(thread_id))

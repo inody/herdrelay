@@ -15,7 +15,7 @@ from .approval import (
     strategy_for,
 )
 from .config import AppConfig
-from .domain import MutationOutcomeUnknownError
+from .domain import MutationOutcomeUnknownError, TargetKey
 from .formatter import (
     target_alias,
     truncate,
@@ -234,21 +234,26 @@ class HerdrDiscordBot(commands.Bot):
                 audit_fields["payload_preview"] = labels
             else:
                 self.security.ensure_send_allowed(message.author.id, location, content)
+                target_info = await asyncio.to_thread(
+                    self.client.resolve_target_key,
+                    TargetKey.from_route_value(binding.herdr_target),
+                )
+                target_address = target_info.target
                 key_name = _special_key_name(content)
                 if key_name in SPECIAL_KEYS:
                     await asyncio.to_thread(
-                        self.client.send_keys, binding.herdr_target, SPECIAL_KEYS[key_name]
+                        self.client.send_keys, target_address, SPECIAL_KEYS[key_name]
                     )
                     audit_fields["action"] = "key_send"
                 elif key_name in SPECIAL_KEY_SEQUENCES:
                     await asyncio.to_thread(
                         self.client.send_raw_text,
-                        binding.herdr_target,
+                        target_address,
                         SPECIAL_KEY_SEQUENCES[key_name],
                     )
                     audit_fields["action"] = "key_send"
                 else:
-                    await asyncio.to_thread(self.client.send, binding.herdr_target, content)
+                    await asyncio.to_thread(self.client.send, target_address, content)
             self.store.add_audit(AuditEntry(result="ok", **audit_fields))
             await _react(message, "✅")
         except MutationOutcomeUnknownError as exc:
@@ -367,12 +372,15 @@ class HerdrDiscordBot(commands.Bot):
         )
         if binding is None:
             return None
-        targets = await asyncio.to_thread(self.client.list_targets)
-        for target in targets:
-            if target.target == binding.herdr_target:
-                raw = target.raw or {}
-                return raw.get("workspace_id"), raw.get("tab_id"), target.cwd, target.target
-        return None
+        try:
+            target = await asyncio.to_thread(
+                self.client.resolve_target_key,
+                TargetKey.from_route_value(binding.herdr_target),
+            )
+        except Exception:
+            return None
+        raw = target.raw or {}
+        return raw.get("workspace_id"), raw.get("tab_id"), target.cwd, target.target
 
     async def _control_start(self, message: discord.Message, args: list[str]) -> None:
         if not args:
@@ -479,7 +487,11 @@ class HerdrDiscordBot(commands.Bot):
                     thread_id=location.thread_id,
                 )
                 if binding:
-                    pane_id = binding.herdr_target
+                    target = await asyncio.to_thread(
+                        self.client.resolve_target_key,
+                        TargetKey.from_route_value(binding.herdr_target),
+                    )
+                    pane_id = target.target
         if pane_id is None:
             raise ValueError("Usage: `@herdr stop <pane_id>` (or run inside a pane thread)")
         self._audit_control_command(message, "stop", "attempt", target=pane_id)

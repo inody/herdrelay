@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfig
+from herdr_discord_bridge.domain import TargetKey
 from herdr_discord_bridge.hc_client import HcClient, HcUnsupportedOperation
 from herdr_discord_bridge.hc_protocol import parse_hello_result
 from herdr_discord_bridge.hc_rpc import HcCallResult, HcRpcError
@@ -183,6 +184,24 @@ def test_core_client_refuses_core_identity_change():
 
     with pytest.raises(HcRpcError, match="Core identity changed"):
         client.list_panes()
+
+
+def test_core_client_resolves_only_exact_pinned_target_identity():
+    client, rpc = make_client()
+    rpc.list_payload["terminals"] = [terminal("t1")]
+
+    key = client.target_key("t1")
+
+    assert key == TargetKey.core(controller_core_id="core-test-001", address="t1")
+    assert client.resolve_target_key(key).target == "t1"
+    with pytest.raises(HcRpcError, match="different Core"):
+        client.resolve_target_key(
+            TargetKey.core(controller_core_id="stale-core", address="t1")
+        )
+    with pytest.raises(HcRpcError, match="no longer live"):
+        client.resolve_target_key(
+            TargetKey.core(controller_core_id="core-test-001", address="t2")
+        )
 
 
 def test_core_client_reads_sends_and_interrupts_without_raw_keys():

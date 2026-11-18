@@ -209,8 +209,11 @@ Validation and retention rules:
   `hook_max_event_age_seconds` elapses.
 - Delivered and duplicate events are deleted.
 - Legacy Discord response dedupe uses `agent-output:<agent>:<event_id>`.
-- Telegram response dedupe is destination-specific and includes the chat and
-  topic IDs, so delivery to one transport does not suppress another route.
+- Discord and Telegram response dedupe keys include their destination IDs.
+  Delivery to one transport does not suppress another route, and a shared
+  version 2 file remains until all currently persisted routes have completed.
+- Core Discord thread bindings store both the stable Core ID and terminal
+  address. A changed Core identity is rejected before a thread mutation.
 - Text is posted as ordinary Discord message content with original newlines and
   agent-authored Markdown. HerdRelay adds no code fences and disables mentions.
 - Long output is split at line boundaries where possible. Delivery is not

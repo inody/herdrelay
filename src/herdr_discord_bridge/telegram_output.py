@@ -8,6 +8,12 @@ import time
 
 from .config import AppConfig
 from .domain import OutputEventKind, RuntimeKind
+from .output_delivery import (
+    all_required_deliveries_seen,
+    delivery_seen,
+    mark_delivery_seen,
+    telegram_delivery_key,
+)
 from .output_events import inbox_events_in_arrival_order, load_hook_output_event
 from .store import Store
 from .telegram_api import TelegramBotApi
@@ -91,20 +97,27 @@ class TelegramOutputRelay:
                     await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue
 
-            dedupe_key = (
-                f"agent-output:telegram:{route.chat_id}:{route.thread_id}:"
-                f"{event.agent}:{event.event_id}"
+            dedupe_key = telegram_delivery_key(
+                event,
+                chat_id=route.chat_id,
+                thread_id=route.thread_id,
             )
-            if self.store.has_event_key(dedupe_key):
-                await asyncio.to_thread(path.unlink, missing_ok=True)
+            if delivery_seen(self.store, event, dedupe_key):
+                if all_required_deliveries_seen(
+                    config=self.config, store=self.store, event=event
+                ):
+                    await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue
 
             if event.kind in {
                 OutputEventKind.HUMAN_INPUT.value,
                 OutputEventKind.QUESTION_RESOLVED.value,
             }:
-                self.store.mark_event_seen(dedupe_key)
-                await asyncio.to_thread(path.unlink, missing_ok=True)
+                mark_delivery_seen(self.store, event, dedupe_key)
+                if all_required_deliveries_seen(
+                    config=self.config, store=self.store, event=event
+                ):
+                    await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue
 
             text = event.text
@@ -115,8 +128,11 @@ class TelegramOutputRelay:
                 message_thread_id=int(route.thread_id),
                 text=text,
             )
-            self.store.mark_event_seen(dedupe_key)
-            await asyncio.to_thread(path.unlink, missing_ok=True)
+            mark_delivery_seen(self.store, event, dedupe_key)
+            if all_required_deliveries_seen(
+                config=self.config, store=self.store, event=event
+            ):
+                await asyncio.to_thread(path.unlink, missing_ok=True)
             LOG.info(
                 "Delivered %s output to Telegram topic %s",
                 event.agent,

@@ -99,11 +99,13 @@ At a useful operational level:
    keys, and pending Claude questions.
 
 The stable default remains the legacy Herdr TUI with Discord. An explicit
-experimental path now supports an existing Herdr Core socket, Core status
-events, normal prompt submission, interrupt, and an experimental Telegram
-forum transport with `/agents`, `/help`, blocked/done notifications, persisted
-topic lifecycle, opt-in prompt submission, and opt-in one-time confirmed
-interrupt. Physical Apple Watch behavior remains unverified. See
+experimental path now supports an existing Herdr Core socket, Core-pinned
+Discord thread bindings, Core status events, normal prompt submission,
+interrupt, and an experimental Telegram forum transport with `/agents`,
+`/help`, blocked/done notifications, persisted topic lifecycle, opt-in prompt
+submission, and opt-in one-time confirmed interrupt. Version 2 adapter output
+fans out independently to every persisted Discord and Telegram route. Physical
+Apple Watch behavior remains unverified. See
 [Herdr Core and Telegram architecture](docs/core-telegram-design.md) and the
 [implementation plan](docs/core-telegram-plan.md) for the current boundary and
 remaining stages.
@@ -470,6 +472,12 @@ Treat every enabled Discord or Telegram destination as remote terminal access.
 - Telegram prompt and interrupt mutations are atomically claimed and audited
   before Core is called. A timeout or lost response is recorded as
   `outcome_unknown` and is never retried automatically.
+- Core Discord bindings persist the Core identity with the terminal address.
+  A binding from a different Core instance is rejected instead of being applied
+  to a reused terminal address.
+- Version 2 output dedupe is route-specific. Discord delivery never suppresses
+  Telegram delivery, or vice versa; the inbox file is removed only after every
+  currently persisted route is complete.
 - Telegram bots cannot use Secret Chats. Messages and agent metadata sent there
   are stored by Telegram's cloud service.
 - Automatic pane threads are **public threads** within the parent channel, not

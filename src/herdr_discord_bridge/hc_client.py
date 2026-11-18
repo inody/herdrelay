@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import AppConfig
+from .domain import RuntimeKind, TargetKey
 from .hc_rpc import HcRpcClient, HcRpcError
 from .hc_protocol import HcTerminal, parse_terminal
 from .herdr_client import TargetResolutionError
@@ -85,6 +86,27 @@ class HcClient:
                 continue
             targets.append(self._target_from_terminal(terminal, raw=raw))
         return targets
+
+    def target_key(self, target: str) -> TargetKey:
+        if self._core_id is None:
+            self.list_panes()
+        if self._core_id is None:
+            raise HcRpcError("Core identity is unavailable")
+        self._ensure_target_allowed(target)
+        return TargetKey.core(controller_core_id=self._core_id, address=target)
+
+    def resolve_target_key(self, key: TargetKey) -> HerdrTarget:
+        if key.runtime is not RuntimeKind.HERDR_CORE:
+            raise HcRpcError("legacy target identity cannot be used with Herdr Core")
+        targets = self.list_panes()
+        if self._core_id != key.controller_core_id:
+            raise HcRpcError(
+                "bound target belongs to a different Core instance; no action was taken"
+            )
+        for target in targets:
+            if target.target == key.address:
+                return target
+        raise HcRpcError(f"Core terminal is no longer live: {key.address}")
 
     def read(
         self,

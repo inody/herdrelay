@@ -6,6 +6,7 @@ import pytest
 
 from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfig
 from herdr_discord_bridge.discord_bot import HerdrDiscordBot
+from herdr_discord_bridge.domain import TargetKey
 from herdr_discord_bridge.hc_client import HcClient
 from herdr_discord_bridge.herdr_client import HerdrClient, StartedAgent
 from herdr_discord_bridge.models import HerdrTarget
@@ -27,6 +28,10 @@ def bot(tmp_path, monkeypatch):
         raw={"workspace_id": "w1", "tab_id": "w1:t1"},
     )]
     client.read.return_value = "ready"
+    client.target_key.side_effect = TargetKey.legacy
+    client.resolve_target_key.side_effect = lambda key: next(
+        target for target in client.list_targets.return_value if target.target == key.address
+    )
     result = HerdrDiscordBot(config=config, store=Store(tmp_path / "test.sqlite3"), client=client)
     result._connection.user = SimpleNamespace(id=99)
     monkeypatch.setattr("herdr_discord_bridge.discord_bot.asyncio.sleep", AsyncMock())

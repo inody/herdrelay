@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from herdr_discord_bridge.config import AppConfig
+from herdr_discord_bridge.domain import TargetKey
 from herdr_discord_bridge.herdr_cli import HerdrCliError
 from herdr_discord_bridge.models import HerdrTarget
 from herdr_discord_bridge.store import Store
@@ -58,6 +59,7 @@ def manager(tmp_path):
         herdr_target="w1:p1", label="project", created_by=1,
     )
     client = Mock()
+    client.target_key.side_effect = TargetKey.legacy
     parent = SimpleNamespace(id=10, guild=SimpleNamespace(id=1), create_thread=AsyncMock())
     thread = SimpleNamespace(id=123, name="project/pi", archived=False, edit=AsyncMock())
     result = ThreadManager(
@@ -148,6 +150,83 @@ async def test_agent_relaunch_reactivates_existing_archived_thread(manager):
         archived=False, reason="Pane w1:p1 active again",
     )
     manager._parent_channel.return_value.create_thread.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_existing_raw_core_thread_binding_is_pinned_without_duplicate(tmp_path):
+    store = Store(tmp_path / "store.sqlite3")
+    store.upsert_agent_thread(pane_id="t1", thread_id=123, guild_id=1, alias="project")
+    store.upsert_binding(
+        guild_id=1,
+        channel_id=10,
+        thread_id=123,
+        herdr_target="t1",
+        label="project",
+        created_by=1,
+    )
+    client = Mock()
+    client.list_panes.return_value = [
+        HerdrTarget(target="t1", agent_name="pi", workspace_label="project")
+    ]
+    client.target_key.return_value = TargetKey.core(
+        controller_core_id="core-1", address="t1"
+    )
+    parent = SimpleNamespace(id=10, guild=SimpleNamespace(id=1), create_thread=AsyncMock())
+    thread = SimpleNamespace(id=123, name="project/pi", archived=False, edit=AsyncMock())
+    manager = ThreadManager(
+        bot=SimpleNamespace(user=None),
+        config=AppConfig(discord_token="token"),
+        store=store,
+        client=client,
+    )
+    manager._parent_channel = AsyncMock(return_value=parent)
+    manager._fetch_thread = AsyncMock(return_value=thread)
+
+    await manager.sync()
+
+    route_target = TargetKey.core(
+        controller_core_id="core-1", address="t1"
+    ).to_route_value()
+    parent.create_thread.assert_not_awaited()
+    assert store.get_agent_thread("t1") is None
+    assert store.get_agent_thread(route_target) == "123"
+    binding = store.find_binding_for_target(route_target)
+    assert binding is not None
+
+
+@pytest.mark.asyncio
+async def test_core_thread_binding_pins_core_identity(tmp_path):
+    store = Store(tmp_path / "store.sqlite3")
+    client = Mock()
+    client.list_panes.return_value = [
+        HerdrTarget(target="t1", agent_name="pi", workspace_label="project")
+    ]
+    client.target_key.return_value = TargetKey.core(
+        controller_core_id="core-1", address="t1"
+    )
+    parent = SimpleNamespace(
+        id=10,
+        guild=SimpleNamespace(id=1),
+        create_thread=AsyncMock(return_value=SimpleNamespace(id=456)),
+    )
+    manager = ThreadManager(
+        bot=SimpleNamespace(user=None),
+        config=AppConfig(discord_token="token"),
+        store=store,
+        client=client,
+    )
+    manager._parent_channel = AsyncMock(return_value=parent)
+    manager._fetch_thread = AsyncMock()
+
+    await manager.sync()
+
+    route_target = TargetKey.core(
+        controller_core_id="core-1", address="t1"
+    ).to_route_value()
+    assert store.get_agent_thread(route_target) == "456"
+    binding = store.find_binding_for_target(route_target)
+    assert binding is not None
+    assert binding.herdr_target == route_target
 
 
 @pytest.mark.asyncio

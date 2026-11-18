@@ -106,6 +106,12 @@ class TargetKey:
     def legacy(cls, pane_id: str) -> TargetKey:
         return cls(runtime=RuntimeKind.HERDR_TUI, address=pane_id)
 
+    def to_route_value(self) -> str:
+        """Persist legacy pane IDs compatibly and Core identities exactly."""
+        if self.runtime is RuntimeKind.HERDR_TUI:
+            return self.address
+        return self.to_storage_key()
+
     def to_storage_key(self) -> str:
         return json.dumps(
             {
@@ -119,6 +125,15 @@ class TargetKey:
             separators=(",", ":"),
             sort_keys=True,
         )
+
+    @classmethod
+    def from_route_value(cls, value: str) -> TargetKey:
+        """Read a normalized Core key or an existing raw legacy pane ID."""
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("target route value must be a non-empty string")
+        if not value.lstrip().startswith("{"):
+            return cls.legacy(value)
+        return cls.from_storage_key(value)
 
     @classmethod
     def from_storage_key(cls, value: str) -> TargetKey:
