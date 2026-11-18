@@ -1,7 +1,7 @@
 import pytest
 
-from herdr_discord_bridge.discord_bot import QuestionChoiceView
-from herdr_discord_bridge.models import PendingQuestion, QuestionOption
+from herdrelay.discord_bot import QuestionChoiceView
+from herdrelay.models import PendingQuestion, QuestionOption
 
 
 def question(*, multi_select=False, event_id="question-1"):

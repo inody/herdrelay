@@ -6,20 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from herdr_discord_bridge.config import (
+from herdrelay.config import (
     AppConfig,
     HcRuntimeConfig,
     RuntimeConfig,
     WatcherConfig,
 )
-from herdr_discord_bridge.hc_client import HcClient
-from herdr_discord_bridge.hc_events import HcTerminalState
-from herdr_discord_bridge.hc_protocol import (
+from herdrelay.hc_client import HcClient
+from herdrelay.hc_events import HcTerminalState
+from herdrelay.hc_protocol import (
     decode_notification_line,
     parse_hello_result,
     parse_subscribe_result,
 )
-from herdr_discord_bridge.hc_watcher import CoreEventWatcher, core_status_events
+from herdrelay.core_discord_watcher import CoreEventWatcher, core_status_events
 
 ROOT = Path(__file__).parents[1]
 FIXTURES = ROOT / "tests/fixtures/hc"

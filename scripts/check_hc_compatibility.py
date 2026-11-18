@@ -9,7 +9,7 @@ import subprocess
 import sys
 from typing import Sequence
 
-from herdr_discord_bridge.hc_protocol import (
+from herdrelay.hc_protocol import (
     HcProtocolError,
     inspect_openrpc_schema,
 )

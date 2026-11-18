@@ -90,7 +90,7 @@ Create domain types and protocols without changing runtime behavior.
 
 ### Work
 
-- Add a package area such as `src/herdr_discord_bridge/domain/` or begin the
+- Add a package area such as `src/herdrelay/domain/` or begin the
   gradual package rename to `src/herdrelay/` only if it can be done separately
   without obscuring functional changes.
 - Define:

@@ -5,10 +5,10 @@ import time
 import discord
 import pytest
 
-from herdr_discord_bridge.config import AppConfig, StreamConfig
-from herdr_discord_bridge.models import PendingQuestion, QuestionOption
-from herdr_discord_bridge.store import Store
-from herdr_discord_bridge.streams import (
+from herdrelay.config import AppConfig, StreamConfig
+from herdrelay.models import PendingQuestion, QuestionOption
+from herdrelay.store import Store
+from herdrelay.discord_output import (
     StreamManager,
     _hook_event_text,
     _last_lines,

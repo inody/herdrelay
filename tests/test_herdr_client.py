@@ -2,11 +2,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig
-from herdr_discord_bridge.domain import MutationOutcomeUnknownError, TargetKey
-from herdr_discord_bridge.herdr_cli import HerdrCliError
-from herdr_discord_bridge.herdr_client import HerdrClient, normalize_targets
-from herdr_discord_bridge.models import HerdrTarget
+from herdrelay.config import AppConfig
+from herdrelay.domain import MutationOutcomeUnknownError, TargetKey
+from herdrelay.herdr_cli import HerdrCliError
+from herdrelay.herdr_client import HerdrClient, normalize_targets
+from herdrelay.models import HerdrTarget
 
 
 def test_normalize_targets_from_result_agents():
@@ -272,7 +272,7 @@ def test_legacy_client_preserves_raw_pane_route_identity():
 
 
 def test_send_keys_pauses_between_keys_when_asked(monkeypatch):
-    from herdr_discord_bridge import herdr_client as module
+    from herdrelay import herdr_client as module
 
     sent = []
     sleeps = []

@@ -3,12 +3,12 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig
-from herdr_discord_bridge.domain import TargetKey
-from herdr_discord_bridge.herdr_cli import HerdrCliError
-from herdr_discord_bridge.models import HerdrTarget
-from herdr_discord_bridge.store import Store
-from herdr_discord_bridge.threads import ThreadManager, thread_name
+from herdrelay.config import AppConfig
+from herdrelay.domain import TargetKey
+from herdrelay.herdr_cli import HerdrCliError
+from herdrelay.models import HerdrTarget
+from herdrelay.store import Store
+from herdrelay.discord_threads import ThreadManager, thread_name
 
 
 def test_thread_name_marks_blocked_panes():

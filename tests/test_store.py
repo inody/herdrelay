@@ -1,12 +1,12 @@
 import sqlite3
 
-from herdr_discord_bridge.domain import TargetKey
-from herdr_discord_bridge.models import (
+from herdrelay.domain import TargetKey
+from herdrelay.models import (
     PendingQuestion,
     QuestionOption,
     TransportAuditEntry,
 )
-from herdr_discord_bridge.store import Store
+from herdrelay.store import Store
 
 
 def test_channel_binding_roundtrip(tmp_path):

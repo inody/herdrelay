@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from herdr_discord_bridge.hc_protocol import (
+from herdrelay.hc_protocol import (
     HcEventNotification,
     HcHeartbeatNotification,
     HcMissedNotification,

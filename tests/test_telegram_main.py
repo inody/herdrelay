@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from herdr_discord_bridge.config import (
+from herdrelay.config import (
     AppConfig,
     HcRuntimeConfig,
     RuntimeConfig,
     TelegramConfig,
 )
-from herdr_discord_bridge.telegram_main import _load_telegram_config, run_telegram
+from herdrelay.telegram_main import _load_telegram_config, run_telegram
 
 
 def test_load_telegram_config_does_not_require_discord_token(tmp_path, monkeypatch):
@@ -76,13 +76,13 @@ async def test_run_telegram_wires_store_runtime_and_service(monkeypatch):
             seen["ran"] = True
 
     runtime_client = object()
-    monkeypatch.setattr("herdr_discord_bridge.telegram_main.Store", FakeStore)
+    monkeypatch.setattr("herdrelay.telegram_main.Store", FakeStore)
     monkeypatch.setattr(
-        "herdr_discord_bridge.telegram_main.build_runtime_client",
+        "herdrelay.telegram_main.build_runtime_client",
         lambda supplied: runtime_client,
     )
     monkeypatch.setattr(
-        "herdr_discord_bridge.telegram_main.TelegramService", FakeService
+        "herdrelay.telegram_main.TelegramService", FakeService
     )
 
     await run_telegram(config)

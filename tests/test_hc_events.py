@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from herdr_discord_bridge.config import HcRuntimeConfig
-from herdr_discord_bridge.hc_events import HcEventStream, HcTerminalState
-from herdr_discord_bridge.hc_protocol import (
+from herdrelay.config import HcRuntimeConfig
+from herdrelay.hc_events import HcEventStream, HcTerminalState
+from herdrelay.hc_protocol import (
     HcHeartbeatNotification,
     HcProtocolError,
     decode_notification_line,
     parse_subscribe_result,
 )
-from herdr_discord_bridge.hc_rpc import HcRpcError
+from herdrelay.hc_rpc import HcRpcError
 
 ROOT = Path(__file__).parents[1]
 FIXTURES = ROOT / "tests/fixtures/hc"

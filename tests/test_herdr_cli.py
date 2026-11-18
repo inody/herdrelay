@@ -1,5 +1,5 @@
-from herdr_discord_bridge.config import HerdrCliConfig
-from herdr_discord_bridge.herdr_cli import CommandResult, HerdrCli, _read_text
+from herdrelay.config import HerdrCliConfig
+from herdrelay.herdr_cli import CommandResult, HerdrCli, _read_text
 
 
 def test_read_text_extracts_agent_read_payload():

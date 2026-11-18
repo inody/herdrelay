@@ -6,23 +6,23 @@ from pathlib import Path
 
 import pytest
 
-from herdr_discord_bridge.config import (
+from herdrelay.config import (
     AppConfig,
     HcRuntimeConfig,
     RuntimeConfig,
     TelegramConfig,
 )
-from herdr_discord_bridge.domain import MutationOutcomeUnknownError, TargetKey
-from herdr_discord_bridge.hc_client import HcClient, HcMutationReceipt
-from herdr_discord_bridge.hc_events import HcTerminalState
-from herdr_discord_bridge.hc_protocol import (
+from herdrelay.domain import MutationOutcomeUnknownError, TargetKey
+from herdrelay.hc_client import HcClient, HcMutationReceipt
+from herdrelay.hc_events import HcTerminalState
+from herdrelay.hc_protocol import (
     decode_notification_line,
     parse_subscribe_result,
 )
-from herdr_discord_bridge.models import HerdrTarget
-from herdr_discord_bridge.store import Store
-from herdr_discord_bridge.telegram_api import TelegramApiError
-from herdr_discord_bridge.telegram_service import (
+from herdrelay.models import HerdrTarget
+from herdrelay.store import Store
+from herdrelay.telegram_api import TelegramApiError
+from herdrelay.telegram_service import (
     OFFSET_STATE_KEY,
     TelegramService,
 )

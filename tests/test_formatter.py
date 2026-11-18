@@ -1,12 +1,12 @@
 import pytest
 
-from herdr_discord_bridge.formatter import (
+from herdrelay.formatter import (
     format_tail,
     split_tail_chunks,
     split_text_chunks,
     target_alias,
 )
-from herdr_discord_bridge.models import HerdrTarget
+from herdrelay.models import HerdrTarget
 
 
 def test_tail_escapes_code_fences():

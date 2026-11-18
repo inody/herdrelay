@@ -1,7 +1,7 @@
 import pytest
 
-from herdr_discord_bridge.models import PendingQuestion, QuestionOption
-from herdr_discord_bridge.questions import parse_question_answer, selection_keys
+from herdrelay.models import PendingQuestion, QuestionOption
+from herdrelay.questions import parse_question_answer, selection_keys
 
 
 def question(*, multi_select=False):

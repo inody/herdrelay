@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfig
-from herdr_discord_bridge.hc_client import HcClient
-from herdr_discord_bridge.hc_events import HcEventStream, HcTerminalState
+from herdrelay.config import AppConfig, HcRuntimeConfig, RuntimeConfig
+from herdrelay.hc_client import HcClient
+from herdrelay.hc_events import HcEventStream, HcTerminalState
 
 ROOT = Path(__file__).parents[1]
 RUN_LIVE = os.environ.get("HERDRELAY_RUN_HC_LIVE_TEST") == "1"

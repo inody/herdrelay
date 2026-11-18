@@ -1,6 +1,6 @@
 import pytest
 
-from herdr_discord_bridge.config import load_config
+from herdrelay.config import load_config
 
 
 def test_load_config_reads_thread_and_streaming_settings(tmp_path, monkeypatch):

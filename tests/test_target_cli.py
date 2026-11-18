@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfig
-from herdr_discord_bridge.models import HerdrTarget
-from herdr_discord_bridge.target_cli import allow_target, remove_target
+from herdrelay.config import AppConfig, HcRuntimeConfig, RuntimeConfig
+from herdrelay.models import HerdrTarget
+from herdrelay.target_cli import allow_target, remove_target
 
 
 def config(path) -> AppConfig:
@@ -35,7 +35,7 @@ def test_allow_and_remove_target_use_private_atomic_file(tmp_path, monkeypatch):
         ]
     )
     monkeypatch.setattr(
-        "herdr_discord_bridge.target_cli._client_with_target",
+        "herdrelay.target_cli._client_with_target",
         lambda supplied, address: client,
     )
 
@@ -52,7 +52,7 @@ def test_allow_and_remove_target_use_private_atomic_file(tmp_path, monkeypatch):
 def test_allow_target_requires_an_eligible_live_agent(tmp_path, monkeypatch):
     app_config = config(tmp_path / "targets.txt")
     monkeypatch.setattr(
-        "herdr_discord_bridge.target_cli._client_with_target",
+        "herdrelay.target_cli._client_with_target",
         lambda supplied, address: SimpleNamespace(list_targets=lambda: []),
     )
 

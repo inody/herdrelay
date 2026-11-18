@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfig
-from herdr_discord_bridge.domain import TargetKey
-from herdr_discord_bridge.hc_client import HcClient, HcUnsupportedOperation
-from herdr_discord_bridge.hc_protocol import parse_hello_result
-from herdr_discord_bridge.hc_rpc import HcCallResult, HcRpcError
-from herdr_discord_bridge.runtime import RuntimeClient
-from herdr_discord_bridge.runtime_client import build_runtime_client
-from herdr_discord_bridge.herdr_client import HerdrClient
+from herdrelay.config import AppConfig, HcRuntimeConfig, RuntimeConfig
+from herdrelay.domain import TargetKey
+from herdrelay.hc_client import HcClient, HcUnsupportedOperation
+from herdrelay.hc_protocol import parse_hello_result
+from herdrelay.hc_rpc import HcCallResult, HcRpcError
+from herdrelay.runtime import RuntimeClient
+from herdrelay.runtime_client import build_runtime_client
+from herdrelay.herdr_client import HerdrClient
 
 ROOT = Path(__file__).parents[1]
 HELLO = parse_hello_result(

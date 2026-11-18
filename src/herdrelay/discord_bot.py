@@ -21,7 +21,7 @@ from .formatter import (
     truncate,
 )
 from .hc_client import HcClient
-from .hc_watcher import CoreEventWatcher
+from .core_discord_watcher import CoreEventWatcher
 from .herdr_client import TargetResolutionError
 from .models import AuditEntry, HerdrTarget, PendingQuestion
 from .questions import (
@@ -31,12 +31,12 @@ from .questions import (
     selection_keys,
 )
 from .runtime import InterruptRuntime, RuntimeClient
-from .security import DiscordLocation, SecurityError, SecurityPolicy
+from .discord_security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
-from .streams import StreamManager
+from .discord_output import StreamManager
 from .telegram_service import TelegramService
-from .threads import ThreadManager
-from .watcher import EventWatcher
+from .discord_threads import ThreadManager
+from .discord_watcher import EventWatcher
 
 LOG = logging.getLogger(__name__)
 

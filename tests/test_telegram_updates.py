@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from herdr_discord_bridge.config import TelegramConfig
-from herdr_discord_bridge.telegram_updates import (
+from herdrelay.config import TelegramConfig
+from herdrelay.telegram_updates import (
     TelegramUpdatePolicy,
     parse_inbound_callback,
     parse_inbound_message,

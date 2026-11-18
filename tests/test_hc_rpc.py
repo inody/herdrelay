@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from herdr_discord_bridge.config import HcRuntimeConfig
-from herdr_discord_bridge.domain import MutationOutcomeUnknownError
-from herdr_discord_bridge.hc_rpc import HcRpcClient, HcRpcError, HcSocketLocator
+from herdrelay.config import HcRuntimeConfig
+from herdrelay.domain import MutationOutcomeUnknownError
+from herdrelay.hc_rpc import HcRpcClient, HcRpcError, HcSocketLocator
 
 ROOT = Path(__file__).parents[1]
 HELLO = json.loads((ROOT / "tests/fixtures/hc/hello.json").read_text())

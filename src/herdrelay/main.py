@@ -28,7 +28,7 @@ def run_configured(config: AppConfig) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Herdr Discord bridge bot.")
+    parser = argparse.ArgumentParser(description="Run configured HerdRelay transports.")
     parser.add_argument("--config", default="config.yaml", help="Path to config YAML")
     parser.add_argument("--log-level", default="INFO", help="Python logging level")
     args = parser.parse_args()

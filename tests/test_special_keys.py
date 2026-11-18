@@ -1,4 +1,4 @@
-from herdr_discord_bridge.discord_bot import (
+from herdrelay.discord_bot import (
     SPECIAL_KEY_SEQUENCES,
     SPECIAL_KEYS,
     _special_key_name,

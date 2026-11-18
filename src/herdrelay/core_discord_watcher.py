@@ -10,7 +10,7 @@ from .hc_events import (
     HcStatusTransition,
     HcTerminalState,
 )
-from .watcher import APPROVAL_VIEW_FACTORY, AgentStatusEvent, EventWatcher
+from .discord_watcher import APPROVAL_VIEW_FACTORY, AgentStatusEvent, EventWatcher
 
 
 class CoreEventWatcher(EventWatcher):

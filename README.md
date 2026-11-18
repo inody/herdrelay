@@ -1,19 +1,18 @@
 # HerdRelay
 
-HerdRelay is a self-hosted Discord control surface for [Herdr](https://herdr.dev/).
-It creates one Discord thread for each Herdr pane that contains a detected coding
-agent, forwards Discord messages to that pane, and relays completed agent
-responses back to the thread.
+HerdRelay connects [Herdr](https://herdr.dev/) runtimes to authorized chat
+transports. It routes prompts, lifecycle notifications, and completed agent
+responses between Herdr Core or the legacy TUI and Discord or Telegram.
 
 ## What HerdRelay is — and is not
 
-HerdRelay keeps Herdr as the source of truth for panes, agents, working
-directories, and lifecycle status. Discord is a remote interface to those local
-panes, not a second session manager.
+HerdRelay keeps Herdr as the source of truth for terminals, panes, agents,
+working directories, and lifecycle status. Discord and Telegram are remote
+interfaces to those local runtimes, not additional session managers.
 
 HerdRelay provides:
 
-- automatic public Discord threads for Herdr panes with detected agents;
+- Discord threads and Telegram forum topics for detected agents;
 - text input, selected terminal keys, agent start, and pane close controls;
 - completed-response relay for Claude Code, Codex, and Pi through adapters;
 - optional blocked/done/working status notifications;
@@ -632,21 +631,18 @@ list/read/send/event subscription, and removes the test processes and files. It
 never types into an existing
 terminal.
 
-The Core backend can now be selected experimentally with
-`runtime.provider: herdr-core`. Status watching uses Core event subscriptions;
-terminal-output streaming still uses polling. The stop command maps only to
-`terminal.interrupt`; approval and all raw-key/start/close operations remain
-disabled. Core targets
-are deny-by-default: `runtime.core.allowed_terminal_addresses` must list exact
-addresses. Use a separate database and Discord test channel for any live test;
-Core bindings are not compatible with legacy pane bindings. See
-`config.example.yaml` for the current settings and
-`docs/core-telegram-plan.md` for remaining work.
+Herdr Core is selected with `runtime.provider: herdr-core`. Status watching
+uses Core event subscriptions and hook output uses the shared delivery inbox.
+The stop command maps only to `terminal.interrupt`; approval and raw-key,
+start, close, and kill operations remain disabled. Core targets are
+deny-by-default through exact inline or file-backed allowlists. See
+`config.example.yaml` and `docs/operations.md` for current settings and rollout
+procedures.
 
 Repository layout:
 
-- `src/herdr_discord_bridge/` — bot, Herdr client, thread/watcher/stream logic,
-  security policy, and SQLite store;
+- `src/herdrelay/` — runtime clients, Discord/Telegram transports, delivery
+  coordination, security policy, and SQLite state;
 - `integrations/` — Pi extension source;
 - `scripts/` — adapter installers, hook writer, runner, and launchd helpers;
 - `tests/` — unit and regression tests;

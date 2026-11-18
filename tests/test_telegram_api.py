@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import pytest
 from aiohttp import web
 
-from herdr_discord_bridge.telegram_api import TelegramApiError, TelegramBotApi
+from herdrelay.telegram_api import TelegramApiError, TelegramBotApi
 
 
 @asynccontextmanager

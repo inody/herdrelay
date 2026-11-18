@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from herdr_discord_bridge.config import (
+from herdrelay.config import (
     AppConfig,
     DiscordTransportConfig,
     TelegramConfig,
 )
-from herdr_discord_bridge.main import run_configured
+from herdrelay.main import run_configured
 
 
 def test_run_configured_prefers_enabled_discord(monkeypatch):
@@ -20,12 +20,12 @@ def test_run_configured_prefers_enabled_discord(monkeypatch):
 
     store = object()
     client = object()
-    monkeypatch.setattr("herdr_discord_bridge.main.Store", lambda path: store)
+    monkeypatch.setattr("herdrelay.main.Store", lambda path: store)
     monkeypatch.setattr(
-        "herdr_discord_bridge.main.build_runtime_client", lambda supplied: client
+        "herdrelay.main.build_runtime_client", lambda supplied: client
     )
     monkeypatch.setattr(
-        "herdr_discord_bridge.main.build_bot",
+        "herdrelay.main.build_bot",
         lambda supplied, supplied_store, supplied_client: FakeBot(),
     )
 
@@ -45,7 +45,7 @@ def test_run_configured_can_run_telegram_without_discord(monkeypatch):
     async def fake_run_telegram(supplied):
         seen["config"] = supplied
 
-    monkeypatch.setattr("herdr_discord_bridge.main.run_telegram", fake_run_telegram)
+    monkeypatch.setattr("herdrelay.main.run_telegram", fake_run_telegram)
 
     run_configured(config)
 

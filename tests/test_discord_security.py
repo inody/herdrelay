@@ -1,7 +1,7 @@
 import pytest
 
-from herdr_discord_bridge.config import AppConfig
-from herdr_discord_bridge.security import DiscordLocation, SecurityError, SecurityPolicy
+from herdrelay.config import AppConfig
+from herdrelay.discord_security import DiscordLocation, SecurityError, SecurityPolicy
 
 
 def test_read_allowed_when_allowlists_are_empty():

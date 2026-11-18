@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from herdr_discord_bridge.domain import (
+from herdrelay.domain import (
     Actor,
     AgentState,
     InboundAction,
@@ -24,7 +24,7 @@ from herdr_discord_bridge.domain import (
 )
 
 ROOT = Path(__file__).parents[1]
-DOMAIN_SOURCE = ROOT / "src" / "herdr_discord_bridge" / "domain.py"
+DOMAIN_SOURCE = ROOT / "src" / "herdrelay" / "domain.py"
 
 
 def test_core_target_key_roundtrips_with_unicode_and_qualified_address():

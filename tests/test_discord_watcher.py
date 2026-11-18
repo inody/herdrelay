@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig, WatcherConfig
-from herdr_discord_bridge.models import HerdrTarget
-from herdr_discord_bridge.store import Store
-from herdr_discord_bridge.watcher import (
+from herdrelay.config import AppConfig, WatcherConfig
+from herdrelay.models import HerdrTarget
+from herdrelay.store import Store
+from herdrelay.discord_watcher import (
     AgentStatusEvent,
     EventWatcher,
     blocked_mention_prefix,
@@ -148,7 +148,7 @@ def test_build_agent_status_subscriptions_uses_pane_and_status_filters():
 
 def test_should_resubscribe_after_configured_interval(monkeypatch):
     config = AppConfig(discord_token="token")
-    monkeypatch.setattr("herdr_discord_bridge.watcher.time.monotonic", lambda: 500.0)
+    monkeypatch.setattr("herdrelay.discord_watcher.time.monotonic", lambda: 500.0)
 
     assert should_resubscribe(199.9, config)
     assert not should_resubscribe(250.1, config)
@@ -161,7 +161,7 @@ def test_should_resubscribe_can_be_disabled(monkeypatch):
             resubscribe_interval_seconds=0,
         ),
     )
-    monkeypatch.setattr("herdr_discord_bridge.watcher.time.monotonic", lambda: 1000.0)
+    monkeypatch.setattr("herdrelay.discord_watcher.time.monotonic", lambda: 1000.0)
 
     assert not should_resubscribe(0, config)
 
@@ -221,7 +221,7 @@ async def test_empty_watcher_waits_then_subscribes_when_a_pane_appears(monkeypat
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
     client.list_panes.return_value = [HerdrTarget(target="w1:p1")]
-    reader = Mock(readline=AsyncMock(return_value=b'{"id":"discord_bridge_events"}\n'))
+    reader = Mock(readline=AsyncMock(return_value=b'{"id":"herdrelay_events"}\n'))
     writer = Mock(drain=AsyncMock(), wait_closed=AsyncMock())
     connection.return_value = (reader, writer)
     async def handle_line(line):
@@ -307,7 +307,7 @@ async def test_topology_refreshes_filters_with_periodic_reconnect_disabled(
     client = Mock()
     client.list_panes.side_effect = [before, before, after, after]
     watcher = _watcher(client)
-    ack = {"id": "discord_bridge_events", "result": {}}
+    ack = {"id": "herdrelay_events", "result": {}}
     wire_type = event_type.replace(".", "_") if wire_style == "snake_case" else event_type
     first = _socket_pair(ack, {"event": wire_type, "data": {"type": wire_type}})
     second = _socket_pair(ack, {
@@ -345,7 +345,7 @@ async def test_post_ack_snapshot_closes_discovery_subscription_gap(monkeypatch):
         [HerdrTarget(target="w1:p1"), HerdrTarget(target="w1:p2")],
     ]
     watcher = _watcher(client)
-    reader, writer = _socket_pair({"id": "discord_bridge_events", "result": {}})
+    reader, writer = _socket_pair({"id": "herdrelay_events", "result": {}})
     monkeypatch.setattr(asyncio, "open_unix_connection", AsyncMock(return_value=(reader, writer)))
 
     await watcher._run_once()
@@ -361,7 +361,7 @@ async def test_events_lost_error_closes_socket_for_retry(monkeypatch):
     client.list_panes.return_value = [HerdrTarget(target="w1:p1")]
     watcher = _watcher(client)
     reader, writer = _socket_pair(
-        {"id": "discord_bridge_events", "result": {}},
+        {"id": "herdrelay_events", "result": {}},
         {"error": {"code": "events_lost", "message": "subscriber fell behind"}},
     )
     monkeypatch.setattr(asyncio, "open_unix_connection", AsyncMock(return_value=(reader, writer)))

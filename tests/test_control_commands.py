@@ -4,14 +4,14 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfig
-from herdr_discord_bridge.discord_bot import HerdrDiscordBot
-from herdr_discord_bridge.domain import TargetKey
-from herdr_discord_bridge.hc_client import HcClient
-from herdr_discord_bridge.herdr_client import HerdrClient, StartedAgent
-from herdr_discord_bridge.models import HerdrTarget
-from herdr_discord_bridge.security import SecurityPolicy
-from herdr_discord_bridge.store import Store
+from herdrelay.config import AppConfig, HcRuntimeConfig, RuntimeConfig
+from herdrelay.discord_bot import HerdrDiscordBot
+from herdrelay.domain import TargetKey
+from herdrelay.hc_client import HcClient
+from herdrelay.herdr_client import HerdrClient, StartedAgent
+from herdrelay.models import HerdrTarget
+from herdrelay.discord_security import SecurityPolicy
+from herdrelay.store import Store
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def bot(tmp_path, monkeypatch):
     )
     result = HerdrDiscordBot(config=config, store=Store(tmp_path / "test.sqlite3"), client=client)
     result._connection.user = SimpleNamespace(id=99)
-    monkeypatch.setattr("herdr_discord_bridge.discord_bot.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("herdrelay.discord_bot.asyncio.sleep", AsyncMock())
     return result
 
 

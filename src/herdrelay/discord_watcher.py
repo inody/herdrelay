@@ -88,7 +88,7 @@ class EventWatcher:
         reader, writer = await asyncio.open_unix_connection(socket_path)
         try:
             request = {
-                "id": "discord_bridge_events",
+                "id": "herdrelay_events",
                 "method": "events.subscribe",
                 "params": {"subscriptions": subscriptions},
             }
@@ -129,7 +129,7 @@ class EventWatcher:
             return
         if isinstance(payload, dict) and payload.get("error"):
             raise RuntimeError(f"Herdr event stream error: {payload['error']}")
-        if isinstance(payload, dict) and payload.get("id") == "discord_bridge_events":
+        if isinstance(payload, dict) and payload.get("id") == "herdrelay_events":
             LOG.info("Herdr event watcher subscribed")
             return "subscribed"
         if isinstance(payload, dict) and _canonical_event_type(payload) in TOPOLOGY_EVENTS:

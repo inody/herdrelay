@@ -1,6 +1,6 @@
 import pytest
 
-from herdr_discord_bridge.approval import (
+from herdrelay.approval import (
     ApprovalError,
     apply_action,
     deny_strategy_for,
@@ -8,8 +8,8 @@ from herdr_discord_bridge.approval import (
     stop_strategy_for,
     strategy_for,
 )
-from herdr_discord_bridge.config import AppConfig, ApprovalStrategy
-from herdr_discord_bridge.models import HerdrTarget
+from herdrelay.config import AppConfig, ApprovalStrategy
+from herdrelay.models import HerdrTarget
 
 
 def test_strategy_for_agent_specific_config():
