@@ -106,7 +106,7 @@ class AppConfig:
     allowed_channel_ids: frozenset[int] = frozenset()
     allowed_user_ids: frozenset[int] = frozenset()
     thread_parent_channel_id: int | None = None
-    database_path: str = "herdr-discord-bridge.sqlite3"
+    database_path: str = "herdrelay.sqlite3"
     max_output_chars: int = 1800
     max_message_chars: int = 2000
     enable_send: bool = False
@@ -240,10 +240,8 @@ def load_config(
                 "thread_parent_channel_id", data.get("thread_parent_channel_id")
             )
         ),
-        database_path=str(
-            storage_data.get("database_path")
-            or data.get("database_path")
-            or "herdr-discord-bridge.sqlite3"
+        database_path=_database_path(
+            storage_data.get("database_path") or data.get("database_path")
         ),
         max_output_chars=int(
             relay_data.get("max_output_chars", data.get("max_output_chars", 1800))
@@ -497,6 +495,16 @@ def _string_set(value: Any) -> frozenset[str]:
     if not all(result):
         raise ValueError("string allowlists cannot contain empty values")
     return result
+
+
+def _database_path(value: Any) -> str:
+    if value not in (None, ""):
+        return str(value)
+    preferred = Path("herdrelay.sqlite3")
+    legacy = Path("herdr-discord-bridge.sqlite3")
+    if legacy.exists() and not preferred.exists():
+        return str(legacy)
+    return str(preferred)
 
 
 def _optional_config_path(value: Any, *, base: Path) -> str | None:

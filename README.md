@@ -399,8 +399,9 @@ The preferred schema groups settings by responsibility:
 For backward compatibility, the former flat keys remain accepted. New
 configurations should use the grouped form in `config.example.yaml`.
 
-If `storage.database_path` is omitted, the code retains the legacy default
-`herdr-discord-bridge.sqlite3`; the example uses `herdrelay.sqlite3`.
+If `storage.database_path` is omitted, the preferred default is
+`herdrelay.sqlite3`. An existing legacy `herdr-discord-bridge.sqlite3` is
+reused only when the preferred file does not yet exist.
 
 ### Nested groups
 

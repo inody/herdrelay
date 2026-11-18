@@ -134,6 +134,24 @@ def test_load_config_accepts_core_event_watcher(tmp_path, monkeypatch):
 
 
 
+def test_database_default_prefers_herdrelay_and_preserves_legacy_file(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+
+    assert load_config(tmp_path / "missing.yaml").database_path == "herdrelay.sqlite3"
+
+    (tmp_path / "herdr-discord-bridge.sqlite3").touch()
+    assert (
+        load_config(tmp_path / "missing.yaml").database_path
+        == "herdr-discord-bridge.sqlite3"
+    )
+
+    (tmp_path / "herdrelay.sqlite3").touch()
+    assert load_config(tmp_path / "missing.yaml").database_path == "herdrelay.sqlite3"
+
+
 def test_load_config_can_disable_discord_without_a_token(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "")
     config_path = tmp_path / "config.yaml"

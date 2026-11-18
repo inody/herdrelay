@@ -8,21 +8,23 @@ the [README](../README.md).
 
 The standard checkout uses these local, gitignored files:
 
-- `.env` — `DISCORD_TOKEN` and optional Herdr socket selection;
+- `.env` — enabled transport tokens and optional runtime overrides;
 - `config.yaml` — runtime configuration;
 - `herdrelay.sqlite3` — SQLite state when copied from the example;
 - `~/.cache/herdrelay/agent-output/` — default adapter inbox; and
 - `logs/` — launchd stdout, stderr, and rotated backups.
 
-If `database_path` is omitted, HerdRelay uses the legacy filename
-`herdr-discord-bridge.sqlite3`. Keep the chosen database when upgrading because
-it contains:
+If `storage.database_path` is omitted, HerdRelay prefers `herdrelay.sqlite3`.
+It reuses an existing `herdr-discord-bridge.sqlite3` only when the preferred
+file is absent. Keep the chosen database when upgrading because it contains:
 
 - `bindings`: Discord location to Herdr pane mappings;
 - `agent_threads`: pane to automatic-thread mappings;
 - `audit_log`: input and control action records;
 - `event_dedupe`: delivered hook and watcher event keys; and
-- `pending_questions`: unanswered structured Claude questions.
+- `pending_questions`: unanswered structured Claude questions;
+- `telegram_topics`: normalized target-to-topic routes; and
+- `transport_audit`: claimed Discord/Telegram mutations and outcomes.
 
 HerdRelay does not currently expose a database migration or pruning command.
 Back up the database with the bot stopped, or use SQLite's online-backup tools.
