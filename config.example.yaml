@@ -1,3 +1,14 @@
+runtime:
+  provider: herdr-tui           # herdr-tui (current default) or herdr-core (experimental)
+  core:
+    socket_path: null             # existing Core only; never starts one
+    connect_timeout_seconds: 5
+    request_timeout_seconds: 20
+    require_app_visible: true
+    include_hidden_workers: false
+    include_connected_machines: false
+    allowed_terminal_addresses: [] # empty denies all Core targets; list exact t-addresses
+
 allowed_guild_ids: []
 allowed_channel_ids: []
 allowed_user_ids: []

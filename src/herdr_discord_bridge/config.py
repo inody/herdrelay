@@ -17,6 +17,23 @@ class HerdrCliConfig:
 
 
 @dataclass(frozen=True)
+class HcRuntimeConfig:
+    socket_path: str | None = None
+    connect_timeout_seconds: float = 5
+    request_timeout_seconds: float = 20
+    require_app_visible: bool = True
+    include_hidden_workers: bool = False
+    include_connected_machines: bool = False
+    allowed_terminal_addresses: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class RuntimeConfig:
+    provider: str = "herdr-tui"
+    core: HcRuntimeConfig = field(default_factory=HcRuntimeConfig)
+
+
+@dataclass(frozen=True)
 class ApprovalStrategy:
     method: str
     text: str | None = None
@@ -71,6 +88,7 @@ class AppConfig:
     enable_streaming: bool = False
     allow_pane_send_fallback: bool = False
     dangerous_text_blocklist: tuple[str, ...] = ()
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     herdr: HerdrCliConfig = field(default_factory=HerdrCliConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
     auto_threads: AutoThreadsConfig = field(default_factory=AutoThreadsConfig)
@@ -94,13 +112,19 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     if not token:
         raise ValueError("DISCORD_TOKEN is required in .env or environment")
 
+    runtime_data = data.get("runtime") or {}
+    if not isinstance(runtime_data, dict):
+        raise ValueError("runtime must be a YAML mapping")
+    core_data = runtime_data.get("core") or {}
+    if not isinstance(core_data, dict):
+        raise ValueError("runtime.core must be a YAML mapping")
     herdr_data = data.get("herdr") or {}
     watcher_data = data.get("watcher") or {}
     auto_threads_data = data.get("auto_threads") or {}
     streaming_data = data.get("streaming") or {}
     approval_data = data.get("approval") or {}
 
-    return AppConfig(
+    config = AppConfig(
         discord_token=token,
         herdr_socket_path=os.environ.get("HERDR_SOCKET_PATH") or None,
         allowed_guild_ids=_id_set(data.get("allowed_guild_ids")),
@@ -118,6 +142,34 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         enable_streaming=bool(data.get("enable_streaming", False)),
         allow_pane_send_fallback=bool(data.get("allow_pane_send_fallback", False)),
         dangerous_text_blocklist=tuple(str(item) for item in data.get("dangerous_text_blocklist") or ()),
+        runtime=RuntimeConfig(
+            provider=_runtime_provider(runtime_data.get("provider")),
+            core=HcRuntimeConfig(
+                socket_path=(
+                    str(core_data["socket_path"])
+                    if core_data.get("socket_path")
+                    else None
+                ),
+                connect_timeout_seconds=float(
+                    core_data.get("connect_timeout_seconds", 5)
+                ),
+                request_timeout_seconds=float(
+                    core_data.get("request_timeout_seconds", 20)
+                ),
+                require_app_visible=bool(
+                    core_data.get("require_app_visible", True)
+                ),
+                include_hidden_workers=bool(
+                    core_data.get("include_hidden_workers", False)
+                ),
+                include_connected_machines=bool(
+                    core_data.get("include_connected_machines", False)
+                ),
+                allowed_terminal_addresses=_string_set(
+                    core_data.get("allowed_terminal_addresses")
+                ),
+            ),
+        ),
         herdr=HerdrCliConfig(
             cli_path=str(herdr_data.get("cli_path") or "herdr"),
             default_source=str(herdr_data.get("default_source") or "recent-unwrapped"),
@@ -168,6 +220,42 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         deny=_approval_strategies(data.get("deny") or {}),
         stop=_single_strategy(data.get("stop")),
     )
+    _validate_runtime_features(config)
+    return config
+
+
+def _validate_runtime_features(config: AppConfig) -> None:
+    if config.runtime.provider != "herdr-core":
+        return
+    if config.runtime.core.connect_timeout_seconds <= 0:
+        raise ValueError("runtime.core.connect_timeout_seconds must be positive")
+    if config.runtime.core.request_timeout_seconds <= 0:
+        raise ValueError("runtime.core.request_timeout_seconds must be positive")
+    if config.enable_watcher:
+        raise ValueError(
+            "enable_watcher is not yet supported with runtime.provider=herdr-core"
+        )
+    if config.enable_approve:
+        raise ValueError(
+            "enable_approve is disabled for Herdr Core until guarded actions exist"
+        )
+    if config.enable_stop:
+        raise ValueError(
+            "enable_stop is not yet wired to hc interrupt; keep it disabled"
+        )
+    if config.enable_streaming and config.streaming.mode != "poll":
+        raise ValueError(
+            "Herdr Core streaming currently requires streaming.mode=poll"
+        )
+
+
+def _runtime_provider(value: Any) -> str:
+    provider = str(value or "herdr-tui").casefold()
+    aliases = {"tui": "herdr-tui", "core": "herdr-core", "hc": "herdr-core"}
+    provider = aliases.get(provider, provider)
+    if provider not in {"herdr-tui", "herdr-core"}:
+        raise ValueError("runtime.provider must be 'herdr-tui' or 'herdr-core'")
+    return provider
 
 
 def _stream_mode(value: Any) -> str:
@@ -175,6 +263,17 @@ def _stream_mode(value: Any) -> str:
     if mode not in {"hooks", "poll"}:
         raise ValueError("streaming.mode must be 'hooks' or 'poll'")
     return mode
+
+
+def _string_set(value: Any) -> frozenset[str]:
+    if not value:
+        return frozenset()
+    if not isinstance(value, list):
+        raise ValueError("string allowlists must be YAML lists")
+    result = frozenset(str(item).strip() for item in value)
+    if not all(result):
+        raise ValueError("string allowlists cannot contain empty values")
+    return result
 
 
 def _id_set(value: Any) -> frozenset[int]:

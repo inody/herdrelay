@@ -269,28 +269,36 @@ behavior.
 
 ### 7.1 Core backend transport
 
-The first implementation may use the installed `hc` CLI and its JSON output:
+The runtime backend connects directly to the existing local Core Unix socket
+using generation-1 plain JSON-RPC. It performs `hello` on every new connection
+and uses only the required narrow method set:
 
-- `hc ls --json` and `hc get` for snapshots;
-- `hc events --json` for a snapshot followed by ordered changes;
-- `hc read --json` for bounded terminal text;
-- `hc send --json` for normal text submission; and
-- `hc interrupt --json` for interruption.
+- `terminal.list` and `terminal.get` for snapshots;
+- `events.subscribe` for a snapshot followed by ordered changes;
+- `terminal.read` for bounded terminal text;
+- `terminal.send` with `force: false` for normal prompt submission; and
+- `terminal.interrupt` for interruption.
 
-The backend must check that an existing Core is available before starting the
-event process. It must not accidentally start a Core under the bridge service's
-launch environment unless an explicit future setting permits that behavior.
+The socket is resolved from an explicit setting or `HC_SOCKET`, then the
+session's `core.lock` and normal XDG state/runtime locations. A failed socket
+connection is an error. The bridge does not invoke `hc server status` or other
+runtime CLI commands because the installed CLI may start Core as a side effect.
+Only the separate static compatibility probe invokes `hc --version` and
+`hc schema`; those commands do not contact or start Core.
 
 The backend reconnects after event-stream exit, replaces state from the next
 snapshot, tolerates unknown optional fields, and stops on an unsupported
-protocol generation or missing required capability. Direct OpenRPC/socket
-integration may replace CLI calls later without changing the domain interface.
+protocol generation or missing required capability. The raw socket and
+arbitrary RPC methods remain internal and are never exposed through a network
+API or chat command.
 
 ### 7.2 Target inclusion policy
 
 A Core can contain app-visible terminals, hidden task workers, plain shells,
 finished history, and connected-machine terminals. The default policy is:
 
+- include only exact terminal addresses in an explicit allowlist, with an empty
+  allowlist exposing no Core targets;
 - include only `state == live`;
 - require a recognized reported agent application;
 - require app visibility labels by default;
@@ -513,8 +521,10 @@ schema will be finalized during implementation, but the intended structure is:
 runtime:
   provider: herdr-core
   core:
-    cli_path: hc
-    start_if_missing: false
+    socket_path: null
+    connect_timeout_seconds: 5
+    request_timeout_seconds: 20
+    allowed_terminal_addresses: []
     include_hidden_workers: false
     include_connected_machines: false
 

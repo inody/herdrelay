@@ -5,7 +5,7 @@ import logging
 
 from .config import load_config
 from .discord_bot import build_bot
-from .herdr_client import HerdrClient
+from .runtime_client import build_runtime_client
 from .store import Store
 
 
@@ -22,7 +22,7 @@ def main() -> None:
 
     config = load_config(args.config)
     store = Store(config.database_path)
-    client = HerdrClient(config)
+    client = build_runtime_client(config)
     bot = build_bot(config, store, client)
     bot.run(config.discord_token)
 

@@ -15,6 +15,7 @@ from .approval import (
     strategy_for,
 )
 from .config import AppConfig
+from .domain import MutationOutcomeUnknownError
 from .formatter import (
     target_alias,
     truncate,
@@ -219,6 +220,14 @@ class HerdrDiscordBot(commands.Bot):
                     await asyncio.to_thread(self.client.send, binding.herdr_target, content)
             self.store.add_audit(AuditEntry(result="ok", **audit_fields))
             await _react(message, "✅")
+        except MutationOutcomeUnknownError as exc:
+            self.store.add_audit(
+                AuditEntry(
+                    result=truncate(f"outcome_unknown: {exc}", max_chars=500),
+                    **audit_fields,
+                )
+            )
+            await _react(message, "⚠️")
         except Exception as exc:
             self.store.add_audit(
                 AuditEntry(result=truncate(f"error: {exc}", max_chars=500), **audit_fields)

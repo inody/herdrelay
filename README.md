@@ -543,9 +543,30 @@ uv run python scripts/check_hc_compatibility.py
 ```
 
 This static probe runs only `hc --version` and `hc schema`; it does not contact
-or start Herdr Core. It checks the methods and parameters required by the
-planned MVP, while a later live handshake will verify the running Core's
-protocol generation and identity.
+or start Herdr Core. It checks the methods and parameters required by the MVP.
+The experimental runtime backend separately performs a generation-1 `hello`
+handshake over an existing local Core socket. It never runs `hc server status`
+or another command that may start Core.
+
+An isolated live contract test is also available:
+
+```bash
+HERDRELAY_RUN_HC_LIVE_TEST=1 uv run pytest -q tests/test_hc_live.py
+```
+
+It creates a temporary HOME/XDG/session/socket, explicitly starts a test-owned
+Core, launches one synthetic status-reporting agent, verifies list/read/send,
+and removes the test processes and files. It never types into an existing
+terminal.
+
+The Core backend can now be selected experimentally with
+`runtime.provider: herdr-core`. It currently uses polling rather than Core event
+subscriptions and rejects watcher, approval, and stop controls. Core targets
+are deny-by-default: `runtime.core.allowed_terminal_addresses` must list exact
+addresses. Use a separate database and Discord test channel for any live test;
+Core bindings are not compatible with legacy pane bindings. See
+`config.example.yaml` for the current settings and
+`docs/core-telegram-plan.md` for remaining work.
 
 Repository layout:
 

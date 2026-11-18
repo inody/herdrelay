@@ -213,8 +213,9 @@ Implement local Core discovery, events, reads, normal sends, and interrupts.
 
 - Add configuration for explicit runtime selection:
   `herdr-tui` or `herdr-core`.
-- Implement an `HcCommandClient` for bounded JSON commands.
-- Implement an event process around `hc events --json`:
+- Implement an existing-socket JSON-RPC client with bounded requests and a
+  generation-1 `hello` handshake. Do not use CLI commands that can start Core.
+- Implement a persistent event connection around `events.subscribe`:
   - parse the initial snapshot;
   - filter live targets;
   - apply ordered updates;
@@ -222,10 +223,11 @@ Implement local Core discovery, events, reads, normal sends, and interrupts.
   - replace state after `missed` or reconnect;
   - tolerate unknown optional fields and future event kinds; and
   - expose connection state.
-- Before launching the event process, confirm an existing Core is available.
-  Keep `start_if_missing` false and unsupported in the first release.
+- Resolve the configured/session socket and connect to it directly. A missing
+  Core is an error; automatic start remains unsupported in the first release.
 - Negotiate or verify protocol generation and required methods.
 - Implement target inclusion policy:
+  - exact terminal-address allowlist, empty by default;
   - recognized reported agent;
   - app-visible by default;
   - hidden workers off by default;
@@ -243,9 +245,9 @@ Implement local Core discovery, events, reads, normal sends, and interrupts.
 - Unit tests against all Phase 0 fixtures.
 - Reconnect and fresh-snapshot replacement.
 - Event sequence gaps and unknown events.
-- Command timeout and malformed JSON classification.
+- Request timeout and malformed JSON classification.
 - `terminal.send` blocked rejection.
-- Interrupt uses `hc interrupt`, not raw keys.
+- Interrupt uses `terminal.interrupt`, not raw keys.
 - Isolated contract test using scratch HOME/XDG and `HC_SESSION`.
 - Synthetic OSC status reporter exercises lifecycle transitions.
 - Core restart does not terminate the bridge test's synthetic terminal unless
@@ -480,10 +482,12 @@ legacy pane IDs.
 
 Before enabling Core:
 
-- `hc` CLI and Core versions are compatible.
-- An existing Core is running under the intended user/session.
+- The static `hc schema` compatibility probe passes.
+- An existing Core is running under the intended user/session and the resolved
+  socket is recorded.
 - Required Core methods are present.
-- Target inclusion policy excludes hidden workers and shells as intended.
+- The exact terminal-address allowlist excludes hidden workers, shells, and
+  unrelated visible agents as intended.
 - Core ID and selected database are recorded in diagnostics.
 
 Before enabling Telegram:

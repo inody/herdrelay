@@ -66,6 +66,10 @@ class MutationOutcome(StrEnum):
     OUTCOME_UNKNOWN = "outcome_unknown"
 
 
+class MutationOutcomeUnknownError(RuntimeError):
+    """A mutation may have applied, so callers must not retry automatically."""
+
+
 @dataclass(frozen=True, slots=True)
 class TargetKey:
     runtime: RuntimeKind
