@@ -64,6 +64,67 @@ def test_upsert_replaces_existing_null_thread_binding(tmp_path):
     assert bindings[0].herdr_target == "1-2"
 
 
+def test_telegram_confirmation_is_actor_location_bound_expiring_and_one_time(tmp_path):
+    store = Store(tmp_path / "confirmation.sqlite3")
+    store.create_telegram_confirmation(
+        token="secret",
+        actor_id=42,
+        chat_id=-1001,
+        thread_id=77,
+        core_id="core-1",
+        terminal_address="t1",
+        action="interrupt",
+        expires_at=200,
+    )
+
+    assert store.consume_telegram_confirmation(
+        token="secret",
+        actor_id=9,
+        chat_id=-1001,
+        thread_id=77,
+        action="interrupt",
+        now=100,
+    ) is None
+    confirmation = store.consume_telegram_confirmation(
+        token="secret",
+        actor_id=42,
+        chat_id=-1001,
+        thread_id=77,
+        action="interrupt",
+        now=100,
+    )
+    assert confirmation is not None
+    assert confirmation.core_id == "core-1"
+    assert confirmation.terminal_address == "t1"
+    assert store.consume_telegram_confirmation(
+        token="secret",
+        actor_id=42,
+        chat_id=-1001,
+        thread_id=77,
+        action="interrupt",
+        now=100,
+    ) is None
+
+    store.create_telegram_confirmation(
+        token="expired",
+        actor_id=42,
+        chat_id=-1001,
+        thread_id=77,
+        core_id="core-1",
+        terminal_address="t1",
+        action="interrupt",
+        expires_at=99,
+    )
+    assert store.consume_telegram_confirmation(
+        token="expired",
+        actor_id=42,
+        chat_id=-1001,
+        thread_id=77,
+        action="interrupt",
+        now=100,
+    ) is None
+
+
 def test_transport_mutation_claim_is_atomic_and_single_use(tmp_path):
     store = Store(tmp_path / "audit.sqlite3")
     entry = TransportAuditEntry(

@@ -67,6 +67,55 @@ async def test_send_text_chunks_plain_text_and_preserves_forum_topic():
 
 
 @pytest.mark.asyncio
+async def test_send_message_supports_inline_confirmation_and_callback_answer():
+    requests = []
+
+    async def handler(request):
+        method = request.match_info["method"]
+        payload = await request.json()
+        requests.append((method, payload))
+        if method == "answerCallbackQuery":
+            return web.json_response({"ok": True, "result": True})
+        return web.json_response(
+            {
+                "ok": True,
+                "result": {
+                    "message_id": 1,
+                    "message_thread_id": 77,
+                    "chat": {"id": -1001, "type": "supergroup"},
+                },
+            }
+        )
+
+    markup = {
+        "inline_keyboard": [
+            [{"text": "Interrupt", "callback_data": "interrupt:token"}]
+        ]
+    }
+    async with telegram_server(handler) as base_url:
+        async with TelegramBotApi("test-token", base_url=base_url) as api:
+            await api.send_message(
+                chat_id=-1001,
+                message_thread_id=77,
+                text="Confirm?",
+                reply_markup=markup,
+            )
+            await api.answer_callback_query(
+                callback_query_id="callback-1", text="Interrupting…"
+            )
+
+    assert requests[0][1]["reply_markup"] == markup
+    assert requests[1] == (
+        "answerCallbackQuery",
+        {
+            "callback_query_id": "callback-1",
+            "show_alert": False,
+            "text": "Interrupting…",
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_updates_uses_outbound_long_polling_parameters():
     requests = []
 

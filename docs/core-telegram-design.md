@@ -544,6 +544,8 @@ transports:
     forum_chat_id: null
     statuses: [blocked, done]
     enable_send: false
+    enable_interrupt: false
+    confirmation_ttl_seconds: 60
     notification_detail: status
 ```
 

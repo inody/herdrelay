@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from .models import (
     Binding,
     PendingQuestion,
     QuestionOption,
+    TelegramConfirmation,
     TelegramTopicRoute,
     TransportAuditEntry,
 )
@@ -103,6 +105,19 @@ class Store:
                   observed_turn INTEGER,
                   outcome TEXT NOT NULL,
                   detail TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS telegram_confirmations (
+                  token TEXT PRIMARY KEY,
+                  actor_id TEXT NOT NULL,
+                  chat_id TEXT NOT NULL,
+                  thread_id TEXT NOT NULL,
+                  core_id TEXT NOT NULL,
+                  terminal_address TEXT NOT NULL,
+                  action TEXT NOT NULL,
+                  expires_at REAL NOT NULL,
+                  consumed_at TEXT,
+                  created_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS telegram_topics (
@@ -267,6 +282,32 @@ class Store:
                 ),
             )
 
+    def add_transport_audit(self, entry: TransportAuditEntry) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO transport_audit (
+                  timestamp, transport, actor_id, container_id,
+                  conversation_id, action, target_key, payload_preview,
+                  observed_turn, outcome, detail
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _now(),
+                    entry.transport,
+                    entry.actor_id,
+                    entry.container_id,
+                    entry.conversation_id,
+                    entry.action,
+                    entry.target_key,
+                    entry.payload_preview,
+                    entry.observed_turn,
+                    entry.outcome,
+                    entry.detail,
+                ),
+            )
+            return int(cursor.lastrowid)
+
     def claim_transport_mutation(
         self, *, event_key: str, entry: TransportAuditEntry
     ) -> int | None:
@@ -375,6 +416,81 @@ class Store:
                 """,
                 (key, value, now),
             )
+
+    def create_telegram_confirmation(
+        self,
+        *,
+        token: str,
+        actor_id: int | str,
+        chat_id: int | str,
+        thread_id: int | str,
+        core_id: str,
+        terminal_address: str,
+        action: str,
+        expires_at: float,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO telegram_confirmations (
+                  token, actor_id, chat_id, thread_id, core_id,
+                  terminal_address, action, expires_at, consumed_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                """,
+                (
+                    token,
+                    str(actor_id),
+                    str(chat_id),
+                    str(thread_id),
+                    core_id,
+                    terminal_address,
+                    action,
+                    expires_at,
+                    _now(),
+                ),
+            )
+
+    def consume_telegram_confirmation(
+        self,
+        *,
+        token: str,
+        actor_id: int | str,
+        chat_id: int | str,
+        thread_id: int | str,
+        action: str,
+        now: float | None = None,
+    ) -> TelegramConfirmation | None:
+        timestamp = time.time() if now is None else now
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM telegram_confirmations
+                WHERE token = ? AND actor_id = ? AND chat_id = ?
+                  AND thread_id = ? AND action = ? AND consumed_at IS NULL
+                  AND expires_at >= ?
+                """,
+                (
+                    token,
+                    str(actor_id),
+                    str(chat_id),
+                    str(thread_id),
+                    action,
+                    timestamp,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            cursor = conn.execute(
+                """
+                UPDATE telegram_confirmations
+                SET consumed_at = ?
+                WHERE token = ? AND consumed_at IS NULL
+                """,
+                (_now(), token),
+            )
+            if cursor.rowcount != 1:
+                return None
+            return _telegram_confirmation(row)
 
     def get_telegram_topic(
         self, *, core_id: str, terminal_address: str
@@ -585,6 +701,19 @@ def _pending_question(row: sqlite3.Row) -> PendingQuestion | None:
         prompt=str(row["prompt"]),
         options=options,
         multi_select=bool(row["multi_select"]),
+    )
+
+
+def _telegram_confirmation(row: sqlite3.Row) -> TelegramConfirmation:
+    return TelegramConfirmation(
+        token=str(row["token"]),
+        actor_id=str(row["actor_id"]),
+        chat_id=str(row["chat_id"]),
+        thread_id=str(row["thread_id"]),
+        core_id=str(row["core_id"]),
+        terminal_address=str(row["terminal_address"]),
+        action=str(row["action"]),
+        expires_at=float(row["expires_at"]),
     )
 
 

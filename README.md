@@ -102,8 +102,8 @@ The stable default remains the legacy Herdr TUI with Discord. An explicit
 experimental path now supports an existing Herdr Core socket, Core status
 events, normal prompt submission, interrupt, and an experimental Telegram
 forum transport with `/agents`, `/help`, blocked/done notifications, persisted
-topic lifecycle, and opt-in prompt submission. Telegram interrupt remains
-planned. See
+topic lifecycle, opt-in prompt submission, and opt-in one-time confirmed
+interrupt. Physical Apple Watch behavior remains unverified. See
 [Herdr Core and Telegram architecture](docs/core-telegram-design.md) and the
 [implementation plan](docs/core-telegram-plan.md) for the current boundary and
 remaining stages.
@@ -413,7 +413,9 @@ If `database_path` is omitted, the code retains the legacy default
 - `transports.telegram`: experimental read-only forum transport. Enabling it
   requires exact nonempty chat/user allowlists, `forum_chat_id`, and
   `TELEGRAM_BOT_TOKEN`; `statuses` is limited to `blocked` and `done`, while
-  transport-specific `enable_send` defaults to false.
+  transport-specific `enable_send` and `enable_interrupt` default to false.
+  Interrupt confirmations are actor/topic bound, single-use, and expire after
+  `confirmation_ttl_seconds`.
 - `auto_threads.refresh_seconds`: pane/thread reconciliation interval.
 - `streaming.mode`: `hooks` (recommended) or `poll`.
 - `streaming.refresh_seconds`, `tail_lines`, `initial_tail_lines`, and
@@ -458,10 +460,11 @@ Treat every enabled Discord or Telegram destination as remote terminal access.
 - Telegram supports `/agents`, `/help`, and status-only blocked/done
   notifications in persisted forum topics. It requires an allowlisted forum
   supergroup and exact user/chat IDs. Ordinary text performs no Core mutation
-  unless `transports.telegram.enable_send` is explicitly enabled.
-- Telegram prompt updates are atomically claimed and audited before Core is
-  called. A timeout or lost response is recorded as `outcome_unknown` and is
-  never retried automatically.
+  unless `transports.telegram.enable_send` is explicitly enabled. `/interrupt`
+  additionally requires `enable_interrupt` and a one-time confirmation button.
+- Telegram prompt and interrupt mutations are atomically claimed and audited
+  before Core is called. A timeout or lost response is recorded as
+  `outcome_unknown` and is never retried automatically.
 - Telegram bots cannot use Secret Chats. Messages and agent metadata sent there
   are stored by Telegram's cloud service.
 - Automatic pane threads are **public threads** within the parent channel, not

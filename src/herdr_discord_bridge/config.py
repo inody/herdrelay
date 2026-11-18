@@ -44,6 +44,8 @@ class TelegramConfig:
     forum_chat_id: int | None = None
     statuses: tuple[str, ...] = ("blocked", "done")
     enable_send: bool = False
+    enable_interrupt: bool = False
+    confirmation_ttl_seconds: int = 60
     poll_timeout_seconds: int = 25
     request_timeout_seconds: float = 35
     reconnect_delay_seconds: float = 5
@@ -256,6 +258,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
                 for item in telegram_data.get("statuses", ("blocked", "done"))
             ),
             enable_send=bool(telegram_data.get("enable_send", False)),
+            enable_interrupt=bool(telegram_data.get("enable_interrupt", False)),
+            confirmation_ttl_seconds=int(
+                telegram_data.get("confirmation_ttl_seconds", 60)
+            ),
             poll_timeout_seconds=int(
                 telegram_data.get("poll_timeout_seconds", 25)
             ),
@@ -297,6 +303,10 @@ def _validate_telegram(config: AppConfig) -> None:
         status not in {"blocked", "done"} for status in telegram.statuses
     ):
         raise ValueError("Telegram statuses may contain only blocked and done")
+    if not 10 <= telegram.confirmation_ttl_seconds <= 600:
+        raise ValueError(
+            "Telegram confirmation_ttl_seconds must be between 10 and 600"
+        )
     if not 1 <= telegram.poll_timeout_seconds <= 50:
         raise ValueError("Telegram poll_timeout_seconds must be between 1 and 50")
     if telegram.request_timeout_seconds <= telegram.poll_timeout_seconds:

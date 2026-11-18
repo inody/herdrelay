@@ -24,6 +24,18 @@ class HerdrTarget:
 
 
 @dataclass(frozen=True)
+class TelegramConfirmation:
+    token: str
+    actor_id: str
+    chat_id: str
+    thread_id: str
+    core_id: str
+    terminal_address: str
+    action: str
+    expires_at: float
+
+
+@dataclass(frozen=True)
 class TransportAuditEntry:
     transport: str
     actor_id: str

@@ -5,6 +5,7 @@ import pytest
 from herdr_discord_bridge.config import TelegramConfig
 from herdr_discord_bridge.telegram_updates import (
     TelegramUpdatePolicy,
+    parse_inbound_callback,
     parse_inbound_message,
 )
 
@@ -73,6 +74,33 @@ def test_parser_ignores_bot_nontext_and_nonmessage_updates():
     nontext["message"].pop("text")
     assert parse_inbound_message(nontext) is None
     assert parse_inbound_message({"update_id": 10, "callback_query": {}}) is None
+
+
+def test_parse_authorized_callback_query():
+    raw = {
+        "update_id": 11,
+        "callback_query": {
+            "id": "callback-1",
+            "from": {"id": 42, "is_bot": False},
+            "message": {
+                "message_id": 6,
+                "message_thread_id": 77,
+                "chat": {
+                    "id": -1001,
+                    "type": "supergroup",
+                    "is_forum": True,
+                },
+            },
+            "data": "interrupt:token",
+        },
+    }
+
+    callback = parse_inbound_callback(raw)
+
+    assert callback is not None
+    assert callback.callback_query_id == "callback-1"
+    assert callback.data == "interrupt:token"
+    assert policy().authorized(callback) is True
 
 
 def test_parser_rejects_malformed_known_fields():

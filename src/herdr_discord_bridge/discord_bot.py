@@ -34,7 +34,7 @@ from .runtime import InterruptRuntime, RuntimeClient
 from .security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
 from .streams import StreamManager
-from .telegram_service import TelegramReadOnlyService
+from .telegram_service import TelegramService
 from .threads import ThreadManager
 from .watcher import EventWatcher
 
@@ -57,7 +57,7 @@ class HerdrDiscordBot(commands.Bot):
         self._thread_task: asyncio.Task | None = None
         self.stream_manager: StreamManager | None = None
         self._stream_task: asyncio.Task | None = None
-        self.telegram_service: TelegramReadOnlyService | None = None
+        self.telegram_service: TelegramService | None = None
         self._telegram_task: asyncio.Task | None = None
 
     async def setup_hook(self) -> None:
@@ -109,7 +109,7 @@ class HerdrDiscordBot(commands.Bot):
             self._stream_task = asyncio.create_task(self.stream_manager.run_forever())
             LOG.info("Started output relay")
         if self.config.telegram.enabled:
-            self.telegram_service = TelegramReadOnlyService(
+            self.telegram_service = TelegramService(
                 config=self.config,
                 store=self.store,
                 client=self.client,
@@ -117,7 +117,7 @@ class HerdrDiscordBot(commands.Bot):
             self._telegram_task = asyncio.create_task(
                 self.telegram_service.run_forever()
             )
-            LOG.info("Started read-only Telegram transport")
+            LOG.info("Started Telegram transport")
 
     async def on_ready(self) -> None:
         # Nickname the bot "herdr" so @he autocomplete points here.

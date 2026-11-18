@@ -101,6 +101,7 @@ class TelegramBotApi:
         text: str,
         message_thread_id: int | None = None,
         disable_notification: bool = False,
+        reply_markup: dict[str, Any] | None = None,
     ) -> TelegramMessage:
         if not text:
             raise ValueError("Telegram message text must not be empty")
@@ -116,6 +117,8 @@ class TelegramBotApi:
         }
         if message_thread_id is not None:
             payload["message_thread_id"] = message_thread_id
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         result = await self.call("sendMessage", payload)
         return _parse_message(result)
 
@@ -145,6 +148,22 @@ class TelegramBotApi:
                 )
             )
         return tuple(messages)
+
+    async def answer_callback_query(
+        self,
+        *,
+        callback_query_id: str,
+        text: str | None = None,
+        show_alert: bool = False,
+    ) -> bool:
+        payload: dict[str, Any] = {
+            "callback_query_id": callback_query_id,
+            "show_alert": show_alert,
+        }
+        if text is not None:
+            payload["text"] = text
+        result = await self.call("answerCallbackQuery", payload)
+        return _boolean_result(result, "answerCallbackQuery")
 
     async def create_forum_topic(
         self, *, chat_id: int, name: str

@@ -24,7 +24,7 @@ from herdr_discord_bridge.store import Store
 from herdr_discord_bridge.telegram_api import TelegramApiError
 from herdr_discord_bridge.telegram_service import (
     OFFSET_STATE_KEY,
-    TelegramReadOnlyService,
+    TelegramService,
 )
 
 ROOT = Path(__file__).parents[1]
@@ -55,6 +55,28 @@ def update(*, update_id=10, user_id=42, chat_id=-1001, text="/agents"):
     }
 
 
+def callback_update(
+    *, update_id=11, user_id=42, data="interrupt:token", callback_id="cb-1"
+):
+    return {
+        "update_id": update_id,
+        "callback_query": {
+            "id": callback_id,
+            "from": {"id": user_id, "is_bot": False},
+            "message": {
+                "message_id": 6,
+                "message_thread_id": 77,
+                "chat": {
+                    "id": -1001,
+                    "type": "supergroup",
+                    "is_forum": True,
+                },
+            },
+            "data": data,
+        },
+    }
+
+
 def config() -> AppConfig:
     return AppConfig(
         discord_token="unused",
@@ -78,6 +100,7 @@ class FakeApi:
     fail_send: bool = False
     update_calls: list[dict] = field(default_factory=list)
     sent: list[dict] = field(default_factory=list)
+    callback_answers: list[dict] = field(default_factory=list)
     closed: bool = False
     created_topics: list[dict] = field(default_factory=list)
     edited_topics: list[dict] = field(default_factory=list)
@@ -93,6 +116,16 @@ class FakeApi:
             raise TelegramApiError("send failed")
         self.sent.append(kwargs)
         return ()
+
+    async def send_message(self, **kwargs):
+        if self.fail_send:
+            raise TelegramApiError("send failed")
+        self.sent.append(kwargs)
+        return None
+
+    async def answer_callback_query(self, **kwargs):
+        self.callback_answers.append(kwargs)
+        return True
 
     async def create_forum_topic(self, **kwargs):
         self.created_topics.append(kwargs)
@@ -135,6 +168,7 @@ class FakeMutationClient(HcClient):
         super().__init__(app_config)
         self.error = error
         self.sent = []
+        self.interrupted = []
 
     def list_targets(self):
         self._core_id = "core-1"
@@ -143,7 +177,7 @@ class FakeMutationClient(HcClient):
             HerdrTarget(
                 target="t12",
                 agent_name="pi",
-                status="idle",
+                status="working",
                 workspace_label="herdrelay",
             )
         ]
@@ -156,10 +190,18 @@ class FakeMutationClient(HcClient):
             observed_turn=4, result={"turn": 5, "started": True}
         )
 
+    def interrupt_with_receipt(self, target):
+        self.interrupted.append(target)
+        if self.error is not None:
+            raise self.error
+        return HcMutationReceipt(
+            observed_turn=5, result={"outcome": "sent", "key": "esc"}
+        )
+
 
 def service(tmp_path, api: FakeApi, client: FakeClient | None = None):
     client = client or FakeClient()
-    result = TelegramReadOnlyService(
+    result = TelegramService(
         config=config(),
         store=Store(tmp_path / "telegram.sqlite3"),
         client=client,
@@ -259,7 +301,7 @@ async def test_status_delivery_reconciles_topic_dedupes_and_closes(tmp_path):
     app_config = config()
     client = HcClient(app_config)
     api = FakeApi([])
-    relay = TelegramReadOnlyService(
+    relay = TelegramService(
         config=app_config,
         store=Store(tmp_path / "status.sqlite3"),
         client=client,
@@ -312,7 +354,7 @@ async def test_existing_closed_topic_is_reopened_and_renamed(tmp_path):
         name="old",
         closed=True,
     )
-    relay = TelegramReadOnlyService(
+    relay = TelegramService(
         config=app_config, store=store, client=client, api=api
     )
     target = client.project_terminal(state_terminal := SUBSCRIBE.terminals[0])
@@ -334,11 +376,17 @@ async def test_existing_closed_topic_is_reopened_and_renamed(tmp_path):
 
 
 
-def mutation_service(tmp_path, api, *, error=None, route_core_id="core-1"):
+def mutation_service(
+    tmp_path, api, *, error=None, route_core_id="core-1", enable_interrupt=False
+):
     base = config()
     app_config = replace(
         base,
-        telegram=replace(base.telegram, enable_send=True),
+        telegram=replace(
+            base.telegram,
+            enable_send=True,
+            enable_interrupt=enable_interrupt,
+        ),
     )
     client = FakeMutationClient(app_config, error=error)
     store = Store(tmp_path / "mutation.sqlite3")
@@ -349,7 +397,7 @@ def mutation_service(tmp_path, api, *, error=None, route_core_id="core-1"):
         thread_id=77,
         name="herdrelay/pi · t12",
     )
-    relay = TelegramReadOnlyService(
+    relay = TelegramService(
         config=app_config, store=store, client=client, api=api
     )
     return relay, client
@@ -441,3 +489,90 @@ async def test_prompt_requires_topic_route_matching_current_core(tmp_path):
     assert client.sent == []
     assert relay.store.list_transport_audits() == []
     assert "different Core" in api.sent[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_interrupt_requires_one_time_actor_bound_confirmation(tmp_path):
+    api = FakeApi([[update(text="/interrupt")]])
+    relay, client = mutation_service(tmp_path, api, enable_interrupt=True)
+
+    await relay.poll_once()
+
+    assert client.interrupted == []
+    assert api.update_calls[0]["allowed_updates"] == (
+        "message",
+        "callback_query",
+    )
+    confirmation_message = api.sent[-1]
+    button = confirmation_message["reply_markup"]["inline_keyboard"][0][0]
+    callback_data = button["callback_data"]
+    assert callback_data.startswith("interrupt:")
+
+    api.batches.append([callback_update(data=callback_data)])
+    await relay.poll_once()
+
+    assert client.interrupted == ["t12"]
+    [audit] = relay.store.list_transport_audits()
+    assert audit["action"] == "interrupt"
+    assert audit["outcome"] == "succeeded"
+    assert audit["observed_turn"] == 5
+    assert api.callback_answers[-1]["text"] == "Interrupting…"
+    assert api.sent[-1]["text"] == "✅ Interrupt sent."
+
+    api.batches.append(
+        [callback_update(update_id=12, callback_id="cb-2", data=callback_data)]
+    )
+    await relay.poll_once()
+
+    assert client.interrupted == ["t12"]
+    audits = relay.store.list_transport_audits()
+    assert [entry["outcome"] for entry in audits] == ["succeeded", "rejected"]
+    assert api.callback_answers[-1]["show_alert"] is True
+
+
+@pytest.mark.asyncio
+async def test_interrupt_cancel_consumes_confirmation_without_mutation(tmp_path):
+    api = FakeApi([[update(text="/interrupt")]])
+    relay, client = mutation_service(tmp_path, api, enable_interrupt=True)
+    await relay.poll_once()
+    interrupt_data = api.sent[-1]["reply_markup"]["inline_keyboard"][0][0][
+        "callback_data"
+    ]
+    token = interrupt_data.split(":", 1)[1]
+
+    api.batches.append([callback_update(data=f"cancel:{token}")])
+    await relay.poll_once()
+
+    assert client.interrupted == []
+    [audit] = relay.store.list_transport_audits()
+    assert audit["outcome"] == "rejected"
+    assert audit["detail"] == "cancelled by actor"
+    assert api.callback_answers[-1]["text"] == "Cancelled."
+
+
+@pytest.mark.asyncio
+async def test_interrupt_unknown_outcome_is_not_retried(tmp_path):
+    api = FakeApi([[update(text="/interrupt")]])
+    relay, client = mutation_service(
+        tmp_path,
+        api,
+        enable_interrupt=True,
+        error=MutationOutcomeUnknownError("response lost"),
+    )
+    await relay.poll_once()
+    callback_data = api.sent[-1]["reply_markup"]["inline_keyboard"][0][0][
+        "callback_data"
+    ]
+
+    api.batches.append([callback_update(data=callback_data)])
+    await relay.poll_once()
+    api.batches.append(
+        [callback_update(update_id=12, callback_id="cb-2", data=callback_data)]
+    )
+    await relay.poll_once()
+
+    assert client.interrupted == ["t12"]
+    audits = relay.store.list_transport_audits()
+    assert audits[0]["outcome"] == "outcome_unknown"
+    assert audits[1]["outcome"] == "rejected"
+    assert "unknown" in api.sent[-1]["text"]

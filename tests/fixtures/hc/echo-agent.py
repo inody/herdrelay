@@ -19,6 +19,10 @@ def report(state: str, message: str) -> None:
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--working"]:
+        report("working", "waiting for interrupt")
+        time.sleep(15)
+        return 0
     report("idle", "ready")
     ready, _, _ = select.select([sys.stdin], [], [], 15)
     if not ready:

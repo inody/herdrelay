@@ -26,7 +26,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
-async def test_isolated_core_list_read_send_and_events_contract():
+async def test_isolated_core_list_read_send_interrupt_and_events_contract():
     hc = shutil.which("hc")
     if hc is None:
         pytest.skip("hc is not installed")
@@ -35,6 +35,7 @@ async def test_isolated_core_list_read_send_and_events_contract():
     core_process: subprocess.Popen | None = None
     client: HcClient | None = None
     target: str | None = None
+    owned_targets: list[str] = []
     log_handle = None
     try:
         directories = {
@@ -71,34 +72,11 @@ async def test_isolated_core_list_read_send_and_events_contract():
         _wait_for_socket(socket_path, core_process)
 
         fixture = ROOT / "tests/fixtures/hc/echo-agent.py"
-        completed = subprocess.run(
-            [
-                hc,
-                "run",
-                "--json",
-                "--bg",
-                "--no-parent",
-                "--label",
-                "herdr.space=smoke",
-                "--label",
-                "herdr.tab=echo",
-                "--",
-                sys.executable,
-                str(fixture),
-            ],
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=True,
+        target = _run_fixture(hc, environment, fixture, tab="echo")
+        interrupt_target = _run_fixture(
+            hc, environment, fixture, tab="interrupt", args=("--working",)
         )
-        run_result = json.loads(completed.stdout)
-        target = (
-            run_result.get("address")
-            or run_result.get("terminal")
-            or run_result.get("target")
-        )
-        assert isinstance(target, str) and target
+        owned_targets.extend((target, interrupt_target))
 
         client = HcClient(
             AppConfig(
@@ -107,7 +85,7 @@ async def test_isolated_core_list_read_send_and_events_contract():
                     provider="herdr-core",
                     core=HcRuntimeConfig(
                         socket_path=str(socket_path),
-                        allowed_terminal_addresses=frozenset({target}),
+                        allowed_terminal_addresses=frozenset(owned_targets),
                     ),
                 ),
             )
@@ -132,13 +110,20 @@ async def test_isolated_core_list_read_send_and_events_contract():
         finally:
             await subscription.close()
         _wait_for_echo(client, target, "ECHO:CORE_SMOKE_42")
+        _wait_for_status(client, interrupt_target, "working")
+        interrupt_receipt = client.interrupt_with_receipt(interrupt_target)
+        assert interrupt_receipt.result.get("outcome") in {
+            "sent",
+            "stopped",
+            "still_working",
+        }
         assert client.core_id
     finally:
         if client is not None:
-            if target:
+            for owned_target in owned_targets:
                 try:
                     client.rpc.call(
-                        "terminal.kill", {"terminal": target, "caller": None}
+                        "terminal.kill", {"terminal": owned_target, "caller": None}
                     )
                 except Exception:
                     pass
@@ -165,6 +150,42 @@ async def test_isolated_core_list_read_send_and_events_contract():
         shutil.rmtree(scratch, ignore_errors=True)
 
 
+def _run_fixture(
+    hc: str,
+    environment: dict[str, str],
+    fixture: Path,
+    *,
+    tab: str,
+    args: tuple[str, ...] = (),
+) -> str:
+    completed = subprocess.run(
+        [
+            hc,
+            "run",
+            "--json",
+            "--bg",
+            "--no-parent",
+            "--label",
+            "herdr.space=smoke",
+            "--label",
+            f"herdr.tab={tab}",
+            "--",
+            sys.executable,
+            str(fixture),
+            *args,
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=True,
+    )
+    result = json.loads(completed.stdout)
+    target = result.get("address") or result.get("terminal") or result.get("target")
+    assert isinstance(target, str) and target
+    return target
+
+
 def _wait_for_socket(path: Path, process: subprocess.Popen) -> None:
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
@@ -184,6 +205,16 @@ def _wait_for_idle(client: HcClient, target: str) -> None:
             return
         time.sleep(0.05)
     raise AssertionError("synthetic Core agent did not become idle")
+
+
+def _wait_for_status(client: HcClient, target: str, expected: str) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        found = {item.target: item for item in client.list_targets()}
+        if target in found and found[target].status == expected:
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"synthetic Core agent did not become {expected}")
 
 
 def _wait_for_echo(client: HcClient, target: str, expected: str) -> None:
