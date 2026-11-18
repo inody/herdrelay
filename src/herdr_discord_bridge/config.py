@@ -21,6 +21,7 @@ class HcRuntimeConfig:
     socket_path: str | None = None
     connect_timeout_seconds: float = 5
     request_timeout_seconds: float = 20
+    event_idle_timeout_seconds: float = 35
     require_app_visible: bool = True
     include_hidden_workers: bool = False
     include_connected_machines: bool = False
@@ -156,6 +157,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
                 request_timeout_seconds=float(
                     core_data.get("request_timeout_seconds", 20)
                 ),
+                event_idle_timeout_seconds=float(
+                    core_data.get("event_idle_timeout_seconds", 35)
+                ),
                 require_app_visible=bool(
                     core_data.get("require_app_visible", True)
                 ),
@@ -231,6 +235,10 @@ def _validate_runtime_features(config: AppConfig) -> None:
         raise ValueError("runtime.core.connect_timeout_seconds must be positive")
     if config.runtime.core.request_timeout_seconds <= 0:
         raise ValueError("runtime.core.request_timeout_seconds must be positive")
+    if config.runtime.core.event_idle_timeout_seconds <= 15:
+        raise ValueError(
+            "runtime.core.event_idle_timeout_seconds must exceed Core's 15s heartbeat"
+        )
     if config.enable_watcher:
         raise ValueError(
             "enable_watcher is not yet supported with runtime.provider=herdr-core"

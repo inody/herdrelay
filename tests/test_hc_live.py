@@ -14,6 +14,7 @@ import pytest
 
 from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfig
 from herdr_discord_bridge.hc_client import HcClient
+from herdr_discord_bridge.hc_events import HcEventStream, HcTerminalState
 
 ROOT = Path(__file__).parents[1]
 RUN_LIVE = os.environ.get("HERDRELAY_RUN_HC_LIVE_TEST") == "1"
@@ -24,7 +25,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_isolated_core_list_read_and_send_contract():
+@pytest.mark.asyncio
+async def test_isolated_core_list_read_send_and_events_contract():
     hc = shutil.which("hc")
     if hc is None:
         pytest.skip("hc is not installed")
@@ -111,7 +113,24 @@ def test_isolated_core_list_read_and_send_contract():
             )
         )
         _wait_for_idle(client, target)
-        client.send(target, "CORE_SMOKE_42")
+        subscription = await HcEventStream(client.config.runtime.core).connect(
+            terminal=target
+        )
+        state = HcTerminalState(subscription.snapshot)
+        try:
+            client.send(target, "CORE_SMOKE_42")
+            observed_states = []
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and "done" not in observed_states:
+                notification = await subscription.next_notification(timeout=1)
+                observed_states.extend(
+                    transition.current_state
+                    for transition in state.apply(notification)
+                )
+            assert "working" in observed_states
+            assert "done" in observed_states
+        finally:
+            await subscription.close()
         _wait_for_echo(client, target, "ECHO:CORE_SMOKE_42")
         assert client.core_id
     finally:

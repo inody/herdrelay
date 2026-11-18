@@ -54,6 +54,7 @@ runtime:
     socket_path: /tmp/custom-core.sock
     connect_timeout_seconds: 3
     request_timeout_seconds: 9
+    event_idle_timeout_seconds: 45
     require_app_visible: false
     include_hidden_workers: true
     include_connected_machines: true
@@ -70,6 +71,7 @@ streaming:
     assert config.runtime.core.socket_path == "/tmp/custom-core.sock"
     assert config.runtime.core.connect_timeout_seconds == 3
     assert config.runtime.core.request_timeout_seconds == 9
+    assert config.runtime.core.event_idle_timeout_seconds == 45
     assert config.runtime.core.require_app_visible is False
     assert config.runtime.core.include_hidden_workers is True
     assert config.runtime.core.include_connected_machines is True
@@ -124,6 +126,17 @@ runtime:
     )
 
     with pytest.raises(ValueError, match="request_timeout_seconds"):
+        load_config(config_path)
+
+    config_path.write_text(
+        """
+runtime:
+  provider: herdr-core
+  core:
+    event_idle_timeout_seconds: 15
+"""
+    )
+    with pytest.raises(ValueError, match="15s heartbeat"):
         load_config(config_path)
 
     config_path.write_text(

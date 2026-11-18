@@ -555,8 +555,9 @@ HERDRELAY_RUN_HC_LIVE_TEST=1 uv run pytest -q tests/test_hc_live.py
 ```
 
 It creates a temporary HOME/XDG/session/socket, explicitly starts a test-owned
-Core, launches one synthetic status-reporting agent, verifies list/read/send,
-and removes the test processes and files. It never types into an existing
+Core, launches one synthetic status-reporting agent, verifies
+list/read/send/event subscription, and removes the test processes and files. It
+never types into an existing
 terminal.
 
 The Core backend can now be selected experimentally with

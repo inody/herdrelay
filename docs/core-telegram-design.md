@@ -524,6 +524,7 @@ runtime:
     socket_path: null
     connect_timeout_seconds: 5
     request_timeout_seconds: 20
+    event_idle_timeout_seconds: 35
     allowed_terminal_addresses: []
     include_hidden_workers: false
     include_connected_machines: false

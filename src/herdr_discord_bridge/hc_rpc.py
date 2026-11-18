@@ -104,13 +104,14 @@ class HcRpcClient:
         try:
             connection.settimeout(self.config.request_timeout_seconds)
             try:
-                self._send(
-                    connection,
-                    request_id="herdrelay-hello",
-                    method="hello",
-                    params={"generation": PROTOCOL_GENERATION, "framed": False},
+                connection.sendall(
+                    encode_request(
+                        request_id="herdrelay-hello",
+                        method="hello",
+                        params={"generation": PROTOCOL_GENERATION, "framed": False},
+                    )
                 )
-                hello_payload = self._response(
+                hello_payload = decode_response_line(
                     self._read_line(connection), expected_id="herdrelay-hello"
                 )
                 hello = parse_hello_result(hello_payload)
@@ -126,13 +127,14 @@ class HcRpcClient:
 
             mutation = method in {"terminal.send", "terminal.interrupt"}
             try:
-                self._send(
-                    connection,
-                    request_id="herdrelay-call",
-                    method=method,
-                    params=params,
+                connection.sendall(
+                    encode_request(
+                        request_id="herdrelay-call",
+                        method=method,
+                        params=params,
+                    )
                 )
-                result = self._response(
+                result = decode_response_line(
                     self._read_line(connection), expected_id="herdrelay-call"
                 )
                 if not isinstance(result, dict):
@@ -164,24 +166,6 @@ class HcRpcClient:
             connection.close()
 
     @staticmethod
-    def _send(
-        connection: socket.socket,
-        *,
-        request_id: str,
-        method: str,
-        params: dict[str, Any],
-    ) -> None:
-        request = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        }
-        connection.sendall(
-            json.dumps(request, separators=(",", ":")).encode() + b"\n"
-        )
-
-    @staticmethod
     def _read_line(connection: socket.socket) -> bytes:
         chunks = bytearray()
         while True:
@@ -201,32 +185,45 @@ class HcRpcClient:
             raise HcRpcError(f"Core JSON line exceeds {MAX_JSON_LINE_BYTES} bytes")
         return bytes(chunks)
 
-    @staticmethod
-    def _response(line: bytes, *, expected_id: str) -> Any:
-        try:
-            payload = json.loads(line)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise HcRpcError(f"Core returned invalid JSON: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise HcRpcError("Core response must be an object")
-        if payload.get("id") != expected_id:
-            raise HcRpcError(
-                f"Core response ID {payload.get('id')!r} did not match {expected_id!r}"
-            )
-        error = payload.get("error")
-        if error is not None:
-            if not isinstance(error, dict):
-                raise HcRpcError("Core returned a malformed error")
-            data = error.get("data")
-            kind = data.get("kind") if isinstance(data, dict) else None
-            message = error.get("message")
-            raise HcRemoteError(
-                str(message or "Core RPC failed"),
-                kind=str(kind) if kind is not None else None,
-            )
-        if "result" not in payload:
-            raise HcRpcError("Core response has neither result nor error")
-        return payload["result"]
+
+
+def encode_request(
+    *, request_id: str, method: str, params: dict[str, Any]
+) -> bytes:
+    request = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": params,
+    }
+    return json.dumps(request, separators=(",", ":")).encode() + b"\n"
+
+
+def decode_response_line(line: bytes | str, *, expected_id: str) -> Any:
+    try:
+        payload = json.loads(line)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HcRpcError(f"Core returned invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise HcRpcError("Core response must be an object")
+    if payload.get("id") != expected_id:
+        raise HcRpcError(
+            f"Core response ID {payload.get('id')!r} did not match {expected_id!r}"
+        )
+    error = payload.get("error")
+    if error is not None:
+        if not isinstance(error, dict):
+            raise HcRpcError("Core returned a malformed error")
+        data = error.get("data")
+        kind = data.get("kind") if isinstance(data, dict) else None
+        message = error.get("message")
+        raise HcRemoteError(
+            str(message or "Core RPC failed"),
+            kind=str(kind) if kind is not None else None,
+        )
+    if "result" not in payload:
+        raise HcRpcError("Core response has neither result nor error")
+    return payload["result"]
 
 
 def _normalize_session(value: str | None) -> str:
