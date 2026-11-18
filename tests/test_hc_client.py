@@ -192,6 +192,7 @@ def test_core_client_reads_sends_and_interrupts_without_raw_keys():
     assert client.read("t1", lines=20, fmt="text", source="recent") == "screen"
     client.send("t1", "continue")
     assert rpc.sent == [("t1", "continue")]
+    rpc.terminals["t1"] = terminal("t1", state="working")
     assert client.interrupt("t1") == {"outcome": "stopped", "key": "esc"}
 
     send_call = next(params for method, params in rpc.calls if method == "terminal.send")
@@ -205,6 +206,7 @@ def test_core_client_refuses_send_to_blocked_stale_or_unlisted_target():
     client, rpc = make_client()
     rpc.terminals["blocked"] = terminal("blocked", state="blocked")
     rpc.terminals["shell"] = terminal("shell", app=None, reported=False)
+    rpc.terminals["t1"] = terminal("t1", state="idle")
 
     with pytest.raises(HcRpcError, match="blocked"):
         client.send("blocked", "yes")
@@ -212,6 +214,8 @@ def test_core_client_refuses_send_to_blocked_stale_or_unlisted_target():
         client.send("shell", "continue")
     with pytest.raises(HcRpcError, match="connected-machine target is disabled"):
         client.send("remote/t1", "continue")
+    with pytest.raises(HcRpcError, match="not interruptible in state idle"):
+        client.interrupt("t1")
     with pytest.raises(HcRpcError, match="not allowlisted"):
         client.send("t99", "continue")
     assert rpc.sent == []

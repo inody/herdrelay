@@ -561,8 +561,10 @@ never types into an existing
 terminal.
 
 The Core backend can now be selected experimentally with
-`runtime.provider: herdr-core`. It currently uses polling rather than Core event
-subscriptions and rejects watcher, approval, and stop controls. Core targets
+`runtime.provider: herdr-core`. Status watching uses Core event subscriptions;
+terminal-output streaming still uses polling. The stop command maps only to
+`terminal.interrupt`; approval and all raw-key/start/close operations remain
+disabled. Core targets
 are deny-by-default: `runtime.core.allowed_terminal_addresses` must list exact
 addresses. Use a separate database and Discord test channel for any live test;
 Core bindings are not compatible with legacy pane bindings. See

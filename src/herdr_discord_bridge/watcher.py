@@ -304,6 +304,9 @@ def parse_agent_status_event(payload: Any) -> AgentStatusEvent | None:
 
 def event_state_marker(client: RuntimeClient, event: AgentStatusEvent) -> str:
     """Stable marker for status-only notifications without reading pane output."""
+    event_sequence = (event.raw or {}).get("state_change_seq")
+    if event_sequence is not None:
+        return f"state-change:{event_sequence}"
     try:
         target = client.resolve_target(event.pane_id)
         sequence = (target.raw or {}).get("state_change_seq")

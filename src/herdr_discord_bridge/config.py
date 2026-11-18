@@ -239,17 +239,9 @@ def _validate_runtime_features(config: AppConfig) -> None:
         raise ValueError(
             "runtime.core.event_idle_timeout_seconds must exceed Core's 15s heartbeat"
         )
-    if config.enable_watcher:
-        raise ValueError(
-            "enable_watcher is not yet supported with runtime.provider=herdr-core"
-        )
     if config.enable_approve:
         raise ValueError(
             "enable_approve is disabled for Herdr Core until guarded actions exist"
-        )
-    if config.enable_stop:
-        raise ValueError(
-            "enable_stop is not yet wired to hc interrupt; keep it disabled"
         )
     if config.enable_streaming and config.streaming.mode != "poll":
         raise ValueError(

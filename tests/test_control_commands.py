@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from herdr_discord_bridge.config import AppConfig
+from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfig
 from herdr_discord_bridge.discord_bot import HerdrDiscordBot
+from herdr_discord_bridge.hc_client import HcClient
 from herdr_discord_bridge.herdr_client import HerdrClient, StartedAgent
 from herdr_discord_bridge.models import HerdrTarget
 from herdr_discord_bridge.security import SecurityPolicy
@@ -163,6 +164,41 @@ async def test_stop_audits_actual_explicit_or_bound_target_before_closing(bot, e
     entries = audits(bot)
     assert [entry["result"] for entry in entries] == ["attempt", "ok"]
     assert {entry["herdr_target"] for entry in entries} == {target}
+
+
+@pytest.mark.asyncio
+async def test_core_stop_uses_native_interrupt_and_core_help(tmp_path):
+    config = AppConfig(
+        discord_token="not-used",
+        enable_stop=True,
+        allowed_guild_ids=frozenset({1}),
+        allowed_channel_ids=frozenset({2}),
+        allowed_user_ids=frozenset({10}),
+        runtime=RuntimeConfig(
+            provider="herdr-core",
+            core=HcRuntimeConfig(allowed_terminal_addresses=frozenset({"t1"})),
+        ),
+    )
+    client = Mock(spec=HcClient)
+    core_bot = HerdrDiscordBot(
+        config=config,
+        store=Store(tmp_path / "core.sqlite3"),
+        client=client,
+    )
+    core_bot._connection.user = SimpleNamespace(id=99)
+
+    stop_message = message(core_bot, "stop t1")
+    await core_bot.on_message(stop_message)
+    help_message = message(core_bot, "help")
+    await core_bot.on_message(help_message)
+
+    client.interrupt.assert_called_once_with("t1")
+    client.pane_close.assert_not_called()
+    assert stop_message.reply.call_args.args[0] == "Interrupted `t1`."
+    help_text = help_message.reply.call_args.args[0]
+    assert "Herdr Core control" in help_text
+    assert "Raw keys" in help_text
+    assert "@herdr start" not in help_text
 
 
 @pytest.mark.asyncio

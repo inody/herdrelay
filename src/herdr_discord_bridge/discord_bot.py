@@ -20,6 +20,8 @@ from .formatter import (
     target_alias,
     truncate,
 )
+from .hc_client import HcClient
+from .hc_watcher import CoreEventWatcher
 from .herdr_client import TargetResolutionError
 from .models import AuditEntry, HerdrTarget, PendingQuestion
 from .questions import (
@@ -28,7 +30,7 @@ from .questions import (
     selected_labels,
     selection_keys,
 )
-from .runtime import RuntimeClient
+from .runtime import InterruptRuntime, RuntimeClient
 from .security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
 from .streams import StreamManager
@@ -49,7 +51,7 @@ class HerdrDiscordBot(commands.Bot):
         self.client = client
         self.security = SecurityPolicy(config)
         self._watcher_task: asyncio.Task | None = None
-        self._watcher: EventWatcher | None = None
+        self._watcher: EventWatcher | CoreEventWatcher | None = None
         self.thread_manager: ThreadManager | None = None
         self._thread_task: asyncio.Task | None = None
         self.stream_manager: StreamManager | None = None
@@ -66,7 +68,12 @@ class HerdrDiscordBot(commands.Bot):
             await self.tree.sync()
             LOG.info("Synced global command tree")
         if self.config.enable_watcher and self.config.watcher.statuses:
-            self._watcher = EventWatcher(
+            watcher_type = EventWatcher
+            if self.config.runtime.provider == "herdr-core":
+                if not isinstance(self.client, HcClient):
+                    raise TypeError("Herdr Core runtime requires HcClient")
+                watcher_type = CoreEventWatcher
+            self._watcher = watcher_type(
                 bot=self,
                 config=self.config,
                 store=self.store,
@@ -453,9 +460,14 @@ class HerdrDiscordBot(commands.Bot):
         if pane_id is None:
             raise ValueError("Usage: `@herdr stop <pane_id>` (or run inside a pane thread)")
         self._audit_control_command(message, "stop", "attempt", target=pane_id)
-        await asyncio.to_thread(self.client.pane_close, pane_id)
+        if isinstance(self.client, InterruptRuntime):
+            await asyncio.to_thread(self.client.interrupt, pane_id)
+            reply = f"Interrupted `{pane_id}`."
+        else:
+            await asyncio.to_thread(self.client.pane_close, pane_id)
+            reply = f"Stopped `{pane_id}`."
         self._audit_control_command(message, "stop", "ok", target=pane_id)
-        await message.reply(f"Stopped `{pane_id}`.")
+        await message.reply(reply)
 
     async def _control_list(self, message: discord.Message) -> None:
         targets = await asyncio.to_thread(self.client.list_targets)
@@ -471,6 +483,18 @@ class HerdrDiscordBot(commands.Bot):
         await message.reply("```text\n" + "\n".join(lines) + "\n```")
 
     def _control_help(self) -> str:
+        if isinstance(self.client, InterruptRuntime):
+            return (
+                "**Herdr Core control** (mention me)\n"
+                "```\n"
+                "@herdr stop [<terminal>]                       Interrupt a working agent\n"
+                "  inside an agent thread: interrupts that terminal (no arg needed)\n"
+                "@herdr list                                    List allowlisted agents\n"
+                "@herdr help                                    Show this help\n"
+                "```\n"
+                "Inside an agent thread, normal text submits a prompt. "
+                "Raw keys, approval, start, close, kill, and remove are disabled."
+            )
         return (
             "**Herdr control** (mention me)\n"
             "```\n"

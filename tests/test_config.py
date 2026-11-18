@@ -96,9 +96,7 @@ def test_load_config_rejects_unknown_runtime_provider(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "body, message",
     [
-        ("enable_watcher: true", "enable_watcher"),
         ("enable_approve: true", "enable_approve"),
-        ("enable_stop: true", "enable_stop"),
         ("enable_streaming: true", "streaming.mode=poll"),
     ],
 )
@@ -111,6 +109,19 @@ def test_load_config_rejects_unimplemented_core_features(
 
     with pytest.raises(ValueError, match=message):
         load_config(config_path)
+
+
+def test_load_config_accepts_core_event_watcher(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "runtime:\n  provider: herdr-core\nenable_watcher: true\nenable_stop: true\n"
+    )
+
+    config = load_config(config_path)
+    assert config.enable_watcher is True
+    assert config.enable_stop is True
+
 
 
 def test_load_config_rejects_invalid_core_runtime_values(tmp_path, monkeypatch):

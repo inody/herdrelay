@@ -42,6 +42,23 @@ class HcClient:
     def core_name(self) -> str | None:
         return self._core_name
 
+    def observe_core_identity(self, core_id: str, core_name: str) -> None:
+        if self._core_id is not None and self._core_id != core_id:
+            raise HcRpcError(
+                f"Core identity changed from {self._core_id} to {core_id}; "
+                "restart HerdRelay after checking the selected session"
+            )
+        self._core_id = core_id
+        self._core_name = core_name
+
+    def address_allowed(self, target: str) -> bool:
+        return target in self.config.runtime.core.allowed_terminal_addresses and (
+            self.config.runtime.core.include_connected_machines or "/" not in target
+        )
+
+    def project_terminal(self, terminal: HcTerminal) -> HerdrTarget:
+        return self._target_from_terminal(terminal, raw={"address": terminal.address})
+
     def list_targets(self) -> list[HerdrTarget]:
         return [target for target in self.list_panes() if target.agent_name]
 
@@ -57,12 +74,7 @@ class HcClient:
             terminal = parse_terminal(raw)
             if terminal.state != "live":
                 continue
-            if terminal.address not in self.config.runtime.core.allowed_terminal_addresses:
-                continue
-            if (
-                not self.config.runtime.core.include_connected_machines
-                and "/" in terminal.address
-            ):
+            if not self.address_allowed(terminal.address):
                 continue
             targets.append(self._target_from_terminal(terminal, raw=raw))
         return targets
@@ -110,6 +122,16 @@ class HcClient:
 
     def interrupt(self, target: str) -> dict[str, Any]:
         self._ensure_target_allowed(target)
+        raw = self._call("terminal.get", {"terminal": target, "caller": None})
+        terminal = parse_terminal(raw)
+        projected = self._target_from_terminal(terminal, raw=raw)
+        if not projected.agent_name:
+            raise HcRpcError(f"Core terminal is not an eligible live agent: {target}")
+        state = terminal.status.state.casefold() if terminal.status else "unknown"
+        if state not in {"working", "blocked"}:
+            raise HcRpcError(
+                f"Core terminal is not interruptible in state {state}: {target}"
+            )
         return self._call("terminal.interrupt", {"terminal": target})
 
     def send_keys(
@@ -175,21 +197,13 @@ class HcClient:
 
     def _call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         call = self.rpc.call(method, params)
-        core_id = call.hello.core.id
-        core_name = call.hello.core.name
-        if self._core_id is not None and self._core_id != core_id:
-            raise HcRpcError(
-                f"Core identity changed from {self._core_id} to {core_id}; "
-                "restart HerdRelay after checking the selected session"
-            )
-        self._core_id = core_id
-        self._core_name = core_name
+        self.observe_core_identity(call.hello.core.id, call.hello.core.name)
         return call.result
 
     def _ensure_target_allowed(self, target: str) -> None:
         if target not in self.config.runtime.core.allowed_terminal_addresses:
             raise HcRpcError(f"Core terminal is not allowlisted: {target}")
-        if not self.config.runtime.core.include_connected_machines and "/" in target:
+        if not self.address_allowed(target):
             raise HcRpcError(f"connected-machine target is disabled: {target}")
 
     def _target_from_terminal(
@@ -197,7 +211,9 @@ class HcClient:
     ) -> HerdrTarget:
         status = terminal.status
         app = status.app.casefold() if status and status.app else None
-        eligible = bool(terminal.reported and app in KNOWN_AGENT_APPS)
+        eligible = bool(
+            terminal.state == "live" and terminal.reported and app in KNOWN_AGENT_APPS
+        )
         if self.config.runtime.core.require_app_visible:
             eligible = eligible and bool(
                 terminal.labels.get("herdr.space") and terminal.labels.get("herdr.tab")

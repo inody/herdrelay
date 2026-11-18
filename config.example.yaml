@@ -22,8 +22,8 @@ max_message_chars: 2000
 
 enable_send: false
 enable_approve: false
-enable_watcher: false
-enable_stop: false
+enable_watcher: false          # Core uses events.subscribe; TUI uses legacy socket
+enable_stop: false             # Core: terminal.interrupt only; TUI: configured stop strategy
 enable_auto_threads: false
 enable_streaming: false
 allow_pane_send_fallback: false
