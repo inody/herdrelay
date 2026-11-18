@@ -1,4 +1,8 @@
-from herdr_discord_bridge.models import PendingQuestion, QuestionOption
+from herdr_discord_bridge.models import (
+    PendingQuestion,
+    QuestionOption,
+    TransportAuditEntry,
+)
 from herdr_discord_bridge.store import Store
 
 
@@ -58,6 +62,41 @@ def test_upsert_replaces_existing_null_thread_binding(tmp_path):
     bindings = store.list_bindings(guild_id=1)
     assert len(bindings) == 1
     assert bindings[0].herdr_target == "1-2"
+
+
+def test_transport_mutation_claim_is_atomic_and_single_use(tmp_path):
+    store = Store(tmp_path / "audit.sqlite3")
+    entry = TransportAuditEntry(
+        transport="telegram",
+        actor_id="42",
+        container_id="-1001",
+        conversation_id="77",
+        action="send_text",
+        target_key="core-1/t1",
+        payload_preview="continue",
+        outcome="attempt",
+    )
+
+    audit_id = store.claim_transport_mutation(
+        event_key="telegram:update:10", entry=entry
+    )
+    duplicate = store.claim_transport_mutation(
+        event_key="telegram:update:10", entry=entry
+    )
+
+    assert isinstance(audit_id, int)
+    assert duplicate is None
+    [attempt] = store.list_transport_audits()
+    assert attempt["outcome"] == "attempt"
+    assert attempt["target_key"] == "core-1/t1"
+
+    store.finish_transport_audit(
+        audit_id, outcome="succeeded", detail="accepted", observed_turn=4
+    )
+    [finished] = store.list_transport_audits()
+    assert finished["outcome"] == "succeeded"
+    assert finished["observed_turn"] == 4
+    assert finished["detail"] == "accepted"
 
 
 def test_telegram_topic_route_upsert_and_close(tmp_path):

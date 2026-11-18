@@ -12,6 +12,7 @@ from .models import (
     PendingQuestion,
     QuestionOption,
     TelegramTopicRoute,
+    TransportAuditEntry,
 )
 
 
@@ -87,6 +88,21 @@ class Store:
                   options_json TEXT NOT NULL,
                   multi_select INTEGER NOT NULL,
                   created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS transport_audit (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  timestamp TEXT NOT NULL,
+                  transport TEXT NOT NULL,
+                  actor_id TEXT NOT NULL,
+                  container_id TEXT NOT NULL,
+                  conversation_id TEXT,
+                  action TEXT NOT NULL,
+                  target_key TEXT,
+                  payload_preview TEXT,
+                  observed_turn INTEGER,
+                  outcome TEXT NOT NULL,
+                  detail TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS telegram_topics (
@@ -250,6 +266,70 @@ class Store:
                     entry.result,
                 ),
             )
+
+    def claim_transport_mutation(
+        self, *, event_key: str, entry: TransportAuditEntry
+    ) -> int | None:
+        """Atomically claim a remote mutation and persist its attempt audit."""
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO event_dedupe (key, created_at) VALUES (?, ?)",
+                    (event_key, _now()),
+                )
+                cursor = conn.execute(
+                    """
+                    INSERT INTO transport_audit (
+                      timestamp, transport, actor_id, container_id,
+                      conversation_id, action, target_key, payload_preview,
+                      observed_turn, outcome, detail
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _now(),
+                        entry.transport,
+                        entry.actor_id,
+                        entry.container_id,
+                        entry.conversation_id,
+                        entry.action,
+                        entry.target_key,
+                        entry.payload_preview,
+                        entry.observed_turn,
+                        entry.outcome,
+                        entry.detail,
+                    ),
+                )
+                return int(cursor.lastrowid)
+        except sqlite3.IntegrityError:
+            return None
+
+    def finish_transport_audit(
+        self,
+        audit_id: int,
+        *,
+        outcome: str,
+        detail: str | None = None,
+        observed_turn: int | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE transport_audit
+                SET outcome = ?, detail = ?,
+                    observed_turn = COALESCE(?, observed_turn)
+                WHERE id = ?
+                """,
+                (outcome, detail, observed_turn, audit_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"transport audit not found: {audit_id}")
+
+    def list_transport_audits(self) -> list[dict[str, object]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM transport_audit ORDER BY id"
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def mark_event_seen(self, key: str) -> bool:
         try:

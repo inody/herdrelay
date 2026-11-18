@@ -24,6 +24,20 @@ class HerdrTarget:
 
 
 @dataclass(frozen=True)
+class TransportAuditEntry:
+    transport: str
+    actor_id: str
+    container_id: str
+    action: str
+    outcome: str
+    conversation_id: str | None = None
+    target_key: str | None = None
+    payload_preview: str | None = None
+    observed_turn: int | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
 class TelegramTopicRoute:
     core_id: str
     terminal_address: str
