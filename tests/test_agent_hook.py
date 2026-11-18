@@ -40,6 +40,62 @@ def test_build_event_ignores_agent_outside_herdr(tmp_path):
     assert build_event(stop_input(tmp_path), {}) is None
 
 
+def test_build_event_uses_core_v2_identity(tmp_path):
+    core_home = tmp_path / "core"
+    core_home.mkdir()
+    (core_home / "core.json").write_text(json.dumps({"id": "core-123"}))
+    event = build_event(
+        stop_input(tmp_path),
+        {
+            "HC_TERMINAL_ID": "t12",
+            "HC_TERMINAL_SOCKET": str(core_home / "default.sock"),
+            "HERDR_PANE_ID": "legacy:p1",
+        },
+    )
+
+    assert event is not None
+    assert event["version"] == 2
+    assert event["runtime"] == "herdr-core"
+    assert event["core_id"] == "core-123"
+    assert event["target"] == "t12"
+    assert "pane_id" not in event
+
+
+def test_explicit_core_identity_takes_precedence(tmp_path):
+    event = build_event(
+        stop_input(tmp_path),
+        {
+            "HC_TERMINAL_ID": "t7",
+            "HERDRELAY_CORE_ID": "explicit-core",
+            "HERDR_PANE_ID": "legacy:p1",
+        },
+    )
+
+    assert event is not None
+    assert event["core_id"] == "explicit-core"
+    assert event["target"] == "t7"
+
+
+def test_core_target_without_core_identity_does_not_fall_back_to_legacy(tmp_path):
+    assert build_event(
+        stop_input(tmp_path),
+        {"HC_TERMINAL_ID": "t9", "HERDR_PANE_ID": "legacy:p1"},
+    ) is None
+
+
+def test_event_id_changes_with_core_identity(tmp_path):
+    data = stop_input(tmp_path)
+    first = build_event(
+        data, {"HC_TERMINAL_ID": "t1", "HERDRELAY_CORE_ID": "core-1"}
+    )
+    second = build_event(
+        data, {"HC_TERMINAL_ID": "t1", "HERDRELAY_CORE_ID": "core-2"}
+    )
+
+    assert first is not None and second is not None
+    assert first["event_id"] != second["event_id"]
+
+
 def test_build_event_supports_codex_stop_payload(tmp_path):
     data = stop_input(tmp_path, "Codex response")
     data["turn_id"] = "turn-1"
@@ -109,6 +165,33 @@ def test_build_question_event_formats_claude_ask_user_question():
         "Which approach should I use?\nOptions:\n"
         "- Safe: Preserve compatibility\n- Fast: Prioritize speed"
     )
+
+
+def test_core_question_event_uses_v2_identity():
+    data = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "session-1",
+        "tool_use_id": "tool-1",
+        "tool_name": "AskUserQuestion",
+        "tool_input": {
+            "questions": [
+                {
+                    "question": "Continue?",
+                    "options": [{"label": "Yes"}],
+                }
+            ]
+        },
+    }
+
+    event = build_question_event(
+        data, {"HC_TERMINAL_ID": "t12", "HERDRELAY_CORE_ID": "core-1"}
+    )
+
+    assert event is not None
+    assert event["version"] == 2
+    assert event["core_id"] == "core-1"
+    assert event["target"] == "t12"
+    assert "pane_id" not in event
 
 
 def test_format_ask_user_question_ignores_malformed_input():

@@ -180,10 +180,13 @@ terminal address:
 }
 ```
 
-The Pi adapter prefers `HC_TERMINAL_ID`. It reads the stable Core ID from
-`HERDRELAY_CORE_ID` when explicitly supplied, otherwise from `core.json` beside
-`HC_TERMINAL_SOCKET`. If a Core terminal lacks a verifiable Core identity, the
-adapter emits nothing instead of falling back to an inherited legacy pane ID.
+The Pi adapter and Claude/Codex hook prefer `HC_TERMINAL_ID`. They read the
+stable Core ID from `HERDRELAY_CORE_ID` when explicitly supplied, otherwise
+from `core.json` beside `HC_TERMINAL_SOCKET`. If a Core terminal lacks a
+verifiable Core identity, the adapter emits nothing instead of falling back to
+an inherited legacy pane ID. A shared Codex app-server that does not inherit
+Core terminal identity remains unable to emit a version 2 event; HerdRelay does
+not guess a Core terminal from working-directory matches.
 
 Supported `kind` values are:
 

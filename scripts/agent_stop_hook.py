@@ -57,19 +57,56 @@ def resolve_pane_id(
         return ""
 
 
+def resolve_event_identity(
+    environ: dict[str, str], *, allow_herdr_lookup: bool = False, cwd: object = None
+) -> dict[str, object] | None:
+    """Resolve one unambiguous legacy pane or Core terminal identity."""
+    core_target = environ.get("HC_TERMINAL_ID", "").strip()
+    if core_target:
+        core_id = environ.get("HERDRELAY_CORE_ID", "").strip()
+        if not core_id:
+            socket = environ.get("HC_TERMINAL_SOCKET", "").strip()
+            if socket:
+                try:
+                    payload = json.loads(
+                        (Path(socket).parent / "core.json").read_text(encoding="utf-8")
+                    )
+                    value = payload.get("id") if isinstance(payload, dict) else None
+                    core_id = value.strip() if isinstance(value, str) else ""
+                except (OSError, ValueError, TypeError):
+                    core_id = ""
+        if not core_id:
+            return None
+        return {
+            "version": 2,
+            "runtime": "herdr-core",
+            "core_id": core_id,
+            "target": core_target,
+        }
+
+    pane_id = resolve_pane_id(
+        environ,
+        allow_herdr_lookup=allow_herdr_lookup,
+        cwd=cwd,
+    )
+    if not pane_id:
+        return None
+    return {"version": 1, "pane_id": pane_id}
+
+
 def build_event(
     data: object, environ: dict[str, str], *, agent: str = "claude"
 ) -> dict[str, object] | None:
     if not isinstance(data, dict) or data.get("hook_event_name") != "Stop":
         return None
-    pane_id = resolve_pane_id(
+    target_identity = resolve_event_identity(
         environ,
         allow_herdr_lookup=agent == "codex",
         cwd=data.get("cwd"),
     )
     message = data.get("last_assistant_message")
     session_id = data.get("session_id")
-    if not pane_id or not isinstance(message, str) or not message.strip():
+    if target_identity is None or not isinstance(message, str) or not message.strip():
         return None
     if not isinstance(session_id, str):
         session_id = ""
@@ -78,13 +115,21 @@ def build_event(
     if not isinstance(turn_id, str):
         turn_id = ""
     transcript_marker = _transcript_marker(data.get("transcript_path"))
-    identity = "\0".join((agent, session_id, turn_id, transcript_marker, message))
+    identity = "\0".join(
+        (
+            agent,
+            session_id,
+            turn_id,
+            transcript_marker,
+            json.dumps(target_identity, sort_keys=True),
+            message,
+        )
+    )
     event_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     return {
-        "version": 1,
+        **target_identity,
         "event_id": event_id,
         "agent": agent,
-        "pane_id": pane_id,
         "session_id": session_id,
         "text": message,
         "created_at": time.time(),
@@ -99,11 +144,11 @@ def build_question_event(
         return None
     if data.get("tool_name") != "AskUserQuestion":
         return None
-    pane_id = resolve_pane_id(environ)
+    target_identity = resolve_event_identity(environ)
     tool_input = data.get("tool_input")
     text = format_ask_user_question(tool_input)
     question = first_ask_user_question(tool_input)
-    if not pane_id or not text or question is None:
+    if target_identity is None or not text or question is None:
         return None
     session_id = data.get("session_id")
     tool_use_id = data.get("tool_use_id")
@@ -111,12 +156,19 @@ def build_question_event(
         session_id = ""
     if not isinstance(tool_use_id, str):
         tool_use_id = ""
-    identity = "\0".join(("claude-question", session_id, tool_use_id, text))
+    identity = "\0".join(
+        (
+            "claude-question",
+            session_id,
+            tool_use_id,
+            json.dumps(target_identity, sort_keys=True),
+            text,
+        )
+    )
     return {
-        "version": 1,
+        **target_identity,
         "event_id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
         "agent": "claude",
-        "pane_id": pane_id,
         "session_id": session_id,
         "kind": "question",
         "question": question,
@@ -141,8 +193,8 @@ def build_question_resolved_event(
             return None
     elif event_name != "UserPromptSubmit":
         return None
-    pane_id = environ.get("HERDR_PANE_ID", "").strip()
-    if not pane_id:
+    target_identity = resolve_event_identity(environ)
+    if target_identity is None:
         return None
     session_id = data.get("session_id")
     if not isinstance(session_id, str):
@@ -152,10 +204,9 @@ def build_question_resolved_event(
         ("claude-question-resolved", session_id, str(event_name), str(time.time_ns()))
     )
     return {
-        "version": 1,
+        **target_identity,
         "event_id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
         "agent": "claude",
-        "pane_id": pane_id,
         "session_id": session_id,
         "kind": "question_resolved",
         "created_at": time.time(),

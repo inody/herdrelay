@@ -266,9 +266,10 @@ This installs `~/.pi/agent/extensions/herdrelay-output.ts`. Run `/reload` in
 existing Pi sessions or start a new Pi process.
 
 Only interactive TUI sessions are relayed. RPC, JSON, print, SDK, and unknown
-contexts are ignored. After an interactive Pi input, the adapter adds configured
-users to the existing public thread; it does not copy the prompt or inject
-instructions into the agent.
+contexts are ignored. In Herdr Core terminals, the adapter emits version 2
+identity using `HC_TERMINAL_ID` and the stable Core ID. After an interactive Pi
+input, the adapter adds configured users to the existing public thread; it does
+not copy the prompt or inject instructions into the agent.
 
 ### Codex
 
@@ -289,10 +290,11 @@ The installer preserves `notify` and unrelated configuration, but refuses to
 overwrite an existing unrelated `hooks.Stop`; merge that case manually. Restart
 existing Codex sessions and any long-lived Codex app-server.
 
-Codex's shared app-server may not inherit `HERDR_PANE_ID`. The adapter therefore
-matches the hook to the only Codex pane with the same working directory. It
-intentionally drops ambiguous output when multiple Codex panes share that
-working directory.
+For the legacy TUI, Codex's shared app-server may not inherit
+`HERDR_PANE_ID`. The adapter therefore matches the hook to the only Codex pane
+with the same working directory and drops ambiguous output. Core events require
+an inherited `HC_TERMINAL_ID` plus a verifiable Core ID; HerdRelay does not use
+working-directory matching to guess a Core terminal.
 
 ### Adapter paths, backups, and removal
 
