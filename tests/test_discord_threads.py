@@ -24,19 +24,19 @@ def test_thread_name_marks_blocked_panes():
 
 def test_thread_name_has_no_marker_when_not_blocked():
     blocked = HerdrTarget(
-        target="w7:p5", workspace_label="herdr-chat-bridge", agent_name="claude", status="blocked"
+        target="w7:p5", workspace_label="herdrelay", agent_name="claude", status="blocked"
     )
     working = HerdrTarget(
-        target="w7:p5", workspace_label="herdr-chat-bridge", agent_name="claude", status="working"
+        target="w7:p5", workspace_label="herdrelay", agent_name="claude", status="working"
     )
     idle = HerdrTarget(
-        target="w7:p5", workspace_label="herdr-chat-bridge", agent_name="claude", status="idle"
+        target="w7:p5", workspace_label="herdrelay", agent_name="claude", status="idle"
     )
 
     assert thread_name(blocked).startswith("🔴")
     assert not thread_name(working).startswith("🔴")
     assert not thread_name(idle).startswith("🔴")
-    assert thread_name(working) == "herdr-chat-bridge/claude"
+    assert thread_name(working) == "herdrelay/claude"
 
 
 def test_thread_name_truncates_to_discord_limit():

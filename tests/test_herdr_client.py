@@ -135,7 +135,7 @@ def test_list_workspaces_maps_ids_to_labels():
     client = HerdrClient(AppConfig(discord_token="token"))
     client.cli = WorkspaceFakeCli()
 
-    assert client.list_workspaces() == {"w1": "cbo_mppi", "w7": "herdr-chat-bridge"}
+    assert client.list_workspaces() == {"w1": "cbo_mppi", "w7": "herdrelay"}
 
 
 def test_list_targets_attaches_workspace_labels():
@@ -145,7 +145,7 @@ def test_list_targets_attaches_workspace_labels():
     targets = {t.target: t for t in client.list_targets()}
 
     assert targets["w1:p1"].workspace_label == "cbo_mppi"
-    assert targets["w7:p3"].workspace_label == "herdr-chat-bridge"
+    assert targets["w7:p3"].workspace_label == "herdrelay"
     assert targets["w7:p3"].status == "blocked"
 
 
@@ -241,7 +241,7 @@ class WorkspaceFakeCli:
             "result": {
                 "workspaces": [
                     {"workspace_id": "w1", "label": "cbo_mppi"},
-                    {"workspace_id": "w7", "label": "herdr-chat-bridge"},
+                    {"workspace_id": "w7", "label": "herdrelay"},
                 ]
             }
         }

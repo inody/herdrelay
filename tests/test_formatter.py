@@ -70,11 +70,11 @@ def test_split_text_chunks_rejects_invalid_budget():
 def test_target_alias_prefers_workspace_label():
     target = HerdrTarget(
         target="w7:p3",
-        workspace_label="herdr-chat-bridge",
+        workspace_label="herdrelay",
         agent_name="claude",
-        cwd="/x/herdr-chat-bridge",
+        cwd="/x/herdrelay",
     )
-    assert target_alias(target) == "herdr-chat-bridge"
+    assert target_alias(target) == "herdrelay"
 
 
 def test_target_alias_falls_back_to_cwd_basename():
