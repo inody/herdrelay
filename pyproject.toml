@@ -5,6 +5,7 @@ description = "HerdRelay — a local Discord control surface for Herdr panes and
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "aiohttp>=3.10,<4",
   "discord.py>=2.4,<3",
   "python-dotenv>=1.0,<2",
   "PyYAML>=6.0,<7",
