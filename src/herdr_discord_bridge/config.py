@@ -31,6 +31,7 @@ class HcRuntimeConfig:
 @dataclass(frozen=True)
 class RuntimeConfig:
     provider: str = "herdr-tui"
+    tui: HerdrCliConfig = field(default_factory=HerdrCliConfig)
     core: HcRuntimeConfig = field(default_factory=HcRuntimeConfig)
 
 
@@ -57,6 +58,7 @@ class TelegramConfig:
     poll_timeout_seconds: int = 25
     request_timeout_seconds: float = 35
     reconnect_delay_seconds: float = 5
+    status_refresh_seconds: float = 5
 
 
 @dataclass(frozen=True)
@@ -115,7 +117,6 @@ class AppConfig:
     allow_pane_send_fallback: bool = False
     dangerous_text_blocklist: tuple[str, ...] = ()
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
-    herdr: HerdrCliConfig = field(default_factory=HerdrCliConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
     auto_threads: AutoThreadsConfig = field(default_factory=AutoThreadsConfig)
     streaming: StreamConfig = field(default_factory=StreamConfig)
@@ -124,6 +125,11 @@ class AppConfig:
     approval: dict[str, ApprovalStrategy] = field(default_factory=dict)
     deny: dict[str, ApprovalStrategy] = field(default_factory=dict)
     stop: ApprovalStrategy | None = None
+
+    @property
+    def herdr(self) -> HerdrCliConfig:
+        """Compatibility alias for the legacy runtime configuration."""
+        return self.runtime.tui
 
 
 def load_config(
@@ -143,9 +149,20 @@ def load_config(
     runtime_data = data.get("runtime") or {}
     if not isinstance(runtime_data, dict):
         raise ValueError("runtime must be a YAML mapping")
-    core_data = runtime_data.get("core") or {}
+    core_data = (
+        runtime_data.get("herdr_core")
+        if "herdr_core" in runtime_data
+        else runtime_data.get("core")
+    ) or {}
     if not isinstance(core_data, dict):
-        raise ValueError("runtime.core must be a YAML mapping")
+        raise ValueError("runtime.herdr_core must be a YAML mapping")
+    tui_data = (
+        runtime_data.get("herdr_tui")
+        if "herdr_tui" in runtime_data
+        else data.get("herdr")
+    ) or {}
+    if not isinstance(tui_data, dict):
+        raise ValueError("runtime.herdr_tui must be a YAML mapping")
     transports_data = data.get("transports") or {}
     if not isinstance(transports_data, dict):
         raise ValueError("transports must be a YAML mapping")
@@ -155,39 +172,120 @@ def load_config(
     telegram_data = transports_data.get("telegram") or {}
     if not isinstance(telegram_data, dict):
         raise ValueError("transports.telegram must be a YAML mapping")
+    storage_data = data.get("storage") or {}
+    if not isinstance(storage_data, dict):
+        raise ValueError("storage must be a YAML mapping")
+    relay_data = data.get("relay") or {}
+    if not isinstance(relay_data, dict):
+        raise ValueError("relay must be a YAML mapping")
     discord = DiscordTransportConfig(
         enabled=bool(discord_data.get("enabled", True))
     )
     if require_discord_token and discord.enabled and not token:
         raise ValueError("DISCORD_TOKEN is required when Discord is enabled")
-    herdr_data = data.get("herdr") or {}
-    watcher_data = data.get("watcher") or {}
-    auto_threads_data = data.get("auto_threads") or {}
-    streaming_data = data.get("streaming") or {}
-    approval_data = data.get("approval") or {}
+    watcher_data = (
+        discord_data.get("watcher")
+        if "watcher" in discord_data
+        else data.get("watcher")
+    ) or {}
+    auto_threads_data = (
+        discord_data.get("auto_threads")
+        if "auto_threads" in discord_data
+        else data.get("auto_threads")
+    ) or {}
+    streaming_data = (
+        relay_data.get("streaming")
+        if "streaming" in relay_data
+        else data.get("streaming")
+    ) or {}
+    approval_data = (
+        discord_data.get("approval")
+        if "approval" in discord_data
+        else data.get("approval")
+    ) or {}
+    deny_data = (
+        discord_data.get("deny")
+        if "deny" in discord_data
+        else data.get("deny")
+    ) or {}
+    stop_data = (
+        discord_data.get("stop")
+        if "stop" in discord_data
+        else data.get("stop")
+    )
 
     config = AppConfig(
         discord_token=token,
         herdr_socket_path=os.environ.get("HERDR_SOCKET_PATH") or None,
-        allowed_guild_ids=_id_set(data.get("allowed_guild_ids")),
-        allowed_channel_ids=_id_set(data.get("allowed_channel_ids")),
-        allowed_user_ids=_id_set(data.get("allowed_user_ids")),
-        thread_parent_channel_id=_optional_int(data.get("thread_parent_channel_id")),
-        database_path=str(data.get("database_path") or "herdr-discord-bridge.sqlite3"),
-        max_output_chars=int(data.get("max_output_chars", 1800)),
-        max_message_chars=int(data.get("max_message_chars", 2000)),
-        enable_send=bool(data.get("enable_send", False)),
-        enable_approve=bool(data.get("enable_approve", False)),
-        enable_watcher=bool(data.get("enable_watcher", False)),
-        enable_stop=bool(data.get("enable_stop", False)),
-        enable_auto_threads=bool(data.get("enable_auto_threads", False)),
-        enable_streaming=bool(data.get("enable_streaming", False)),
-        allow_pane_send_fallback=bool(data.get("allow_pane_send_fallback", False)),
+        allowed_guild_ids=_id_set(
+            discord_data.get("allowed_guild_ids", data.get("allowed_guild_ids"))
+        ),
+        allowed_channel_ids=_id_set(
+            discord_data.get("allowed_channel_ids", data.get("allowed_channel_ids"))
+        ),
+        allowed_user_ids=_id_set(
+            discord_data.get("allowed_user_ids", data.get("allowed_user_ids"))
+        ),
+        thread_parent_channel_id=_optional_int(
+            discord_data.get(
+                "thread_parent_channel_id", data.get("thread_parent_channel_id")
+            )
+        ),
+        database_path=str(
+            storage_data.get("database_path")
+            or data.get("database_path")
+            or "herdr-discord-bridge.sqlite3"
+        ),
+        max_output_chars=int(
+            relay_data.get("max_output_chars", data.get("max_output_chars", 1800))
+        ),
+        max_message_chars=int(
+            relay_data.get("max_message_chars", data.get("max_message_chars", 2000))
+        ),
+        enable_send=bool(
+            discord_data.get("enable_send", data.get("enable_send", False))
+        ),
+        enable_approve=bool(
+            discord_data.get("enable_approve", data.get("enable_approve", False))
+        ),
+        enable_watcher=bool(
+            discord_data.get("enable_watcher", data.get("enable_watcher", False))
+        ),
+        enable_stop=bool(
+            discord_data.get("enable_stop", data.get("enable_stop", False))
+        ),
+        enable_auto_threads=bool(
+            discord_data.get(
+                "enable_auto_threads", data.get("enable_auto_threads", False)
+            )
+        ),
+        enable_streaming=bool(
+            relay_data.get("enable_streaming", data.get("enable_streaming", False))
+        ),
+        allow_pane_send_fallback=bool(
+            discord_data.get(
+                "allow_pane_send_fallback",
+                data.get("allow_pane_send_fallback", False),
+            )
+        ),
         dangerous_text_blocklist=tuple(
-            str(item) for item in data.get("dangerous_text_blocklist") or ()
+            str(item)
+            for item in relay_data.get(
+                "dangerous_text_blocklist",
+                data.get("dangerous_text_blocklist") or (),
+            )
         ),
         runtime=RuntimeConfig(
             provider=_runtime_provider(runtime_data.get("provider")),
+            tui=HerdrCliConfig(
+                cli_path=str(tui_data.get("cli_path") or "herdr"),
+                default_source=str(
+                    tui_data.get("default_source") or "recent-unwrapped"
+                ),
+                command_timeout_seconds=int(
+                    tui_data.get("command_timeout_seconds", 20)
+                ),
+            ),
             core=HcRuntimeConfig(
                 socket_path=(
                     str(core_data["socket_path"])
@@ -216,11 +314,6 @@ def load_config(
                     core_data.get("allowed_terminal_addresses")
                 ),
             ),
-        ),
-        herdr=HerdrCliConfig(
-            cli_path=str(herdr_data.get("cli_path") or "herdr"),
-            default_source=str(herdr_data.get("default_source") or "recent-unwrapped"),
-            command_timeout_seconds=int(herdr_data.get("command_timeout_seconds", 20)),
         ),
         watcher=WatcherConfig(
             statuses=tuple(
@@ -298,10 +391,13 @@ def load_config(
             reconnect_delay_seconds=float(
                 telegram_data.get("reconnect_delay_seconds", 5)
             ),
+            status_refresh_seconds=float(
+                telegram_data.get("status_refresh_seconds", 5)
+            ),
         ),
         approval=_approval_strategies(approval_data),
-        deny=_approval_strategies(data.get("deny") or {}),
-        stop=_single_strategy(data.get("stop")),
+        deny=_approval_strategies(deny_data),
+        stop=_single_strategy(stop_data),
     )
     _validate_runtime_features(config)
     _validate_telegram(config)
@@ -312,8 +408,6 @@ def _validate_telegram(config: AppConfig) -> None:
     telegram = config.telegram
     if not telegram.enabled:
         return
-    if config.runtime.provider != "herdr-core":
-        raise ValueError("Telegram currently requires runtime.provider=herdr-core")
     if not telegram.token:
         raise ValueError("TELEGRAM_BOT_TOKEN is required when Telegram is enabled")
     if telegram.mode != "forum":
@@ -349,18 +443,20 @@ def _validate_telegram(config: AppConfig) -> None:
         )
     if telegram.reconnect_delay_seconds <= 0:
         raise ValueError("Telegram reconnect_delay_seconds must be positive")
+    if telegram.status_refresh_seconds <= 0:
+        raise ValueError("Telegram status_refresh_seconds must be positive")
 
 
 def _validate_runtime_features(config: AppConfig) -> None:
     if config.runtime.provider != "herdr-core":
         return
     if config.runtime.core.connect_timeout_seconds <= 0:
-        raise ValueError("runtime.core.connect_timeout_seconds must be positive")
+        raise ValueError("runtime.herdr_core.connect_timeout_seconds must be positive")
     if config.runtime.core.request_timeout_seconds <= 0:
-        raise ValueError("runtime.core.request_timeout_seconds must be positive")
+        raise ValueError("runtime.herdr_core.request_timeout_seconds must be positive")
     if config.runtime.core.event_idle_timeout_seconds <= 15:
         raise ValueError(
-            "runtime.core.event_idle_timeout_seconds must exceed Core's 15s heartbeat"
+            "runtime.herdr_core.event_idle_timeout_seconds must exceed Core's 15s heartbeat"
         )
     if config.enable_approve:
         raise ValueError(

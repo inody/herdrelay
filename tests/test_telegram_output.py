@@ -40,6 +40,21 @@ def write_v2(path: Path, **fields) -> None:
     )
 
 
+def write_v1(path: Path, **fields) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "event_id": "legacy-event-1",
+                "pane_id": "w1:p1",
+                "agent": "pi",
+                "text": "legacy response",
+                **fields,
+            }
+        )
+    )
+
+
 def relay(tmp_path, *, max_age=86_400):
     inbox = tmp_path / "inbox"
     inbox.mkdir()
@@ -83,6 +98,33 @@ async def test_core_output_is_delivered_to_exact_telegram_topic(tmp_path):
     assert not event_path.exists()
     assert store.has_event_key(
         "agent-output:telegram:-1001:77:pi:event-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_tui_output_is_delivered_to_bound_telegram_topic(tmp_path):
+    inbox, store, api, output = relay(tmp_path)
+    store.upsert_telegram_topic_for_target(
+        target=TargetKey.legacy("w1:p1"),
+        chat_id=-1001,
+        thread_id=88,
+        name="project/pi",
+    )
+    event_path = inbox / "legacy.json"
+    write_v1(event_path)
+
+    await output.drain_once(inbox)
+
+    assert api.sent == [
+        {
+            "chat_id": -1001,
+            "message_thread_id": 88,
+            "text": "legacy response",
+        }
+    ]
+    assert not event_path.exists()
+    assert store.has_event_key(
+        "agent-output:telegram:-1001:88:pi:legacy-event-1"
     )
 
 

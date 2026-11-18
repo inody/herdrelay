@@ -25,21 +25,21 @@ until a deployment explicitly selects the Core backend.
 The first Core/Telegram release intentionally has a smaller mutation surface
 than the legacy Discord backend.
 
-| Capability | Legacy Discord | Core Discord MVP | Core Telegram MVP |
-|---|---:|---:|---:|
-| List detected agents | Yes | Yes | Yes |
-| Per-target conversation | Yes | Yes | Yes, forum topic preferred |
-| Blocked/done notification | Yes | Yes | Yes |
-| Completed-response relay | Yes | Yes | Yes |
-| Human-input visibility event | Pi | Yes | Yes if required by topic policy |
-| Send normal prompt | Yes | Yes | Yes |
-| Interrupt working turn | Yes | Yes | Yes, with confirmation |
-| Raw special keys | Yes | No | No |
-| Approve/deny buttons | Yes | No | No |
-| Structured question answer | Claude-specific | Deferred | Deferred |
-| Start visible agent | Yes | Deferred | Deferred |
-| Close/kill terminal | Yes | Deferred | Deferred |
-| Connected machines | No | Optional after local MVP | Optional after local MVP |
+| Capability | TUI Discord | TUI Telegram | Core Discord | Core Telegram |
+|---|---:|---:|---:|---:|
+| List detected agents | Yes | Yes | Yes | Yes |
+| Per-target conversation | Yes | Yes, forum topic | Yes | Yes, forum topic |
+| Blocked/done notification | Yes | Yes | Yes | Yes |
+| Completed-response relay | Yes | Yes | Yes | Yes |
+| Human-input visibility event | Pi | Not required | Yes | Not required |
+| Send normal prompt | Yes | Yes | Yes | Yes |
+| Interrupt working turn | Yes | No | Yes | Yes, with confirmation |
+| Raw special keys | Yes | No | No | No |
+| Approve/deny buttons | Yes | No | No | No |
+| Structured question answer | Claude-specific | No | Deferred | Deferred |
+| Start visible agent | Yes | No | Deferred | Deferred |
+| Close/kill terminal | Yes | No | Deferred | Deferred |
+| Connected machines | No | No | Optional after local MVP | Optional after local MVP |
 
 ## 3. Phase 0 — Baseline and contracts
 

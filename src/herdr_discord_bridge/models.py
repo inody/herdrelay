@@ -51,6 +51,7 @@ class TransportAuditEntry:
 
 @dataclass(frozen=True)
 class TelegramTopicRoute:
+    route_target: str
     core_id: str
     terminal_address: str
     chat_id: str

@@ -205,13 +205,17 @@ Validation and retention rules:
   target addresses are limited to 200 characters and agent names to 50.
 - Files larger than `hook_max_event_bytes`, invalid JSON, and malformed events
   are deleted.
-- A valid event without a pane/thread mapping waits until the mapping appears or
-  `hook_max_event_age_seconds` elapses.
+- A valid event without a persisted Discord thread or Telegram topic waits until
+  a route appears or `hook_max_event_age_seconds` elapses.
 - Delivered and duplicate events are deleted.
-- Legacy Discord response dedupe uses `agent-output:<agent>:<event_id>`.
+- The pre-fanout legacy Discord dedupe key
+  `agent-output:<agent>:<event_id>` remains readable for compatibility.
 - Discord and Telegram response dedupe keys include their destination IDs.
   Delivery to one transport does not suppress another route, and a shared
-  version 2 file remains until all currently persisted routes have completed.
+  version 1 or version 2 file remains until all currently persisted routes have
+  completed.
+- Telegram stores normalized runtime target keys, so legacy pane IDs and
+  Core-ID-pinned terminal addresses use the same routing machinery.
 - Core Discord thread bindings store both the stable Core ID and terminal
   address. A changed Core identity is rejected before a thread mutation.
 - Text is posted as ordinary Discord message content with original newlines and

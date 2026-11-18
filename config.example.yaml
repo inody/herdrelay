@@ -1,18 +1,88 @@
 runtime:
-  provider: herdr-tui           # herdr-tui (current default) or herdr-core (experimental)
-  core:
-    socket_path: null             # existing Core only; never starts one
+  provider: herdr-tui             # herdr-tui or herdr-core
+  herdr_tui:
+    cli_path: herdr
+    default_source: recent-unwrapped
+    command_timeout_seconds: 20
+  herdr_core:
+    socket_path: null             # existing Core only; HerdRelay never starts it
     connect_timeout_seconds: 5
     request_timeout_seconds: 20
     event_idle_timeout_seconds: 35 # Core heartbeats every 15s
     require_app_visible: true
     include_hidden_workers: false
     include_connected_machines: false
-    allowed_terminal_addresses: [] # empty denies all Core targets; list exact t-addresses
+    allowed_terminal_addresses: [] # empty denies all Core targets
+
+storage:
+  database_path: herdrelay.sqlite3
+
+relay:
+  max_output_chars: 1800
+  max_message_chars: 2000
+  enable_streaming: false
+  dangerous_text_blocklist:
+    - "rm -rf"
+    - "sudo"
+    - "git reset --hard"
+  streaming:
+    mode: hooks                    # hooks (recommended) or poll
+    refresh_seconds: 8             # poll mode only
+    tail_lines: 1000               # poll mode only
+    initial_tail_lines: 60         # poll mode only
+    enable_visible_fallback: true  # poll mode only
+    hook_inbox_path: ~/.cache/herdrelay/agent-output
+    hook_refresh_seconds: 1
+    hook_max_event_bytes: 2000000
+    hook_max_event_age_seconds: 86400
 
 transports:
   discord:
-    enabled: true               # backward-compatible default; false runs Telegram only
+    enabled: true                  # backward-compatible default
+    allowed_guild_ids: []
+    allowed_channel_ids: []
+    allowed_user_ids: []
+    thread_parent_channel_id: null
+    enable_send: false
+    enable_approve: false          # unavailable for Herdr Core
+    enable_watcher: false
+    enable_stop: false
+    enable_auto_threads: false
+    allow_pane_send_fallback: false
+    auto_threads:
+      refresh_seconds: 30
+    watcher:
+      statuses: [blocked, done]
+      reconnect_delay_seconds: 5
+      resubscribe_interval_seconds: 300
+      include_output: true
+      blocked_notification_delay_seconds: 1.5
+      blocked_tail_lines: 80
+      done_tail_lines: 60
+    approval:
+      codex:
+        method: send_text_enter
+        text: "y"
+      claude:
+        method: send_keys
+        keys: [Enter]
+      pi:
+        method: send_keys
+        keys: [Enter]
+    deny:
+      codex:
+        method: send_keys
+        keys: [Escape]
+      claude:
+        method: send_keys
+        keys: [Escape]
+      pi:
+        method: send_keys
+        keys: [Escape]
+    stop:
+      method: send_keys
+      keys: [C-c]
+
   telegram:
     enabled: false
     mode: forum
@@ -21,7 +91,7 @@ transports:
     forum_chat_id: null
     statuses: [blocked, done]
     enable_send: false
-    enable_interrupt: false
+    enable_interrupt: false        # Core-only, with one-time confirmation
     confirmation_ttl_seconds: 60
     actor_mutations_per_minute: 6
     chat_mutations_per_minute: 12
@@ -29,77 +99,4 @@ transports:
     poll_timeout_seconds: 25
     request_timeout_seconds: 35
     reconnect_delay_seconds: 5
-
-allowed_guild_ids: []
-allowed_channel_ids: []
-allowed_user_ids: []
-thread_parent_channel_id: null
-
-database_path: herdrelay.sqlite3
-
-max_output_chars: 1800
-max_message_chars: 2000
-
-enable_send: false
-enable_approve: false
-enable_watcher: false          # Core uses events.subscribe; TUI uses legacy socket
-enable_stop: false             # Core: terminal.interrupt only; TUI: configured stop strategy
-enable_auto_threads: false
-enable_streaming: false        # hooks also relays Core v2 responses to Telegram topics
-allow_pane_send_fallback: false
-
-auto_threads:
-  refresh_seconds: 30
-
-streaming:
-  mode: hooks                  # hooks (recommended) or poll
-  refresh_seconds: 8           # poll mode only
-  tail_lines: 1000             # poll mode only
-  initial_tail_lines: 60       # poll mode only
-  enable_visible_fallback: true # poll mode only
-  hook_inbox_path: ~/.cache/herdrelay/agent-output
-  hook_refresh_seconds: 1
-  hook_max_event_bytes: 2000000
-  hook_max_event_age_seconds: 86400
-
-watcher:
-  statuses: ["blocked", "done"]
-  reconnect_delay_seconds: 5
-  resubscribe_interval_seconds: 300
-  include_output: true
-  blocked_notification_delay_seconds: 1.5 # lets agent question hooks arrive first
-  blocked_tail_lines: 80
-  done_tail_lines: 60
-dangerous_text_blocklist:
-  - "rm -rf"
-  - "sudo"
-  - "git reset --hard"
-
-herdr:
-  cli_path: herdr
-  default_source: recent-unwrapped
-  command_timeout_seconds: 20
-
-approval:
-  codex:
-    method: send_text_enter
-    text: "y"
-  claude:
-    method: send_keys
-    keys: ["Enter"]
-  pi:
-    method: send_keys
-    keys: ["Enter"]
-deny:
-  codex:
-    method: send_keys
-    keys: ["Escape"]
-  claude:
-    method: send_keys
-    keys: ["Escape"]
-  pi:
-    method: send_keys
-    keys: ["Escape"]
-stop:
-  method: send_keys
-  keys: ["C-c"]
+    status_refresh_seconds: 5      # legacy TUI polling; Core uses native events

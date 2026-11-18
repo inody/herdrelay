@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from .config import AppConfig
-from .domain import RuntimeKind
 from .output_events import HookOutputEvent
 from .store import Store
 
@@ -26,12 +25,18 @@ def legacy_delivery_key(event: HookOutputEvent) -> str:
 def delivery_seen(store: Store, event: HookOutputEvent, key: str) -> bool:
     if store.has_event_key(key):
         return True
-    return event.version == 1 and store.has_event_key(legacy_delivery_key(event))
+    # The pre-fanout key represented legacy Discord delivery only. It must not
+    # suppress a newly configured Telegram route for the same version 1 event.
+    return (
+        event.version == 1
+        and key.startswith("agent-output:discord:")
+        and store.has_event_key(legacy_delivery_key(event))
+    )
 
 
 def mark_delivery_seen(store: Store, event: HookOutputEvent, key: str) -> None:
     store.mark_event_seen(key)
-    if event.version == 1:
+    if event.version == 1 and key.startswith("agent-output:discord:"):
         store.mark_event_seen(legacy_delivery_key(event))
 
 
@@ -44,15 +49,8 @@ def required_delivery_keys(
     if discord_thread is not None:
         keys.append(discord_delivery_key(event, discord_thread))
 
-    if (
-        config.telegram.enabled
-        and event.target.runtime is RuntimeKind.HERDR_CORE
-        and event.target.controller_core_id is not None
-    ):
-        route = store.get_telegram_topic(
-            core_id=event.target.controller_core_id,
-            terminal_address=event.target.address,
-        )
+    if config.telegram.enabled:
+        route = store.get_telegram_topic_for_target(event.target)
         if route is not None and not route.closed:
             keys.append(
                 telegram_delivery_key(

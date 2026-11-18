@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from .config import AppConfig
-from .domain import RuntimeKind, TargetKey
+from .domain import MutationOutcomeUnknownError, RuntimeKind, TargetKey
 from .herdr_cli import HerdrCli, HerdrCliError
 from .models import HerdrTarget, StartedAgent
 from .runtime import RuntimeCapabilities
@@ -105,7 +105,9 @@ class HerdrClient:
         try:
             self.cli.agent_prompt(target, message)
             return
-        except HerdrCliError:
+        except HerdrCliError as exc:
+            if "timed out" in str(exc).casefold():
+                raise MutationOutcomeUnknownError(str(exc)) from exc
             if not self.config.allow_pane_send_fallback:
                 raise
         self.cli.pane_run(target, message)

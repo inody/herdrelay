@@ -12,7 +12,7 @@ from herdr_discord_bridge.config import (
     RuntimeConfig,
     TelegramConfig,
 )
-from herdr_discord_bridge.domain import MutationOutcomeUnknownError
+from herdr_discord_bridge.domain import MutationOutcomeUnknownError, TargetKey
 from herdr_discord_bridge.hc_client import HcClient, HcMutationReceipt
 from herdr_discord_bridge.hc_events import HcTerminalState
 from herdr_discord_bridge.hc_protocol import (
@@ -163,6 +163,27 @@ class FakeClient:
         ]
 
 
+@dataclass
+class FakeLegacyClient:
+    panes: list[HerdrTarget]
+    sent: list[tuple[str, str]] = field(default_factory=list)
+
+    def list_panes(self):
+        return list(self.panes)
+
+    def list_targets(self):
+        return [target for target in self.panes if target.agent_name]
+
+    def target_key(self, target):
+        return TargetKey.legacy(target)
+
+    def resolve_target_key(self, key):
+        return next(target for target in self.panes if target.target == key.address)
+
+    def send(self, target, text):
+        self.sent.append((target, text))
+
+
 class FakeMutationClient(HcClient):
     def __init__(self, app_config, *, error: Exception | None = None):
         super().__init__(app_config)
@@ -251,7 +272,7 @@ async def test_normal_text_is_read_only_and_does_not_call_core(tmp_path):
     assert client.calls == 0
     assert len(api.sent) == 1
     assert "read-only" in api.sent[0]["text"]
-    assert "no Core mutation" in api.sent[0]["text"]
+    assert "no runtime mutation" in api.sent[0]["text"]
 
 
 @pytest.mark.asyncio
@@ -410,6 +431,92 @@ def mutation_service(
         config=app_config, store=store, client=client, api=api
     )
     return relay, client
+
+
+@pytest.mark.asyncio
+async def test_legacy_tui_topics_status_and_lifecycle_are_reconciled(tmp_path):
+    api = FakeApi([])
+    target = HerdrTarget(
+        target="w1:p1",
+        agent_name="pi",
+        status="idle",
+        workspace_label="project",
+    )
+    client = FakeLegacyClient([target])
+    app_config = AppConfig(
+        discord_token="unused",
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+        ),
+    )
+    relay = TelegramService(
+        config=app_config,
+        store=Store(tmp_path / "store.sqlite3"),
+        client=client,
+        api=api,
+    )
+
+    await relay._legacy_status_once()
+
+    route = relay.store.get_telegram_topic_for_target(TargetKey.legacy("w1:p1"))
+    assert route is not None
+    assert api.sent == []
+
+    client.panes = [replace(target, status="blocked")]
+    await relay._legacy_status_once()
+
+    assert api.sent[-1]["text"].endswith("\nblocked")
+
+    client.panes = []
+    await relay._legacy_status_once()
+
+    route = relay.store.get_telegram_topic_for_target(TargetKey.legacy("w1:p1"))
+    assert route is not None and route.closed
+    assert api.closed_topics[-1]["message_thread_id"] == int(route.thread_id)
+
+
+@pytest.mark.asyncio
+async def test_legacy_tui_prompt_is_claimed_and_audited(tmp_path):
+    api = FakeApi([[update(text="continue")]])
+    target = HerdrTarget(
+        target="w1:p1",
+        agent_name="pi",
+        status="idle",
+        workspace_label="project",
+    )
+    client = FakeLegacyClient([target])
+    app_config = AppConfig(
+        discord_token="unused",
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+            enable_send=True,
+        ),
+    )
+    store = Store(tmp_path / "store.sqlite3")
+    store.upsert_telegram_topic_for_target(
+        target=TargetKey.legacy("w1:p1"),
+        chat_id=-1001,
+        thread_id=77,
+        name="project/pi · w1:p1",
+    )
+    relay = TelegramService(
+        config=app_config, store=store, client=client, api=api
+    )
+
+    await relay.poll_once()
+
+    assert client.sent == [("w1:p1", "continue")]
+    [audit] = store.list_transport_audits()
+    assert audit["outcome"] == "succeeded"
+    assert audit["target_key"] == TargetKey.legacy("w1:p1").to_storage_key()
 
 
 @pytest.mark.asyncio

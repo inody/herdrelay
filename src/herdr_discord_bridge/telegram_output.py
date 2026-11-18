@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 
 from .config import AppConfig
-from .domain import OutputEventKind, RuntimeKind
+from .domain import OutputEventKind
 from .output_delivery import (
     all_required_deliveries_seen,
     delivery_seen,
@@ -22,7 +22,7 @@ LOG = logging.getLogger(__name__)
 
 
 class TelegramOutputRelay:
-    """Deliver Core-aware adapter events to their exact Telegram topic."""
+    """Deliver adapter events to the exact persisted Telegram topic."""
 
     def __init__(
         self,
@@ -46,7 +46,7 @@ class TelegramOutputRelay:
             inbox.chmod(0o700)
         except OSError:
             LOG.warning("Could not restrict hook inbox permissions: %s", inbox)
-        LOG.info("Watching Core output inbox for Telegram delivery: %s", inbox)
+        LOG.info("Watching output inbox for Telegram delivery: %s", inbox)
         while not self._stopped.is_set():
             try:
                 await self.drain_once(inbox)
@@ -78,21 +78,13 @@ class TelegramOutputRelay:
                 await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue
 
-            if event.target.runtime is not RuntimeKind.HERDR_CORE:
-                continue
-            core_id = event.target.controller_core_id
-            assert core_id is not None
-            route = self.store.get_telegram_topic(
-                core_id=core_id,
-                terminal_address=event.target.address,
-            )
+            route = self.store.get_telegram_topic_for_target(event.target)
             if route is None or route.closed:
                 if await asyncio.to_thread(self._expired, path):
                     LOG.warning(
-                        "Discarding expired %s output for unbound Core target %s/%s",
+                        "Discarding expired %s output for unbound target %s",
                         event.agent,
-                        core_id,
-                        event.target.address,
+                        event.target.to_route_value(),
                     )
                     await asyncio.to_thread(path.unlink, missing_ok=True)
                 continue

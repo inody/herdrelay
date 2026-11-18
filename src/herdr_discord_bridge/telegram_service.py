@@ -8,17 +8,19 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .config import AppConfig
-from .domain import MutationOutcomeUnknownError, TargetKey
+from .domain import MutationOutcomeUnknownError, RuntimeKind, TargetKey
 from .formatter import target_alias, truncate
 from .hc_client import HcClient
 from .hc_events import HcEventStream, HcStatusTransition, HcTerminalState
 from .hc_protocol import HcEventNotification
 from .hc_rpc import HcRpcError
+from .herdr_cli import HerdrCliError
 from .models import TransportAuditEntry
 from .runtime import RuntimeClient
 from .store import Store
-from .telegram_api import TelegramApiError, TelegramBotApi
+from .telegram_api import TelegramBotApi
 from .telegram_output import TelegramOutputRelay
+from .telegram_topics import TelegramTopicManager
 from .telegram_updates import (
     TelegramUpdatePolicy,
     parse_inbound_callback,
@@ -27,11 +29,10 @@ from .telegram_updates import (
 
 LOG = logging.getLogger(__name__)
 OFFSET_STATE_KEY = "telegram_next_update_id"
-TOPIC_NAME_LIMIT = 128
 
 
 class TelegramService:
-    """Authorized long polling and status-only Core forum delivery."""
+    """Authorized long polling and runtime-neutral forum delivery."""
 
     def __init__(
         self,
@@ -51,6 +52,11 @@ class TelegramService:
             request_timeout_seconds=self.telegram.request_timeout_seconds,
         )
         self.policy = TelegramUpdatePolicy(self.telegram)
+        self.topics = TelegramTopicManager(
+            config=config, store=store, api=self.api
+        )
+        self._legacy_statuses: dict[str, str | None] = {}
+        self._legacy_live_targets: set[str] = set()
         self.output_relay = (
             TelegramOutputRelay(config=config, store=store, api=self.api)
             if config.enable_streaming and config.streaming.mode == "hooks"
@@ -68,9 +74,10 @@ class TelegramService:
         await self.api.close()
 
     async def run_forever(self) -> None:
-        tasks = [asyncio.create_task(self._poll_forever())]
-        if self.core_client is not None:
-            tasks.append(asyncio.create_task(self._status_forever()))
+        tasks = [
+            asyncio.create_task(self._poll_forever()),
+            asyncio.create_task(self._status_forever()),
+        ]
         if self.output_relay is not None:
             tasks.append(asyncio.create_task(self.output_relay.run_forever()))
         try:
@@ -98,7 +105,7 @@ class TelegramService:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                LOG.exception("Telegram Core status stream failed; reconnecting")
+                LOG.exception("Telegram runtime status relay failed; reconnecting")
                 await self._sleep_reconnect()
 
     async def poll_once(self) -> None:
@@ -135,8 +142,20 @@ class TelegramService:
             self._save_offset(update_id + 1)
 
     async def _status_once(self) -> None:
-        if self.core_client is None:
-            raise RuntimeError("Telegram status delivery requires HcClient")
+        if self.core_client is not None:
+            await self._core_status_once()
+            return
+        await self._legacy_status_once()
+        try:
+            await asyncio.wait_for(
+                self._stopped.wait(),
+                timeout=self.telegram.status_refresh_seconds,
+            )
+        except TimeoutError:
+            pass
+
+    async def _core_status_once(self) -> None:
+        assert self.core_client is not None
         subscription = await HcEventStream(
             self.config.runtime.core
         ).connect()
@@ -176,6 +195,46 @@ class TelegramService:
             stop_task.cancel()
             await asyncio.gather(stop_task, return_exceptions=True)
             await subscription.close()
+
+    async def _legacy_status_once(self) -> None:
+        panes = await asyncio.to_thread(self.client.list_panes)
+        live_targets = {
+            self.client.target_key(target.target).to_route_value()
+            for target in panes
+        }
+        detected: set[str] = set()
+        for target in panes:
+            key = self.client.target_key(target.target)
+            route_target = key.to_route_value()
+            if not target.agent_name:
+                self._legacy_statuses.pop(route_target, None)
+                continue
+            detected.add(route_target)
+            topic = await self.topics.ensure(key, target)
+            current = target.status.casefold() if target.status else None
+            previous = self._legacy_statuses.get(route_target)
+            self._legacy_statuses[route_target] = current
+            if (
+                previous is not None
+                and current != previous
+                and current in self.telegram.statuses
+            ):
+                icon = "🔴" if current == "blocked" else "✅"
+                await self.api.send_text(
+                    chat_id=int(topic.chat_id),
+                    message_thread_id=int(topic.thread_id),
+                    text=(
+                        f"{icon} {target_alias(target)}/{target.agent_name}"
+                        f"\n{current}"
+                    ),
+                )
+        for route_target in self._legacy_live_targets - live_targets:
+            await self.topics.close(TargetKey.from_route_value(route_target))
+            self._legacy_statuses.pop(route_target, None)
+        self._legacy_live_targets = live_targets
+        for route_target in tuple(self._legacy_statuses):
+            if route_target not in detected:
+                self._legacy_statuses.pop(route_target, None)
 
     async def _reconcile_topics(
         self, core_id: str, state: HcTerminalState
@@ -242,73 +301,15 @@ class TelegramService:
                 if target.agent_name:
                     await self._ensure_topic(core_id, address, target)
         elif notification.kind in {"finished", "removed"}:
-            topic = self.store.get_telegram_topic(
-                core_id=core_id, terminal_address=address
+            await self.topics.close(
+                TargetKey.core(controller_core_id=core_id, address=address)
             )
-            if topic and not topic.closed:
-                await self.api.close_forum_topic(
-                    chat_id=int(topic.chat_id),
-                    message_thread_id=int(topic.thread_id),
-                )
-                self.store.set_telegram_topic_closed(
-                    core_id=core_id, terminal_address=address, closed=True
-                )
 
     async def _ensure_topic(self, core_id: str, address: str, target):
-        chat_id = self.telegram.forum_chat_id
-        if chat_id is None:
-            raise RuntimeError("Telegram forum_chat_id is not configured")
-        name = f"{target_alias(target)}/{target.agent_name} · {address}"[
-            :TOPIC_NAME_LIMIT
-        ]
-        topic = self.store.get_telegram_topic(
-            core_id=core_id, terminal_address=address
+        return await self.topics.ensure(
+            TargetKey.core(controller_core_id=core_id, address=address),
+            target,
         )
-        if topic is None or int(topic.chat_id) != chat_id:
-            result = await self.api.create_forum_topic(chat_id=chat_id, name=name)
-            thread_id = result.get("message_thread_id")
-            if not isinstance(thread_id, int) or isinstance(thread_id, bool):
-                raise TelegramApiError(
-                    "Telegram createForumTopic did not return message_thread_id"
-                )
-            self.store.upsert_telegram_topic(
-                core_id=core_id,
-                terminal_address=address,
-                chat_id=chat_id,
-                thread_id=thread_id,
-                name=name,
-            )
-            topic = self.store.get_telegram_topic(
-                core_id=core_id, terminal_address=address
-            )
-            assert topic is not None
-            return topic
-        if topic.closed:
-            await self.api.reopen_forum_topic(
-                chat_id=chat_id, message_thread_id=int(topic.thread_id)
-            )
-            self.store.set_telegram_topic_closed(
-                core_id=core_id, terminal_address=address, closed=False
-            )
-        if topic.name != name:
-            await self.api.edit_forum_topic(
-                chat_id=chat_id,
-                message_thread_id=int(topic.thread_id),
-                name=name,
-            )
-            self.store.upsert_telegram_topic(
-                core_id=core_id,
-                terminal_address=address,
-                chat_id=chat_id,
-                thread_id=topic.thread_id,
-                name=name,
-                closed=False,
-            )
-        refreshed = self.store.get_telegram_topic(
-            core_id=core_id, terminal_address=address
-        )
-        assert refreshed is not None
-        return refreshed
 
     async def _handle_update(
         self, update: dict[str, Any], *, event_key: str
@@ -363,7 +364,7 @@ class TelegramService:
         else:
             text = (
                 "Telegram is currently read-only. Use /agents or /help; "
-                "no Core mutation was attempted."
+                "no runtime mutation was attempted."
             )
         await self.api.send_text(
             chat_id=message.chat_id,
@@ -375,7 +376,8 @@ class TelegramService:
     async def _request_interrupt(self, message) -> None:
         if self.core_client is None or message.message_thread_id is None:
             await self._feedback(
-                message, "Request interrupt inside a bound agent forum topic."
+                message,
+                "Interrupt is available only for a bound Herdr Core agent topic.",
             )
             return
         route = self.store.get_telegram_topic_by_destination(
@@ -622,9 +624,6 @@ class TelegramService:
             LOG.exception("Failed to answer Telegram callback query")
 
     async def _send_prompt(self, message, *, event_key: str) -> bool:
-        if self.core_client is None:
-            await self._feedback(message, "Core runtime is unavailable.")
-            return False
         if message.message_thread_id is None:
             await self._feedback(
                 message, "Send prompts inside a bound agent forum topic."
@@ -656,25 +655,31 @@ class TelegramService:
             await self._feedback(message, "Message was rejected by the text blocklist.")
             return False
 
-        targets = await asyncio.to_thread(self.core_client.list_targets)
-        if self.core_client.core_id != route.core_id:
+        key: TargetKey | None = None
+        try:
+            key = TargetKey.from_route_value(route.route_target)
+            targets = await asyncio.to_thread(self.client.list_targets)
+            target = next(
+                (item for item in targets if item.target == key.address), None
+            )
+            if target is None or self.client.target_key(target.target) != key:
+                raise ValueError("topic target identity changed")
+        except Exception:
+            detail = (
+                "This topic belongs to a different Core instance; no prompt was sent."
+                if key is not None and key.runtime is RuntimeKind.HERDR_CORE
+                else "The bound runtime agent is not currently live."
+            )
+            await self._feedback(message, detail)
+            return False
+        assert key is not None
+        if not target.agent_name:
             await self._feedback(
-                message,
-                "This topic belongs to a different Core instance; no prompt was sent.",
+                message, "The bound runtime target has no detected agent."
             )
             return False
-        target = next(
-            (item for item in targets if item.target == route.terminal_address),
-            None,
-        )
-        if target is None or not target.agent_name:
-            await self._feedback(message, "The bound Core agent is not currently live.")
-            return False
 
-        target_key = TargetKey.core(
-            controller_core_id=route.core_id,
-            address=route.terminal_address,
-        ).to_storage_key()
+        target_key = key.to_storage_key()
         rate_limit = self._mutation_rate_limit(
             actor_id=str(message.user_id),
             container_id=str(message.chat_id),
@@ -713,11 +718,15 @@ class TelegramService:
             return True
 
         try:
-            receipt = await asyncio.to_thread(
-                self.core_client.send_with_receipt,
-                route.terminal_address,
-                text,
-            )
+            receipt = None
+            if self.core_client is not None and key.runtime is RuntimeKind.HERDR_CORE:
+                receipt = await asyncio.to_thread(
+                    self.core_client.send_with_receipt,
+                    target.target,
+                    text,
+                )
+            else:
+                await asyncio.to_thread(self.client.send, target.target, text)
         except MutationOutcomeUnknownError as exc:
             self.store.finish_transport_audit(
                 audit_id,
@@ -735,6 +744,23 @@ class TelegramService:
                 detail=truncate(str(exc), max_chars=500),
             )
             await self._safe_feedback(message, f"⚠️ Prompt rejected: {exc}")
+        except HerdrCliError as exc:
+            outcome = (
+                "outcome_unknown"
+                if "timed out" in str(exc).casefold()
+                else "failed"
+            )
+            self.store.finish_transport_audit(
+                audit_id,
+                outcome=outcome,
+                detail=truncate(str(exc), max_chars=500),
+            )
+            feedback = (
+                "⚠️ Prompt outcome is unknown. Inspect the agent before retrying."
+                if outcome == "outcome_unknown"
+                else "⚠️ Prompt submission failed."
+            )
+            await self._safe_feedback(message, feedback)
         except Exception as exc:
             self.store.finish_transport_audit(
                 audit_id,
@@ -746,8 +772,12 @@ class TelegramService:
             self.store.finish_transport_audit(
                 audit_id,
                 outcome="succeeded",
-                detail=truncate(str(receipt.result), max_chars=500),
-                observed_turn=receipt.observed_turn,
+                detail=(
+                    truncate(str(receipt.result), max_chars=500)
+                    if receipt is not None
+                    else None
+                ),
+                observed_turn=(receipt.observed_turn if receipt is not None else None),
             )
             await self._safe_feedback(message, "✅ Prompt submitted.")
         return True

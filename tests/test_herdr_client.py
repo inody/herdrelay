@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from herdr_discord_bridge.config import AppConfig
-from herdr_discord_bridge.domain import TargetKey
+from herdr_discord_bridge.domain import MutationOutcomeUnknownError, TargetKey
 from herdr_discord_bridge.herdr_cli import HerdrCliError
 from herdr_discord_bridge.herdr_client import HerdrClient, normalize_targets
 from herdr_discord_bridge.models import HerdrTarget
@@ -70,6 +70,22 @@ def test_send_uses_agent_prompt_without_extra_enter():
     client.send("w7:p2", "hello")
 
     assert fake_cli.calls == [("agent_prompt", "w7:p2", "hello")]
+
+
+def test_send_timeout_is_unknown_and_never_falls_back():
+    client = HerdrClient(
+        AppConfig(discord_token="token", allow_pane_send_fallback=True)
+    )
+    fake_cli = Mock()
+    fake_cli.agent_prompt.side_effect = HerdrCliError(
+        "Herdr command timed out: herdr agent prompt"
+    )
+    client.cli = fake_cli
+
+    with pytest.raises(MutationOutcomeUnknownError, match="timed out"):
+        client.send("w7:p2", "hello")
+
+    fake_cli.pane_run.assert_not_called()
 
 
 def test_agent_start_splits_source_pane_then_uses_current_cli_shape():

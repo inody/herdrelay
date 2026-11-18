@@ -145,6 +145,70 @@ def test_load_config_can_disable_discord_without_a_token(tmp_path, monkeypatch):
     assert config.discord_token == ""
 
 
+def test_load_config_accepts_grouped_storage_relay_and_discord(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """storage:
+  database_path: grouped.sqlite3
+relay:
+  max_message_chars: 321
+  enable_streaming: true
+  dangerous_text_blocklist: [blocked]
+  streaming:
+    hook_inbox_path: /tmp/grouped-inbox
+transports:
+  discord:
+    enabled: true
+    allowed_guild_ids: [1]
+    allowed_channel_ids: [2]
+    allowed_user_ids: [3]
+    thread_parent_channel_id: 2
+    enable_send: true
+    auto_threads:
+      refresh_seconds: 7
+"""
+    )
+
+    config = load_config(config_path)
+
+    assert config.database_path == "grouped.sqlite3"
+    assert config.max_message_chars == 321
+    assert config.enable_streaming is True
+    assert config.streaming.hook_inbox_path == "/tmp/grouped-inbox"
+    assert config.dangerous_text_blocklist == ("blocked",)
+    assert config.allowed_guild_ids == frozenset({1})
+    assert config.allowed_channel_ids == frozenset({2})
+    assert config.allowed_user_ids == frozenset({3})
+    assert config.thread_parent_channel_id == 2
+    assert config.enable_send is True
+    assert config.auto_threads.refresh_seconds == 7
+
+
+def test_load_config_accepts_grouped_runtime_sections(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """runtime:
+  provider: herdr-core
+  herdr_tui:
+    cli_path: /opt/bin/herdr
+    command_timeout_seconds: 9
+  herdr_core:
+    socket_path: /tmp/core.sock
+    allowed_terminal_addresses: [t1]
+"""
+    )
+
+    config = load_config(config_path)
+
+    assert config.runtime.provider == "herdr-core"
+    assert config.runtime.tui.cli_path == "/opt/bin/herdr"
+    assert config.herdr.command_timeout_seconds == 9
+    assert config.runtime.core.socket_path == "/tmp/core.sock"
+    assert config.runtime.core.allowed_terminal_addresses == frozenset({"t1"})
+
+
 def test_load_config_keeps_discord_enabled_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
 
@@ -200,6 +264,28 @@ transports:
     assert "telegram-secret" not in repr(config.telegram)
 
 
+def test_load_config_allows_telegram_with_legacy_tui(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """runtime:
+  provider: herdr-tui
+transports:
+  telegram:
+    enabled: true
+    allowed_chat_ids: [-1]
+    allowed_user_ids: [2]
+    forum_chat_id: -1
+"""
+    )
+
+    config = load_config(config_path)
+
+    assert config.runtime.provider == "herdr-tui"
+    assert config.telegram.enabled is True
+
+
 @pytest.mark.parametrize(
     "runtime, telegram, message",
     [
@@ -207,11 +293,6 @@ transports:
             "herdr-core",
             "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -1",
             "TELEGRAM_BOT_TOKEN",
-        ),
-        (
-            "herdr-tui",
-            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -1",
-            "requires runtime.provider",
         ),
         (
             "herdr-core",

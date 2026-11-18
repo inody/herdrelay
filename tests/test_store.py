@@ -1,3 +1,6 @@
+import sqlite3
+
+from herdr_discord_bridge.domain import TargetKey
 from herdr_discord_bridge.models import (
     PendingQuestion,
     QuestionOption,
@@ -158,6 +161,45 @@ def test_transport_mutation_claim_is_atomic_and_single_use(tmp_path):
     assert finished["outcome"] == "succeeded"
     assert finished["observed_turn"] == 4
     assert finished["detail"] == "accepted"
+
+
+def test_existing_core_topic_schema_is_migrated_to_normalized_route(tmp_path):
+    path = tmp_path / "store.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE telegram_topics (
+              core_id TEXT NOT NULL,
+              terminal_address TEXT NOT NULL,
+              chat_id TEXT NOT NULL,
+              thread_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              closed INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(core_id, terminal_address),
+              UNIQUE(chat_id, thread_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO telegram_topics VALUES (
+              'core-1', 't1', '-1001', '77', 'project/pi', 0, 'now', 'now'
+            )
+            """
+        )
+
+    store = Store(path)
+
+    route = store.get_telegram_topic_for_target(
+        TargetKey.core(controller_core_id="core-1", address="t1")
+    )
+    assert route is not None
+    assert route.thread_id == "77"
+    assert TargetKey.from_route_value(route.route_target) == TargetKey.core(
+        controller_core_id="core-1", address="t1"
+    )
 
 
 def test_telegram_topic_route_upsert_and_close(tmp_path):

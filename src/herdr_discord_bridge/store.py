@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .domain import TargetKey
 from .models import (
     AuditEntry,
     Binding,
@@ -121,6 +122,7 @@ class Store:
                 );
 
                 CREATE TABLE IF NOT EXISTS telegram_topics (
+                  route_target TEXT,
                   core_id TEXT NOT NULL,
                   terminal_address TEXT NOT NULL,
                   chat_id TEXT NOT NULL,
@@ -130,10 +132,44 @@ class Store:
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
                   PRIMARY KEY(core_id, terminal_address),
+                  UNIQUE(route_target),
                   UNIQUE(chat_id, thread_id)
                 );
                 """
             )
+            self._migrate_telegram_topics(conn)
+
+    def _migrate_telegram_topics(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(telegram_topics)")
+        }
+        if "route_target" not in columns:
+            conn.execute("ALTER TABLE telegram_topics ADD COLUMN route_target TEXT")
+        rows = conn.execute(
+            """
+            SELECT core_id, terminal_address FROM telegram_topics
+            WHERE route_target IS NULL OR route_target = ''
+            """
+        ).fetchall()
+        for row in rows:
+            route_target = TargetKey.core(
+                controller_core_id=str(row["core_id"]),
+                address=str(row["terminal_address"]),
+            ).to_route_value()
+            conn.execute(
+                """
+                UPDATE telegram_topics SET route_target = ?
+                WHERE core_id = ? AND terminal_address = ?
+                """,
+                (route_target, row["core_id"], row["terminal_address"]),
+            )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS telegram_topics_route_target_idx
+            ON telegram_topics(route_target)
+            """
+        )
 
     def upsert_binding(
         self,
@@ -523,18 +559,27 @@ class Store:
                 return None
             return _telegram_confirmation(row)
 
+    def get_telegram_topic_for_target(
+        self, target: TargetKey | str
+    ) -> TelegramTopicRoute | None:
+        route_target = (
+            target.to_route_value() if isinstance(target, TargetKey) else target
+        )
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM telegram_topics WHERE route_target = ?",
+                (route_target,),
+            ).fetchone()
+        return _telegram_topic(row) if row else None
+
     def get_telegram_topic(
         self, *, core_id: str, terminal_address: str
     ) -> TelegramTopicRoute | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT * FROM telegram_topics
-                WHERE core_id = ? AND terminal_address = ?
-                """,
-                (core_id, terminal_address),
-            ).fetchone()
-        return _telegram_topic(row) if row else None
+        return self.get_telegram_topic_for_target(
+            TargetKey.core(
+                controller_core_id=core_id, address=terminal_address
+            )
+        )
 
     def get_telegram_topic_by_destination(
         self, *, chat_id: int | str, thread_id: int | str
@@ -549,6 +594,51 @@ class Store:
             ).fetchone()
         return _telegram_topic(row) if row else None
 
+    def list_telegram_topics(self) -> tuple[TelegramTopicRoute, ...]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM telegram_topics").fetchall()
+        return tuple(_telegram_topic(row) for row in rows)
+
+    def upsert_telegram_topic_for_target(
+        self,
+        *,
+        target: TargetKey,
+        chat_id: int | str,
+        thread_id: int | str,
+        name: str,
+        closed: bool = False,
+    ) -> None:
+        now = _now()
+        core_id = target.controller_core_id or ""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO telegram_topics (
+                  route_target, core_id, terminal_address, chat_id, thread_id,
+                  name, closed, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(route_target) DO UPDATE SET
+                  core_id = excluded.core_id,
+                  terminal_address = excluded.terminal_address,
+                  chat_id = excluded.chat_id,
+                  thread_id = excluded.thread_id,
+                  name = excluded.name,
+                  closed = excluded.closed,
+                  updated_at = excluded.updated_at
+                """,
+                (
+                    target.to_route_value(),
+                    core_id,
+                    target.address,
+                    str(chat_id),
+                    str(thread_id),
+                    name,
+                    int(closed),
+                    now,
+                    now,
+                ),
+            )
+
     def upsert_telegram_topic(
         self,
         *,
@@ -559,45 +649,41 @@ class Store:
         name: str,
         closed: bool = False,
     ) -> None:
-        now = _now()
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO telegram_topics (
-                  core_id, terminal_address, chat_id, thread_id, name,
-                  closed, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(core_id, terminal_address) DO UPDATE SET
-                  chat_id = excluded.chat_id,
-                  thread_id = excluded.thread_id,
-                  name = excluded.name,
-                  closed = excluded.closed,
-                  updated_at = excluded.updated_at
-                """,
-                (
-                    core_id,
-                    terminal_address,
-                    str(chat_id),
-                    str(thread_id),
-                    name,
-                    int(closed),
-                    now,
-                    now,
-                ),
-            )
+        self.upsert_telegram_topic_for_target(
+            target=TargetKey.core(
+                controller_core_id=core_id, address=terminal_address
+            ),
+            chat_id=chat_id,
+            thread_id=thread_id,
+            name=name,
+            closed=closed,
+        )
 
-    def set_telegram_topic_closed(
-        self, *, core_id: str, terminal_address: str, closed: bool
+    def set_telegram_topic_closed_for_target(
+        self, target: TargetKey | str, *, closed: bool
     ) -> None:
+        route_target = (
+            target.to_route_value() if isinstance(target, TargetKey) else target
+        )
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE telegram_topics
                 SET closed = ?, updated_at = ?
-                WHERE core_id = ? AND terminal_address = ?
+                WHERE route_target = ?
                 """,
-                (int(closed), _now(), core_id, terminal_address),
+                (int(closed), _now(), route_target),
             )
+
+    def set_telegram_topic_closed(
+        self, *, core_id: str, terminal_address: str, closed: bool
+    ) -> None:
+        self.set_telegram_topic_closed_for_target(
+            TargetKey.core(
+                controller_core_id=core_id, address=terminal_address
+            ),
+            closed=closed,
+        )
 
     def upsert_pending_question(self, question: PendingQuestion) -> None:
         with self._connect() as conn:
@@ -791,9 +877,17 @@ def _telegram_confirmation(row: sqlite3.Row) -> TelegramConfirmation:
 
 
 def _telegram_topic(row: sqlite3.Row) -> TelegramTopicRoute:
+    core_id = str(row["core_id"])
+    terminal_address = str(row["terminal_address"])
+    route_target = row["route_target"]
+    if not isinstance(route_target, str) or not route_target:
+        route_target = TargetKey.core(
+            controller_core_id=core_id, address=terminal_address
+        ).to_route_value()
     return TelegramTopicRoute(
-        core_id=str(row["core_id"]),
-        terminal_address=str(row["terminal_address"]),
+        route_target=route_target,
+        core_id=core_id,
+        terminal_address=terminal_address,
         chat_id=str(row["chat_id"]),
         thread_id=str(row["thread_id"]),
         name=str(row["name"]),

@@ -98,13 +98,13 @@ At a useful operational level:
 5. `database_path` stores pane/thread bindings, audit entries, event dedupe
    keys, and pending Claude questions.
 
-The stable default remains the legacy Herdr TUI with Discord. An explicit
-experimental path now supports an existing Herdr Core socket, Core-pinned
-Discord thread bindings, Core status events, normal prompt submission,
-interrupt, and an experimental Telegram forum transport with `/agents`,
-`/help`, blocked/done notifications, persisted topic lifecycle, opt-in prompt
-submission, and opt-in one-time confirmed interrupt. Version 2 adapter output
-fans out independently to every persisted Discord and Telegram route. Physical
+The stable default remains the legacy Herdr TUI with Discord. Herdr Core adds
+Core-pinned Discord thread bindings, native status events, normal prompt
+submission, and interrupt. The Telegram forum transport now supports both
+legacy TUI panes and Core terminals with `/agents`, `/help`, blocked/done
+notifications, persisted topic lifecycle, and opt-in prompt submission;
+one-time confirmed interrupt remains Core-only. Adapter output fans out
+independently to every persisted Discord and Telegram route. Physical
 Apple Watch behavior remains unverified. See
 [Herdr Core and Telegram architecture](docs/core-telegram-design.md) and the
 [implementation plan](docs/core-telegram-plan.md) for the current boundary and
@@ -387,63 +387,61 @@ want.
 
 ### Access, state, and feature flags
 
-| Setting | Meaning |
-|---|---|
-| `allowed_guild_ids` | Guild allowlist for reads and actions; empty means no guild restriction |
-| `allowed_channel_ids` | Parent-channel or thread allowlist; empty means no channel restriction |
-| `allowed_user_ids` | Users allowed to send or mutate; empty denies all guarded writes |
-| `thread_parent_channel_id` | Parent text channel for automatic public threads |
-| `database_path` | SQLite state and audit database; keep it stable across upgrades |
-| `max_output_chars` | Per-message output budget before Discord chunking/truncation rules |
-| `max_message_chars` | Maximum inbound message/control length |
-| `enable_send` | Thread input and `@herdr start` |
-| `enable_approve` | Approve, Deny, and structured question answers |
-| `enable_watcher` | Herdr socket status notifications |
-| `enable_stop` | Cancel controls and `@herdr stop` |
-| `enable_auto_threads` | Pane discovery, public thread creation, and binding |
-| `enable_streaming` | Hook or poll output relay |
-| `allow_pane_send_fallback` | Fall back from `agent prompt` to `pane run`; normally keep false |
-| `dangerous_text_blocklist` | Case-insensitive substring filter for thread input and `start` text |
+The preferred schema groups settings by responsibility:
 
-If `database_path` is omitted, the code retains the legacy default
-`herdr-discord-bridge.sqlite3`; the example explicitly uses
-`herdrelay.sqlite3`.
+- `runtime`: TUI/Core selection and runtime-specific connection policy;
+- `storage`: the stable SQLite database path;
+- `relay`: shared output limits, hook streaming, and text safety policy; and
+- `transports.discord` / `transports.telegram`: destination-specific access,
+  features, and controls.
+
+For backward compatibility, the former flat keys remain accepted. New
+configurations should use the grouped form in `config.example.yaml`.
+
+If `storage.database_path` is omitted, the code retains the legacy default
+`herdr-discord-bridge.sqlite3`; the example uses `herdrelay.sqlite3`.
 
 ### Nested groups
 
-- `runtime.provider`: `herdr-tui` (default) or experimental `herdr-core`.
-- `transports.discord.enabled`: defaults to true for existing installations.
-  Set false to run Telegram without opening a Discord gateway connection.
-- `runtime.core`: existing socket selection, timeouts, visibility policy, and
-  exact `allowed_terminal_addresses`; an empty Core target list denies all.
-- `transports.telegram`: experimental forum transport. Enabling it requires
+- `runtime.provider`: `herdr-tui` (default) or `herdr-core`.
+- `transports.discord`: gateway enablement, guild/channel/user allowlists,
+  automatic threads, watcher controls, mutation flags, and approval strategies.
+  `enabled` defaults to true for existing installations; set it false to run
+  Telegram without opening a Discord gateway connection.
+- `runtime.herdr_tui`: legacy CLI path, read source, and command timeout.
+  The former top-level `herdr` group remains accepted for compatibility.
+- `runtime.herdr_core`: existing socket selection, timeouts, visibility policy,
+  and exact `allowed_terminal_addresses`; an empty Core target list denies all.
+  The former `runtime.core` name remains accepted for compatibility.
+- `transports.telegram`: forum transport for either runtime. Enabling it requires
   exact nonempty chat/user allowlists, `forum_chat_id`, and
   `TELEGRAM_BOT_TOKEN`; `statuses` is limited to `blocked` and `done`, while
   transport-specific `enable_send` and `enable_interrupt` default to false.
-  With `enable_streaming: true` and `streaming.mode: hooks`, Core-aware version
-  2 adapter responses are delivered to the exact persisted terminal topic.
+  With `relay.enable_streaming: true` and
+  `relay.streaming.mode: hooks`, legacy version 1
+  and Core-aware version 2 adapter responses are delivered to the exact
+  persisted target topic. `status_refresh_seconds` controls legacy TUI
+  reconciliation; Core uses its native event stream.
   Interrupt confirmations are actor/topic bound, single-use, and expire after
   `confirmation_ttl_seconds`. Per-minute actor, chat, and target mutation limits
   are configured independently.
-- `auto_threads.refresh_seconds`: pane/thread reconciliation interval.
-- `streaming.mode`: `hooks` (recommended) or `poll`.
-- `streaming.refresh_seconds`, `tail_lines`, `initial_tail_lines`, and
-  `enable_visible_fallback`: poll-mode behavior.
-- `streaming.hook_inbox_path`, `hook_refresh_seconds`,
-  `hook_max_event_bytes`, and `hook_max_event_age_seconds`: adapter inbox
-  behavior.
-- `watcher.statuses`: any Herdr statuses to notify, normally `blocked` and
-  `done`; add `working` to expose Cancel cards.
-- `watcher.reconnect_delay_seconds` and `resubscribe_interval_seconds`: socket
+- `transports.discord.auto_threads.refresh_seconds`: pane/thread reconciliation
+  interval.
+- `relay.streaming.mode`: `hooks` (recommended) or `poll`; the remaining
+  `relay.streaming` fields configure polling and the private adapter inbox.
+- `transports.discord.watcher.statuses`: any Herdr statuses to notify, normally
+  `blocked` and `done`; add `working` to expose Cancel cards.
+- `transports.discord.watcher.reconnect_delay_seconds` and
+  `resubscribe_interval_seconds`: socket
   reconnect behavior; zero disables periodic resubscription, not
   topology-triggered refreshes.
-- `watcher.include_output`, `blocked_tail_lines`, and `done_tail_lines`: whether
+- `transports.discord.watcher.include_output`, `blocked_tail_lines`, and
+  `done_tail_lines`: whether
   status cards read and attach terminal tails.
-- `watcher.blocked_notification_delay_seconds`: short delay that lets a Claude
-  question event replace a generic approval card.
-- `herdr.cli_path`, `default_source`, and `command_timeout_seconds`: Herdr CLI
-  invocation settings.
-- `approval.<agent>`, `deny.<agent>`, and `stop`: terminal action strategies.
+- `transports.discord.watcher.blocked_notification_delay_seconds`: short delay
+  that lets a Claude question event replace a generic approval card.
+- `transports.discord.approval.<agent>`, `deny.<agent>`, and `stop`: terminal
+  action strategies.
   Supported methods are `send_keys` and `send_text_enter`.
 
 Environment variables:
@@ -467,12 +465,13 @@ Treat every enabled Discord or Telegram destination as remote terminal access.
   channel, and user allowlists. Empty Discord guild/channel lists are
   permissive; an empty user list denies guarded writes.
 - Telegram supports `/agents`, `/help`, blocked/done notifications, and
-  Core-aware adapter responses in persisted forum topics. It requires an
-  allowlisted forum supergroup and exact user/chat IDs. Ordinary text performs no Core mutation
-  unless `transports.telegram.enable_send` is explicitly enabled. `/interrupt`
-  additionally requires `enable_interrupt` and a one-time confirmation button.
-- Telegram prompt and interrupt mutations are atomically claimed and audited
-  before Core is called. A timeout or lost response is recorded as
+  adapter responses for both runtimes in persisted forum topics. It requires an
+  allowlisted forum supergroup and exact user/chat IDs. Ordinary text performs
+  no runtime mutation unless `transports.telegram.enable_send` is explicitly
+  enabled. `/interrupt` remains Core-only and additionally requires
+  `enable_interrupt` and a one-time confirmation button.
+- Telegram prompts and Core interrupts are atomically claimed and audited before
+  the runtime is called. A timeout or lost response is recorded as
   `outcome_unknown` and is never retried automatically.
 - Core Discord bindings persist the Core identity with the terminal address.
   A binding from a different Core instance is rejected instead of being applied
@@ -526,10 +525,11 @@ uv run herdrelay-telegram --config /path/to/telegram-config.yaml
 Setting `transports.discord.enabled: false` makes the main `herdrelay` command
 run Telegram alone. The explicit standalone command also does not require
 `DISCORD_TOKEN`, but it still requires
-an enabled `transports.telegram` block, `TELEGRAM_BOT_TOKEN`, an experimental
-Herdr Core runtime, exact chat/user/terminal allowlists, and a separate stable
-SQLite database. Set `enable_streaming: true` with `streaming.mode: hooks` to
-relay version 2 Core adapter responses. Use it for isolated acceptance testing
+an enabled `transports.telegram` block, `TELEGRAM_BOT_TOKEN`, an available
+configured runtime, exact chat/user allowlists, and a separate stable SQLite
+database. Core additionally requires exact terminal allowlists. Set
+`enable_streaming: true` with `streaming.mode: hooks` to relay adapter responses.
+Use it for isolated acceptance testing
 before enabling Telegram in the Discord service.
 
 On macOS, install the supplied user LaunchAgent:
