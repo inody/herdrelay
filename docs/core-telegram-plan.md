@@ -27,12 +27,13 @@ than the legacy Discord backend.
 
 | Capability | TUI Discord | TUI Telegram | Core Discord | Core Telegram |
 |---|---:|---:|---:|---:|
-| List detected agents | Yes | Yes | Yes | Yes |
-| Per-target conversation | Yes | Yes, forum topic | Yes | Yes, forum topic |
-| Blocked/done notification | Yes | Yes | Yes | Yes |
-| Completed-response relay | Yes | Yes | Yes | Yes |
+| Support level | Compatibility | Best-effort, no live acceptance | Supported | Supported |
+| List detected agents | Yes | Contract-tested | Yes | Yes |
+| Per-target conversation | Yes | Contract-tested forum topic | Yes | Yes, forum topic |
+| Blocked/done notification | Yes | Contract-tested | Yes | Yes |
+| Completed-response relay | Yes | Contract-tested | Yes | Yes |
 | Human-input visibility event | Pi | Not required | Yes | Not required |
-| Send normal prompt | Yes | Yes | Yes | Yes |
+| Send normal prompt | Yes | Contract-tested | Yes | Yes |
 | Interrupt working turn | Yes | No | Yes | Yes, with confirmation |
 | Raw special keys | Yes | No | No | No |
 | Approve/deny buttons | Yes | No | No | No |

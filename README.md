@@ -98,12 +98,14 @@ At a useful operational level:
 5. `database_path` stores pane/thread bindings, audit entries, event dedupe
    keys, and pending Claude questions.
 
-The stable default remains the legacy Herdr TUI with Discord. Herdr Core adds
-Core-pinned Discord thread bindings, native status events, normal prompt
-submission, and interrupt. The Telegram forum transport now supports both
-legacy TUI panes and Core terminals with `/agents`, `/help`, blocked/done
-notifications, persisted topic lifecycle, and opt-in prompt submission;
-one-time confirmed interrupt remains Core-only. Adapter output fans out
+The supported production path is Herdr Core with Discord and/or Telegram.
+Legacy Herdr TUI with Discord remains available for compatibility. TUI with
+Telegram has automated contract coverage but no live acceptance guarantee and
+is outside the supported operational matrix. Core provides pinned Discord
+bindings, native status events, normal prompt submission, and interrupt.
+Telegram provides `/agents`, `/help`, blocked/done notifications, persisted
+topic lifecycle, and opt-in prompt submission; one-time confirmed interrupt
+remains Core-only. Adapter output fans out
 independently to every persisted Discord and Telegram route. Physical
 Apple Watch behavior remains unverified. See
 [Herdr Core and Telegram architecture](docs/core-telegram-design.md) and the
@@ -413,7 +415,8 @@ If `storage.database_path` is omitted, the code retains the legacy default
 - `runtime.herdr_core`: existing socket selection, timeouts, visibility policy,
   and exact `allowed_terminal_addresses`; an empty Core target list denies all.
   The former `runtime.core` name remains accepted for compatibility.
-- `transports.telegram`: forum transport for either runtime. Enabling it requires
+- `transports.telegram`: supported with Herdr Core; legacy TUI compatibility is
+  automated-test-only and not operationally guaranteed. Enabling it requires
   exact nonempty chat/user allowlists, `forum_chat_id`, and
   `TELEGRAM_BOT_TOKEN`; `statuses` is limited to `blocked` and `done`, while
   transport-specific `enable_send` and `enable_interrupt` default to false.
@@ -465,7 +468,8 @@ Treat every enabled Discord or Telegram destination as remote terminal access.
   channel, and user allowlists. Empty Discord guild/channel lists are
   permissive; an empty user list denies guarded writes.
 - Telegram supports `/agents`, `/help`, blocked/done notifications, and
-  adapter responses for both runtimes in persisted forum topics. It requires an
+  adapter responses in persisted forum topics. Herdr Core is the supported
+  production runtime; legacy TUI behavior is best-effort only. It requires an
   allowlisted forum supergroup and exact user/chat IDs. Ordinary text performs
   no runtime mutation unless `transports.telegram.enable_send` is explicitly
   enabled. `/interrupt` remains Core-only and additionally requires

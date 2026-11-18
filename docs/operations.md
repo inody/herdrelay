@@ -153,7 +153,9 @@ Hook mode watches `streaming.hook_inbox_path` for JSON files, oldest first. The
 built-in adapters atomically rename a temporary file into the inbox so HerdRelay
 does not read a partial event.
 
-A legacy TUI response event has this format:
+A legacy TUI response event has this format. TUI-to-Telegram routing has
+automated contract coverage but is not part of live acceptance or the supported
+production matrix:
 
 ```json
 {
