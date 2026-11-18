@@ -145,14 +145,13 @@ A durable target key contains:
 
 - `runtime`: `herdr-core` or `herdr-tui`;
 - `controller_core_id`: the Core to which HerdRelay is connected;
-- `origin_core_id`: the Core that owns the terminal, when available;
-- `address`: the owning Core's terminal address or a legacy pane ID; and
-- `machine`: an optional routing hint for a connected machine.
+- `origin_core_id`: the Core that owns the terminal, when available; and
+- `address`: the owning Core's terminal address or a legacy pane ID.
 
 A serialized key must be unambiguous and versioned. Prefer
 `origin_core_id + address` for Core identity. If the CLI exposes only a
-controller-relative qualified address such as `machine/t12`, use
-`controller_core_id + qualified address` and treat a machine rename as an
+controller-relative qualified address such as `machine/t12`, store that full
+qualified address with `controller_core_id` and treat a machine rename as an
 identity migration that requires explicit reconciliation. Display names, cwd,
 titles, space IDs, tab IDs, and machine aliases are mutable metadata and are not
 otherwise part of the identity.

@@ -535,6 +535,18 @@ node --experimental-strip-types --test tests/pi_output_adapter.test.mjs
 The adapter tests execute the real TypeScript extension with isolated event
 contexts and inboxes. They do not contact Discord or a model.
 
+For development of the proposed Herdr Core backend, check the installed `hc`
+CLI schema with:
+
+```bash
+uv run python scripts/check_hc_compatibility.py
+```
+
+This static probe runs only `hc --version` and `hc schema`; it does not contact
+or start Herdr Core. It checks the methods and parameters required by the
+planned MVP, while a later live handshake will verify the running Core's
+protocol generation and identity.
+
 Repository layout:
 
 - `src/herdr_discord_bridge/` — bot, Herdr client, thread/watcher/stream logic,

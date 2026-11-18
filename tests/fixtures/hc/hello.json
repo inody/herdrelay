@@ -1,0 +1,24 @@
+{
+  "generation": 1,
+  "version": "0.1.21",
+  "core": {
+    "id": "core-test-001",
+    "name": "test-host"
+  },
+  "framed": false,
+  "methods": [
+    "hello",
+    "server.status",
+    "terminal.list",
+    "terminal.get",
+    "terminal.read",
+    "terminal.send",
+    "terminal.interrupt",
+    "events.subscribe",
+    "future.method"
+  ],
+  "features": ["future-feature"],
+  "future": {
+    "ignored": true
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "herdr-core",
+    "version": "0.1.21"
+  },
+  "methods": [
+    {
+      "name": "hello",
+      "params": [
+        {"name": "generation", "required": false}
+      ],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    },
+    {
+      "name": "server.status",
+      "params": [],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    },
+    {
+      "name": "terminal.list",
+      "params": [
+        {"name": "all", "required": false},
+        {"name": "labels", "required": false}
+      ],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    },
+    {
+      "name": "terminal.get",
+      "params": [
+        {"name": "caller", "required": false},
+        {"name": "terminal", "required": true}
+      ],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    },
+    {
+      "name": "terminal.read",
+      "params": [
+        {"name": "caller", "required": false},
+        {"name": "lines", "required": false},
+        {"name": "terminal", "required": true}
+      ],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    },
+    {
+      "name": "terminal.send",
+      "params": [
+        {"name": "caller", "required": false},
+        {"name": "force", "required": false},
+        {"name": "if", "required": false},
+        {"name": "terminal", "required": true},
+        {"name": "text", "required": true},
+        {"name": "timeout", "required": false},
+        {"name": "wait", "required": false}
+      ],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    },
+    {
+      "name": "terminal.interrupt",
+      "params": [
+        {"name": "terminal", "required": true},
+        {"name": "timeout", "required": false}
+      ],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    },
+    {
+      "name": "events.subscribe",
+      "params": [
+        {"name": "children_of", "required": false},
+        {"name": "labels", "required": false},
+        {"name": "terminal", "required": false}
+      ],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    },
+    {
+      "name": "future.method",
+      "params": [
+        {"name": "future", "required": false}
+      ],
+      "result": {"name": "result", "schema": {"type": "object"}}
+    }
+  ]
+}

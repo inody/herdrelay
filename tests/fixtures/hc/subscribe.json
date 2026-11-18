@@ -1,0 +1,181 @@
+{
+  "seq": 40,
+  "channel": null,
+  "terminals": [
+    {
+      "address": "t12",
+      "labels": {
+        "herdr.space": "space-test",
+        "herdr.tab": "tab-test",
+        "where": "herdrelay / 1"
+      },
+      "argv": ["/bin/zsh", "-l"],
+      "cwd": "/tmp/herdrelay",
+      "state": "live",
+      "pid": 1200,
+      "exit_code": null,
+      "signal": null,
+      "reason": null,
+      "created_ms": 1000,
+      "finished_ms": null,
+      "screen": "exact",
+      "cols": 120,
+      "rows": 40,
+      "status": {
+        "state": "working",
+        "app": "pi",
+        "title": "Implement Core support",
+        "msg": "Reading tests",
+        "kind": null,
+        "progress": 25,
+        "future": "ignored"
+      },
+      "status_ms": 1100,
+      "records": {
+        "tool": {
+          "state": "working",
+          "app": "pi",
+          "title": "Running tests"
+        }
+      },
+      "turn": 3,
+      "reported": true,
+      "title": "π - herdrelay",
+      "parent": null,
+      "foreground": {
+        "pid": 1201,
+        "name": "node",
+        "argv": ["pi"],
+        "cwd": "/tmp/herdrelay"
+      },
+      "future": {
+        "ignored": true
+      }
+    },
+    {
+      "address": "t13",
+      "labels": {},
+      "argv": ["/bin/zsh", "-l"],
+      "cwd": "/tmp/plain-shell",
+      "state": "live",
+      "created_ms": 1001,
+      "screen": "exact",
+      "cols": 80,
+      "rows": 24,
+      "status": null,
+      "turn": 0,
+      "reported": false,
+      "title": ""
+    },
+    {
+      "address": "t14",
+      "labels": {
+        "where": "hidden review"
+      },
+      "argv": ["pi"],
+      "cwd": "/tmp/review",
+      "state": "live",
+      "created_ms": 1002,
+      "screen": "exact",
+      "cols": 100,
+      "rows": 30,
+      "status": {
+        "state": "blocked",
+        "app": "pi",
+        "msg": "Needs input"
+      },
+      "turn": 1,
+      "reported": true,
+      "title": "π - review",
+      "parent": "t12"
+    },
+    {
+      "address": "remote/t7",
+      "labels": {
+        "herdr.space": "remote-space",
+        "herdr.tab": "remote-tab",
+        "where": "remote-api / Agent"
+      },
+      "argv": ["claude"],
+      "cwd": "/srv/api",
+      "state": "live",
+      "created_ms": 1003,
+      "screen": "exact",
+      "cols": 120,
+      "rows": 40,
+      "status": {
+        "state": "done",
+        "app": "claude"
+      },
+      "turn": 8,
+      "reported": true,
+      "title": "Claude - API"
+    },
+    {
+      "address": "t15",
+      "labels": {
+        "herdr.space": "codex-space",
+        "herdr.tab": "codex-tab",
+        "where": "cli / Codex"
+      },
+      "argv": ["codex", "--no-daemon"],
+      "cwd": "/tmp/cli",
+      "state": "live",
+      "created_ms": 1004,
+      "screen": "exact",
+      "cols": 100,
+      "rows": 30,
+      "status": {
+        "state": "idle",
+        "app": "codex"
+      },
+      "turn": 5,
+      "reported": true,
+      "title": "Codex - cli"
+    },
+    {
+      "address": "t16",
+      "labels": {
+        "herdr.space": "claude-space",
+        "herdr.tab": "claude-tab",
+        "where": "web / Claude"
+      },
+      "argv": ["claude"],
+      "cwd": "/tmp/web",
+      "state": "live",
+      "created_ms": 1005,
+      "screen": "exact",
+      "cols": 100,
+      "rows": 30,
+      "status": {
+        "state": "error",
+        "app": "claude",
+        "msg": "Tool failed"
+      },
+      "turn": 6,
+      "reported": true,
+      "title": "Claude - web"
+    },
+    {
+      "address": "t9",
+      "labels": {
+        "herdr.space": "old-space",
+        "herdr.tab": "old-tab"
+      },
+      "argv": ["codex"],
+      "cwd": "/tmp/old",
+      "state": "finished",
+      "created_ms": 900,
+      "finished_ms": 950,
+      "exit_code": 0,
+      "screen": "exact",
+      "cols": 80,
+      "rows": 24,
+      "status": null,
+      "turn": 2,
+      "reported": true,
+      "title": "Codex - old"
+    }
+  ],
+  "future": "ignored"
+}

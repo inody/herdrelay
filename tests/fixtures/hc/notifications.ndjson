@@ -1,0 +1,11 @@
+{"jsonrpc":"2.0","method":"event","params":{"seq":41,"type":"status","terminal":"t12","machine":null,"data":{"status":{"state":"blocked","app":"pi","msg":"Needs approval"},"records":{},"reported":true}}}
+{"jsonrpc":"2.0","method":"event","params":{"seq":42,"type":"turn","terminal":"t12","machine":null,"data":{"turn":4,"state":"done"}}}
+{"jsonrpc":"2.0","method":"event","params":{"seq":43,"type":"created","terminal":"t17","machine":null,"data":{"address":"t17","labels":{},"argv":["pi"],"cwd":"/tmp/new","state":"live","created_ms":2000,"screen":"exact","cols":80,"rows":24,"status":{"state":"idle","app":"pi"},"turn":0,"reported":true,"title":"π - new"}}}
+{"jsonrpc":"2.0","method":"event","params":{"seq":44,"type":"restarted","terminal":"t17","machine":null,"data":{"address":"t17","labels":{},"argv":["/bin/zsh"],"cwd":"/tmp/new","state":"live","created_ms":2000,"screen":"exact","cols":80,"rows":24,"status":null,"turn":0,"reported":false,"title":""}}}
+{"jsonrpc":"2.0","method":"event","params":{"seq":45,"type":"labels","terminal":"t12","machine":null,"data":{"labels":{"herdr.space":"space-test","herdr.tab":"tab-renamed","where":"herdrelay / Core"}}}}
+{"jsonrpc":"2.0","method":"event","params":{"seq":46,"type":"title","terminal":"t12","machine":null,"data":{"title":"π - Core migration"}}}
+{"jsonrpc":"2.0","method":"event","params":{"seq":47,"type":"finished","terminal":"t17","machine":null,"data":{"state":"finished","finished_ms":2100,"exit_code":0,"signal":null,"reason":"exited"}}}
+{"jsonrpc":"2.0","method":"event","params":{"seq":48,"type":"removed","terminal":"t17","machine":null,"data":{}}}
+{"jsonrpc":"2.0","method":"heartbeat","params":{"seq":48}}
+{"jsonrpc":"2.0","method":"missed","params":{"seq":50,"terminals":[{"address":"t12","labels":{"herdr.space":"space-test","herdr.tab":"tab-test","where":"herdrelay / 1"},"argv":["/bin/zsh","-l"],"cwd":"/tmp/herdrelay","state":"live","created_ms":1000,"screen":"exact","cols":120,"rows":40,"status":{"state":"done","app":"pi"},"status_ms":1500,"turn":4,"reported":true,"title":"π - herdrelay"}]}}
+{"jsonrpc":"2.0","method":"future.notification","params":{"seq":51,"future":true}}
