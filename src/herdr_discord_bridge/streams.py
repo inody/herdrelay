@@ -12,8 +12,8 @@ import discord
 
 from .config import AppConfig
 from .formatter import split_text_chunks
-from .herdr_client import HerdrClient
 from .models import HerdrTarget, PendingQuestion, QuestionOption
+from .runtime import RuntimeClient
 from .store import Store
 
 LOG = logging.getLogger(__name__)
@@ -167,7 +167,7 @@ class StreamManager:
         bot: discord.Client,
         config: AppConfig,
         store: Store,
-        client: HerdrClient,
+        client: RuntimeClient,
         question_view_factory: QUESTION_VIEW_FACTORY | None = None,
     ):
         self.bot = bot

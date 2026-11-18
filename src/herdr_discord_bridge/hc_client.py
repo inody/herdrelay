@@ -6,8 +6,9 @@ from typing import Any
 from .config import AppConfig
 from .hc_rpc import HcRpcClient, HcRpcError
 from .hc_protocol import HcTerminal, parse_terminal
-from .herdr_client import StartedAgent, TargetResolutionError
-from .models import HerdrTarget
+from .herdr_client import TargetResolutionError
+from .models import HerdrTarget, StartedAgent
+from .runtime import RuntimeCapabilities
 
 KNOWN_AGENT_APPS = frozenset({"pi", "claude", "codex"})
 
@@ -24,6 +25,8 @@ class HcClient:
     discovery, bounded reads, normal sends, and interrupt while transport-neutral
     orchestration is introduced incrementally.
     """
+
+    capabilities = RuntimeCapabilities(native_events=True, native_interrupt=True)
 
     def __init__(self, config: AppConfig):
         self.config = config

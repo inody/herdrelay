@@ -7,8 +7,8 @@ import discord
 
 from .config import AppConfig
 from .formatter import target_alias
-from .herdr_client import HerdrClient
 from .models import HerdrTarget
+from .runtime import RuntimeClient
 from .store import Store
 
 LOG = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class ThreadManager:
         bot: discord.Client,
         config: AppConfig,
         store: Store,
-        client: HerdrClient,
+        client: RuntimeClient,
     ):
         self.bot = bot
         self.config = config

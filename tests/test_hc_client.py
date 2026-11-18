@@ -9,6 +9,7 @@ from herdr_discord_bridge.config import AppConfig, HcRuntimeConfig, RuntimeConfi
 from herdr_discord_bridge.hc_client import HcClient, HcUnsupportedOperation
 from herdr_discord_bridge.hc_protocol import parse_hello_result
 from herdr_discord_bridge.hc_rpc import HcCallResult, HcRpcError
+from herdr_discord_bridge.runtime import RuntimeClient
 from herdr_discord_bridge.runtime_client import build_runtime_client
 from herdr_discord_bridge.herdr_client import HerdrClient
 
@@ -222,3 +223,9 @@ def test_runtime_client_factory_keeps_legacy_default():
 
     assert isinstance(legacy, HerdrClient)
     assert isinstance(core, HcClient)
+    assert isinstance(legacy, RuntimeClient)
+    assert isinstance(core, RuntimeClient)
+    assert legacy.capabilities.raw_input is True
+    assert legacy.capabilities.native_interrupt is False
+    assert core.capabilities.raw_input is False
+    assert core.capabilities.native_interrupt is True

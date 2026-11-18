@@ -1,26 +1,27 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
 import time
 from typing import Any
 
 from .config import AppConfig
 from .herdr_cli import HerdrCli, HerdrCliError
-from .models import HerdrTarget
+from .models import HerdrTarget, StartedAgent
+from .runtime import RuntimeCapabilities
 
 
 class TargetResolutionError(ValueError):
     pass
 
 
-@dataclass(frozen=True)
-class StartedAgent:
-    pane_id: str
-    result: Any
-
-
 class HerdrClient:
+    capabilities = RuntimeCapabilities(
+        raw_input=True,
+        guarded_approval=True,
+        agent_start=True,
+        target_close=True,
+    )
+
     def __init__(self, config: AppConfig):
         self.config = config
         self.cli = HerdrCli(config.herdr)

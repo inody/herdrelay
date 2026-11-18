@@ -20,7 +20,7 @@ from .formatter import (
     target_alias,
     truncate,
 )
-from .herdr_client import HerdrClient, TargetResolutionError
+from .herdr_client import TargetResolutionError
 from .models import AuditEntry, HerdrTarget, PendingQuestion
 from .questions import (
     QUESTION_KEY_INTERVAL_SECONDS,
@@ -28,6 +28,7 @@ from .questions import (
     selected_labels,
     selection_keys,
 )
+from .runtime import RuntimeClient
 from .security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
 from .streams import StreamManager
@@ -38,7 +39,7 @@ LOG = logging.getLogger(__name__)
 
 
 class HerdrDiscordBot(commands.Bot):
-    def __init__(self, *, config: AppConfig, store: Store, client: HerdrClient):
+    def __init__(self, *, config: AppConfig, store: Store, client: RuntimeClient):
         intents = discord.Intents.default()
         if config.enable_send:
             intents.message_content = True
@@ -851,5 +852,5 @@ async def _send_error(interaction: discord.Interaction, exc: Exception) -> None:
         await interaction.response.send_message(message, ephemeral=True)
 
 
-def build_bot(config: AppConfig, store: Store, client: HerdrClient) -> HerdrDiscordBot:
+def build_bot(config: AppConfig, store: Store, client: RuntimeClient) -> HerdrDiscordBot:
     return HerdrDiscordBot(config=config, store=store, client=client)

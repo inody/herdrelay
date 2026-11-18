@@ -15,8 +15,8 @@ import discord
 
 from .config import AppConfig
 from .formatter import format_tail
-from .herdr_client import HerdrClient
 from .models import Binding
+from .runtime import RuntimeClient
 from .store import Store
 
 LOG = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class EventWatcher:
         bot: discord.Client,
         config: AppConfig,
         store: Store,
-        client: HerdrClient,
+        client: RuntimeClient,
         card_view_factory: APPROVAL_VIEW_FACTORY | None = None,
     ):
         self.bot = bot
@@ -242,7 +242,7 @@ def resolve_socket_path(config: AppConfig) -> str:
     return str(Path.home() / ".config" / "herdr" / "herdr.sock")
 
 
-def build_agent_status_subscriptions(client: HerdrClient, config: AppConfig) -> list[dict[str, str]]:
+def build_agent_status_subscriptions(client: RuntimeClient, config: AppConfig) -> list[dict[str, str]]:
     statuses = tuple(status.casefold() for status in config.watcher.statuses)
     subscriptions = []
     # Subscribe before agent detection so later launches in existing shells
@@ -302,7 +302,7 @@ def parse_agent_status_event(payload: Any) -> AgentStatusEvent | None:
     )
 
 
-def event_state_marker(client: HerdrClient, event: AgentStatusEvent) -> str:
+def event_state_marker(client: RuntimeClient, event: AgentStatusEvent) -> str:
     """Stable marker for status-only notifications without reading pane output."""
     try:
         target = client.resolve_target(event.pane_id)
