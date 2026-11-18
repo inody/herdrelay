@@ -185,6 +185,27 @@ transports:
     assert config.auto_threads.refresh_seconds == 7
 
 
+def test_load_config_merges_file_managed_core_targets(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
+    (tmp_path / "targets.txt").write_text("# local policy\nt2\n")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """runtime:
+  provider: herdr-core
+  herdr_core:
+    allowed_terminal_addresses: [t1]
+    allowed_terminal_addresses_file: targets.txt
+"""
+    )
+
+    config = load_config(config_path)
+
+    assert config.runtime.core.allowed_terminal_addresses == frozenset({"t1", "t2"})
+    assert config.runtime.core.allowed_terminal_addresses_file == str(
+        (tmp_path / "targets.txt").resolve()
+    )
+
+
 def test_load_config_accepts_grouped_runtime_sections(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
     config_path = tmp_path / "config.yaml"

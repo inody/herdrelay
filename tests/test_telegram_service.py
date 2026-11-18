@@ -330,7 +330,7 @@ async def test_status_delivery_reconciles_topic_dedupes_and_closes(tmp_path):
     )
     state = HcTerminalState(SUBSCRIBE)
 
-    await relay._reconcile_topics("core-1", state)
+    await relay.status_relay.reconcile_core_topics("core-1", state)
     assert api.created_topics == [
         {"chat_id": -1001, "name": "herdrelay/pi · t12"}
     ]
@@ -340,8 +340,8 @@ async def test_status_delivery_reconciles_topic_dedupes_and_closes(tmp_path):
     assert topic is not None and topic.thread_id == "101"
 
     transition = state.apply(NOTIFICATIONS[0])[0]
-    await relay._deliver_status("core-1", state, transition)
-    await relay._deliver_status("core-1", state, transition)
+    await relay.status_relay.deliver_core_status("core-1", state, transition)
+    await relay.status_relay.deliver_core_status("core-1", state, transition)
     assert len(api.sent) == 1
     assert api.sent[0]["message_thread_id"] == 101
     assert api.sent[0]["text"].startswith("🔴 herdrelay/pi\nblocked")
@@ -353,7 +353,7 @@ async def test_status_delivery_reconciles_topic_dedupes_and_closes(tmp_path):
         '"signal":null,"reason":"exited"}}}'
     )
     state.apply(finished)
-    await relay._handle_lifecycle("core-1", state, finished)
+    await relay.status_relay.handle_core_lifecycle("core-1", state, finished)
     assert api.closed_topics == [{"chat_id": -1001, "message_thread_id": 101}]
     closed = relay.store.get_telegram_topic(
         core_id="core-1", terminal_address="t12"
@@ -380,7 +380,9 @@ async def test_existing_closed_topic_is_reopened_and_renamed(tmp_path):
     )
     target = client.project_terminal(state_terminal := SUBSCRIBE.terminals[0])
 
-    topic = await relay._ensure_topic("core-1", state_terminal.address, target)
+    topic = await relay.status_relay.ensure_core_topic(
+        "core-1", state_terminal.address, target
+    )
 
     assert api.reopened_topics == [
         {"chat_id": -1001, "message_thread_id": 77}
@@ -460,19 +462,19 @@ async def test_legacy_tui_topics_status_and_lifecycle_are_reconciled(tmp_path):
         api=api,
     )
 
-    await relay._legacy_status_once()
+    await relay.status_relay.legacy_once()
 
     route = relay.store.get_telegram_topic_for_target(TargetKey.legacy("w1:p1"))
     assert route is not None
     assert api.sent == []
 
     client.panes = [replace(target, status="blocked")]
-    await relay._legacy_status_once()
+    await relay.status_relay.legacy_once()
 
     assert api.sent[-1]["text"].endswith("\nblocked")
 
     client.panes = []
-    await relay._legacy_status_once()
+    await relay.status_relay.legacy_once()
 
     route = relay.store.get_telegram_topic_for_target(TargetKey.legacy("w1:p1"))
     assert route is not None and route.closed

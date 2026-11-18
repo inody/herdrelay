@@ -12,7 +12,8 @@ runtime:
     require_app_visible: true
     include_hidden_workers: false
     include_connected_machines: false
-    allowed_terminal_addresses: [] # empty denies all Core targets
+    allowed_terminal_addresses: [] # inline exact addresses
+    allowed_terminal_addresses_file: null # optional local 0600 file managed by herdrelay-targets
 
 storage:
   database_path: herdrelay.sqlite3

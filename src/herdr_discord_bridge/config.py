@@ -19,6 +19,7 @@ class HerdrCliConfig:
 @dataclass(frozen=True)
 class HcRuntimeConfig:
     socket_path: str | None = None
+    allowed_terminal_addresses_file: str | None = None
     connect_timeout_seconds: float = 5
     request_timeout_seconds: float = 20
     event_idle_timeout_seconds: float = 35
@@ -214,6 +215,14 @@ def load_config(
         else data.get("stop")
     )
 
+    allowed_targets_file = _optional_config_path(
+        core_data.get("allowed_terminal_addresses_file"),
+        base=config_path.parent,
+    )
+    allowed_targets = _string_set(core_data.get("allowed_terminal_addresses"))
+    if allowed_targets_file is not None:
+        allowed_targets |= _read_target_allowlist(Path(allowed_targets_file))
+
     config = AppConfig(
         discord_token=token,
         herdr_socket_path=os.environ.get("HERDR_SOCKET_PATH") or None,
@@ -292,6 +301,7 @@ def load_config(
                     if core_data.get("socket_path")
                     else None
                 ),
+                allowed_terminal_addresses_file=allowed_targets_file,
                 connect_timeout_seconds=float(
                     core_data.get("connect_timeout_seconds", 5)
                 ),
@@ -310,9 +320,7 @@ def load_config(
                 include_connected_machines=bool(
                     core_data.get("include_connected_machines", False)
                 ),
-                allowed_terminal_addresses=_string_set(
-                    core_data.get("allowed_terminal_addresses")
-                ),
+                allowed_terminal_addresses=allowed_targets,
             ),
         ),
         watcher=WatcherConfig(
@@ -489,6 +497,30 @@ def _string_set(value: Any) -> frozenset[str]:
     if not all(result):
         raise ValueError("string allowlists cannot contain empty values")
     return result
+
+
+def _optional_config_path(value: Any, *, base: Path) -> str | None:
+    if value in (None, ""):
+        return None
+    path = Path(str(value)).expanduser()
+    if not path.is_absolute():
+        path = base / path
+    return str(path.resolve())
+
+
+def _read_target_allowlist(path: Path) -> frozenset[str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return frozenset()
+    targets = {
+        line.strip()
+        for line in lines
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if any(any(character.isspace() for character in target) for target in targets):
+        raise ValueError(f"Core target allowlist contains whitespace: {path}")
+    return frozenset(targets)
 
 
 def _id_set(value: Any) -> frozenset[int]:

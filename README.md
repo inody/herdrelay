@@ -413,8 +413,10 @@ If `storage.database_path` is omitted, the code retains the legacy default
 - `runtime.herdr_tui`: legacy CLI path, read source, and command timeout.
   The former top-level `herdr` group remains accepted for compatibility.
 - `runtime.herdr_core`: existing socket selection, timeouts, visibility policy,
-  and exact `allowed_terminal_addresses`; an empty Core target list denies all.
-  The former `runtime.core` name remains accepted for compatibility.
+  and exact target allowlists. Inline `allowed_terminal_addresses` and the
+  optional private `allowed_terminal_addresses_file` are merged; an empty
+  result denies all Core targets. The former `runtime.core` name remains
+  accepted for compatibility.
 - `transports.telegram`: supported with Herdr Core; legacy TUI compatibility is
   automated-test-only and not operationally guaranteed. Enabling it requires
   exact nonempty chat/user allowlists, `forum_chat_id`, and
@@ -543,7 +545,20 @@ scripts/install_launchd.sh
 scripts/status_launchd.sh
 ```
 
-After changing `.env`, `config.yaml`, or code:
+Manage file-backed Core targets locally without exposing discovery over a chat
+transport:
+
+```bash
+uv run herdrelay-targets --config config.yaml list
+uv run herdrelay-targets --config config.yaml allow t12
+uv run herdrelay-targets --config config.yaml remove t12
+```
+
+`allow` accepts only an eligible live agent from the configured Core. The file
+is replaced atomically with mode `0600`. Restart HerdRelay after a change.
+Inline targets remain readable but are intentionally not removed by this CLI.
+
+After changing `.env`, `config.yaml`, the target allowlist, or code:
 
 ```bash
 launchctl kickstart -k "gui/$UID/dev.herdrelay"

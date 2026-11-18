@@ -147,6 +147,24 @@ requires an existing pane/thread binding.
 Blocked notifications intentionally mention all `allowed_user_ids`. Done and
 working notifications do not.
 
+## Core target allowlist operations
+
+Core access remains deny-by-default. For installations that create and retire
+terminals frequently, configure
+`runtime.herdr_core.allowed_terminal_addresses_file` and manage it locally:
+
+```bash
+uv run herdrelay-targets --config config.yaml list
+uv run herdrelay-targets --config config.yaml allow t12
+uv run herdrelay-targets --config config.yaml remove t12
+```
+
+The command connects directly to the configured existing Core socket; it does
+not invoke a Core-starting CLI operation. `allow` verifies that the exact
+address is currently an eligible live agent. Writes are atomic and mode `0600`.
+Restart HerdRelay after changes. Inline addresses are merged with the file and
+cannot be removed through this command.
+
 ## Hook-mode output relay
 
 Hook mode watches `streaming.hook_inbox_path` for JSON files, oldest first. The

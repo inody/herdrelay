@@ -2,24 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
-import time
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .config import AppConfig
-from .domain import MutationOutcomeUnknownError, RuntimeKind, TargetKey
-from .formatter import target_alias, truncate
-from .hc_client import HcClient
-from .hc_events import HcEventStream, HcStatusTransition, HcTerminalState
-from .hc_protocol import HcEventNotification
-from .hc_rpc import HcRpcError
-from .herdr_cli import HerdrCliError
-from .models import TransportAuditEntry
+from .formatter import target_alias
 from .runtime import RuntimeClient
 from .store import Store
 from .telegram_api import TelegramBotApi
+from .telegram_mutations import TelegramMutationHandler
 from .telegram_output import TelegramOutputRelay
+from .telegram_status import TelegramStatusRelay
 from .telegram_topics import TelegramTopicManager
 from .telegram_updates import (
     TelegramUpdatePolicy,
@@ -46,7 +38,6 @@ class TelegramService:
         self.telegram = config.telegram
         self.store = store
         self.client = client
-        self.core_client = client if isinstance(client, HcClient) else None
         self.api = api or TelegramBotApi(
             self.telegram.token,
             request_timeout_seconds=self.telegram.request_timeout_seconds,
@@ -55,14 +46,23 @@ class TelegramService:
         self.topics = TelegramTopicManager(
             config=config, store=store, api=self.api
         )
-        self._legacy_statuses: dict[str, str | None] = {}
-        self._legacy_live_targets: set[str] = set()
         self.output_relay = (
             TelegramOutputRelay(config=config, store=store, api=self.api)
             if config.enable_streaming and config.streaming.mode == "hooks"
             else None
         )
         self._stopped = asyncio.Event()
+        self.mutations = TelegramMutationHandler(
+            config=config, store=store, client=client, api=self.api
+        )
+        self.status_relay = TelegramStatusRelay(
+            config=config,
+            store=store,
+            client=client,
+            api=self.api,
+            stopped=self._stopped,
+            topics=self.topics,
+        )
 
     def stop(self) -> None:
         self._stopped.set()
@@ -76,7 +76,7 @@ class TelegramService:
     async def run_forever(self) -> None:
         tasks = [
             asyncio.create_task(self._poll_forever()),
-            asyncio.create_task(self._status_forever()),
+            asyncio.create_task(self.status_relay.run_forever()),
         ]
         if self.output_relay is not None:
             tasks.append(asyncio.create_task(self.output_relay.run_forever()))
@@ -96,16 +96,6 @@ class TelegramService:
                 raise
             except Exception:
                 LOG.exception("Telegram polling failed; reconnecting")
-                await self._sleep_reconnect()
-
-    async def _status_forever(self) -> None:
-        while not self._stopped.is_set():
-            try:
-                await self._status_once()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                LOG.exception("Telegram runtime status relay failed; reconnecting")
                 await self._sleep_reconnect()
 
     async def poll_once(self) -> None:
@@ -141,182 +131,18 @@ class TelegramService:
                 LOG.info("Telegram update %s was already handled", update_id)
             self._save_offset(update_id + 1)
 
-    async def _status_once(self) -> None:
-        if self.core_client is not None:
-            await self._core_status_once()
-            return
-        await self._legacy_status_once()
-        try:
-            await asyncio.wait_for(
-                self._stopped.wait(),
-                timeout=self.telegram.status_refresh_seconds,
-            )
-        except TimeoutError:
-            pass
-
-    async def _core_status_once(self) -> None:
-        assert self.core_client is not None
-        subscription = await HcEventStream(
-            self.config.runtime.core
-        ).connect()
-        self.core_client.observe_core_identity(
-            subscription.hello.core.id, subscription.hello.core.name
-        )
-        core_id = subscription.hello.core.id
-        state = HcTerminalState(subscription.snapshot)
-        await self._reconcile_topics(core_id, state)
-
-        stop_task = asyncio.create_task(self._stopped.wait())
-        notification_task: asyncio.Task | None = None
-        try:
-            while not self._stopped.is_set():
-                notification_task = asyncio.create_task(
-                    subscription.next_notification()
-                )
-                done, _pending = await asyncio.wait(
-                    {notification_task, stop_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if stop_task in done:
-                    notification_task.cancel()
-                    await asyncio.gather(notification_task, return_exceptions=True)
-                    return
-                notification = notification_task.result()
-                notification_task = None
-                transitions = state.apply(notification)
-                for transition in transitions:
-                    await self._deliver_status(core_id, state, transition)
-                if isinstance(notification, HcEventNotification):
-                    await self._handle_lifecycle(core_id, state, notification)
-        finally:
-            if notification_task is not None:
-                notification_task.cancel()
-                await asyncio.gather(notification_task, return_exceptions=True)
-            stop_task.cancel()
-            await asyncio.gather(stop_task, return_exceptions=True)
-            await subscription.close()
-
-    async def _legacy_status_once(self) -> None:
-        panes = await asyncio.to_thread(self.client.list_panes)
-        live_targets = {
-            self.client.target_key(target.target).to_route_value()
-            for target in panes
-        }
-        detected: set[str] = set()
-        for target in panes:
-            key = self.client.target_key(target.target)
-            route_target = key.to_route_value()
-            if not target.agent_name:
-                self._legacy_statuses.pop(route_target, None)
-                continue
-            detected.add(route_target)
-            topic = await self.topics.ensure(key, target)
-            current = target.status.casefold() if target.status else None
-            previous = self._legacy_statuses.get(route_target)
-            self._legacy_statuses[route_target] = current
-            if (
-                previous is not None
-                and current != previous
-                and current in self.telegram.statuses
-            ):
-                icon = "🔴" if current == "blocked" else "✅"
-                await self.api.send_text(
-                    chat_id=int(topic.chat_id),
-                    message_thread_id=int(topic.thread_id),
-                    text=(
-                        f"{icon} {target_alias(target)}/{target.agent_name}"
-                        f"\n{current}"
-                    ),
-                )
-        for route_target in self._legacy_live_targets - live_targets:
-            await self.topics.close(TargetKey.from_route_value(route_target))
-            self._legacy_statuses.pop(route_target, None)
-        self._legacy_live_targets = live_targets
-        for route_target in tuple(self._legacy_statuses):
-            if route_target not in detected:
-                self._legacy_statuses.pop(route_target, None)
-
-    async def _reconcile_topics(
-        self, core_id: str, state: HcTerminalState
-    ) -> None:
-        for terminal in state.terminals.values():
-            if not self.core_client or not self.core_client.address_allowed(
-                terminal.address
-            ):
-                continue
-            target = self.core_client.project_terminal(terminal)
-            if target.agent_name:
-                await self._ensure_topic(core_id, terminal.address, target)
-
-    async def _deliver_status(
-        self,
-        core_id: str,
-        state: HcTerminalState,
-        transition: HcStatusTransition,
-    ) -> None:
-        if transition.current_state.casefold() not in self.telegram.statuses:
-            return
-        if not self.core_client or not self.core_client.address_allowed(
-            transition.terminal
-        ):
-            return
-        terminal = state.terminals.get(transition.terminal)
-        if terminal is None:
-            return
-        target = self.core_client.project_terminal(terminal)
-        if not target.agent_name:
-            return
-        topic = await self._ensure_topic(core_id, transition.terminal, target)
-        dedupe_key = (
-            f"telegram:status:{core_id}:{transition.terminal}:"
-            f"{state.seq}:{transition.current_state.casefold()}"
-        )
-        if self.store.has_event_key(dedupe_key):
-            return
-        icon = "🔴" if transition.current_state.casefold() == "blocked" else "✅"
-        title = f"{target_alias(target)}/{target.agent_name}"
-        text = f"{icon} {title}\n{transition.current_state.casefold()}"
-        if terminal.status and terminal.status.message:
-            text += f"\n{terminal.status.message}"
-        await self.api.send_text(
-            chat_id=int(topic.chat_id),
-            message_thread_id=int(topic.thread_id),
-            text=text,
-        )
-        self.store.mark_event_seen(dedupe_key)
-
-    async def _handle_lifecycle(
-        self,
-        core_id: str,
-        state: HcTerminalState,
-        notification: HcEventNotification,
-    ) -> None:
-        address = notification.terminal
-        if not address or not self.core_client:
-            return
-        if notification.kind in {"created", "restarted"}:
-            terminal = state.terminals.get(address)
-            if terminal and self.core_client.address_allowed(address):
-                target = self.core_client.project_terminal(terminal)
-                if target.agent_name:
-                    await self._ensure_topic(core_id, address, target)
-        elif notification.kind in {"finished", "removed"}:
-            await self.topics.close(
-                TargetKey.core(controller_core_id=core_id, address=address)
-            )
-
-    async def _ensure_topic(self, core_id: str, address: str, target):
-        return await self.topics.ensure(
-            TargetKey.core(controller_core_id=core_id, address=address),
-            target,
-        )
-
     async def _handle_update(
         self, update: dict[str, Any], *, event_key: str
     ) -> bool:
+        # Tests and embedded callers may replace the immutable AppConfig.
+        self.mutations.config = self.config
+        self.mutations.telegram = self.config.telegram
+        self.mutations.policy = TelegramUpdatePolicy(self.config.telegram)
         callback = parse_inbound_callback(update)
         if callback is not None:
-            return await self._handle_callback(callback, event_key=event_key)
+            return await self.mutations.handle_callback(
+                callback, event_key=event_key
+            )
         message = parse_inbound_message(update)
         if message is None or not self.policy.authorized(message):
             return False
@@ -355,12 +181,14 @@ class TelegramService:
             if not self.telegram.enable_interrupt:
                 text = "Telegram interrupt is disabled."
             else:
-                await self._request_interrupt(message)
+                await self.mutations.request_interrupt(message)
                 return False
         elif command is not None:
             text = "Unknown command. Use /agents, /interrupt, or /help."
         elif self.telegram.enable_send:
-            return await self._send_prompt(message, event_key=event_key)
+            return await self.mutations.send_prompt(
+                message, event_key=event_key
+            )
         else:
             text = (
                 "Telegram is currently read-only. Use /agents or /help; "
@@ -372,457 +200,6 @@ class TelegramService:
             text=text,
         )
         return False
-
-    async def _request_interrupt(self, message) -> None:
-        if self.core_client is None or message.message_thread_id is None:
-            await self._feedback(
-                message,
-                "Interrupt is available only for a bound Herdr Core agent topic.",
-            )
-            return
-        route = self.store.get_telegram_topic_by_destination(
-            chat_id=message.chat_id, thread_id=message.message_thread_id
-        )
-        if route is None or route.closed:
-            await self._feedback(message, "This topic is not bound to a live agent.")
-            return
-        targets = await asyncio.to_thread(self.core_client.list_targets)
-        if self.core_client.core_id != route.core_id:
-            await self._feedback(message, "This topic belongs to a different Core.")
-            return
-        target = next(
-            (item for item in targets if item.target == route.terminal_address),
-            None,
-        )
-        state = target.status.casefold() if target and target.status else "unknown"
-        if target is None or not target.agent_name or state not in {"working", "blocked"}:
-            await self._feedback(
-                message, f"The bound agent is not interruptible in state {state}."
-            )
-            return
-
-        token = secrets.token_urlsafe(12)
-        self.store.create_telegram_confirmation(
-            token=token,
-            actor_id=message.user_id,
-            chat_id=message.chat_id,
-            thread_id=message.message_thread_id,
-            core_id=route.core_id,
-            terminal_address=route.terminal_address,
-            action="interrupt",
-            expires_at=time.time() + self.telegram.confirmation_ttl_seconds,
-        )
-        await self.api.send_message(
-            chat_id=message.chat_id,
-            message_thread_id=message.message_thread_id,
-            text=f"Interrupt {target_alias(target)}/{target.agent_name}?",
-            reply_markup={
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "Interrupt",
-                            "callback_data": f"interrupt:{token}",
-                        },
-                        {"text": "Cancel", "callback_data": f"cancel:{token}"},
-                    ]
-                ]
-            },
-        )
-
-    async def _handle_callback(self, callback, *, event_key: str) -> bool:
-        if not self.policy.authorized(callback):
-            return False
-        action, separator, token = callback.data.partition(":")
-        if not separator or action not in {"interrupt", "cancel"} or not token:
-            await self._safe_answer_callback(
-                callback, "Unsupported or stale action.", show_alert=True
-            )
-            return False
-        confirmation = self.store.consume_telegram_confirmation(
-            token=token,
-            actor_id=callback.user_id,
-            chat_id=callback.chat_id,
-            thread_id=callback.message_thread_id or 0,
-            action="interrupt",
-        )
-        if confirmation is None:
-            self._audit_interrupt_rejection(
-                callback, detail="stale, expired, consumed, or mismatched confirmation"
-            )
-            await self._safe_answer_callback(
-                callback, "This confirmation is stale or already used.", show_alert=True
-            )
-            return False
-        if action == "cancel":
-            self._audit_interrupt_rejection(
-                callback,
-                detail="cancelled by actor",
-                target_key=TargetKey.core(
-                    controller_core_id=confirmation.core_id,
-                    address=confirmation.terminal_address,
-                ).to_storage_key(),
-            )
-            await self._safe_answer_callback(callback, "Cancelled.")
-            return False
-        return await self._execute_interrupt(
-            callback, confirmation=confirmation, event_key=event_key
-        )
-
-    async def _execute_interrupt(
-        self, callback, *, confirmation, event_key: str
-    ) -> bool:
-        if self.core_client is None or callback.message_thread_id is None:
-            self._audit_interrupt_rejection(callback, detail="Core runtime unavailable")
-            await self._safe_answer_callback(
-                callback, "Core runtime is unavailable.", show_alert=True
-            )
-            return False
-        route = self.store.get_telegram_topic_by_destination(
-            chat_id=callback.chat_id, thread_id=callback.message_thread_id
-        )
-        expected = (confirmation.core_id, confirmation.terminal_address)
-        actual = (
-            (route.core_id, route.terminal_address)
-            if route is not None and not route.closed
-            else None
-        )
-        target_key = TargetKey.core(
-            controller_core_id=confirmation.core_id,
-            address=confirmation.terminal_address,
-        ).to_storage_key()
-        if actual != expected:
-            self._audit_interrupt_rejection(
-                callback, detail="topic route changed", target_key=target_key
-            )
-            await self._safe_answer_callback(
-                callback, "This topic binding changed.", show_alert=True
-            )
-            return False
-
-        targets = await asyncio.to_thread(self.core_client.list_targets)
-        target = next(
-            (item for item in targets if item.target == confirmation.terminal_address),
-            None,
-        )
-        state = target.status.casefold() if target and target.status else "unknown"
-        if (
-            self.core_client.core_id != confirmation.core_id
-            or target is None
-            or not target.agent_name
-            or state not in {"working", "blocked"}
-        ):
-            self._audit_interrupt_rejection(
-                callback,
-                detail=f"target is not interruptible in state {state}",
-                target_key=target_key,
-            )
-            await self._safe_answer_callback(
-                callback,
-                f"Agent is not interruptible in state {state}.",
-                show_alert=True,
-            )
-            return False
-
-        rate_limit = self._mutation_rate_limit(
-            actor_id=str(callback.user_id),
-            container_id=str(callback.chat_id),
-            target_key=target_key,
-        )
-        if rate_limit is not None:
-            self._audit_interrupt_rejection(
-                callback, detail=rate_limit, target_key=target_key
-            )
-            await self._safe_answer_callback(
-                callback, "Interrupt rate limit exceeded.", show_alert=True
-            )
-            return False
-
-        audit_id = self.store.claim_transport_mutation(
-            event_key=event_key,
-            entry=TransportAuditEntry(
-                transport="telegram",
-                actor_id=str(callback.user_id),
-                container_id=str(callback.chat_id),
-                conversation_id=str(callback.message_thread_id),
-                action="interrupt",
-                target_key=target_key,
-                outcome="attempt",
-            ),
-        )
-        if audit_id is None:
-            return True
-        await self._safe_answer_callback(callback, "Interrupting…")
-        try:
-            receipt = await asyncio.to_thread(
-                self.core_client.interrupt_with_receipt,
-                confirmation.terminal_address,
-            )
-        except MutationOutcomeUnknownError as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="outcome_unknown",
-                detail=truncate(str(exc), max_chars=500),
-            )
-            await self._safe_feedback(
-                callback,
-                "⚠️ Interrupt outcome is unknown. Inspect the agent before retrying.",
-            )
-        except HcRpcError as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="rejected" if exc.kind else "failed",
-                detail=truncate(str(exc), max_chars=500),
-            )
-            await self._safe_feedback(callback, f"⚠️ Interrupt rejected: {exc}")
-        except Exception as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="failed",
-                detail=truncate(str(exc), max_chars=500),
-            )
-            await self._safe_feedback(callback, "⚠️ Interrupt failed.")
-        else:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="succeeded",
-                detail=truncate(str(receipt.result), max_chars=500),
-                observed_turn=receipt.observed_turn,
-            )
-            await self._safe_feedback(callback, "✅ Interrupt sent.")
-        return True
-
-    def _audit_interrupt_rejection(
-        self, callback, *, detail: str, target_key: str | None = None
-    ) -> None:
-        self.store.add_transport_audit(
-            TransportAuditEntry(
-                transport="telegram",
-                actor_id=str(callback.user_id),
-                container_id=str(callback.chat_id),
-                conversation_id=(
-                    str(callback.message_thread_id)
-                    if callback.message_thread_id is not None
-                    else None
-                ),
-                action="interrupt",
-                target_key=target_key,
-                outcome="rejected",
-                detail=truncate(detail, max_chars=500),
-            )
-        )
-
-    async def _safe_answer_callback(
-        self, callback, text: str, *, show_alert: bool = False
-    ) -> None:
-        try:
-            await self.api.answer_callback_query(
-                callback_query_id=callback.callback_query_id,
-                text=text,
-                show_alert=show_alert,
-            )
-        except Exception:
-            LOG.exception("Failed to answer Telegram callback query")
-
-    async def _send_prompt(self, message, *, event_key: str) -> bool:
-        if message.message_thread_id is None:
-            await self._feedback(
-                message, "Send prompts inside a bound agent forum topic."
-            )
-            return False
-        route = self.store.get_telegram_topic_by_destination(
-            chat_id=message.chat_id, thread_id=message.message_thread_id
-        )
-        if route is None or route.closed:
-            await self._feedback(message, "This forum topic is not bound to a live agent.")
-            return False
-        text = message.text.strip()
-        if len(text) > self.config.max_message_chars:
-            await self._feedback(
-                message,
-                f"Message exceeds the {self.config.max_message_chars}-character limit.",
-            )
-            return False
-        lowered = text.casefold()
-        blocked = next(
-            (
-                item
-                for item in self.config.dangerous_text_blocklist
-                if item.casefold() in lowered
-            ),
-            None,
-        )
-        if blocked is not None:
-            await self._feedback(message, "Message was rejected by the text blocklist.")
-            return False
-
-        key: TargetKey | None = None
-        try:
-            key = TargetKey.from_route_value(route.route_target)
-            targets = await asyncio.to_thread(self.client.list_targets)
-            target = next(
-                (item for item in targets if item.target == key.address), None
-            )
-            if target is None or self.client.target_key(target.target) != key:
-                raise ValueError("topic target identity changed")
-        except Exception:
-            detail = (
-                "This topic belongs to a different Core instance; no prompt was sent."
-                if key is not None and key.runtime is RuntimeKind.HERDR_CORE
-                else "The bound runtime agent is not currently live."
-            )
-            await self._feedback(message, detail)
-            return False
-        assert key is not None
-        if not target.agent_name:
-            await self._feedback(
-                message, "The bound runtime target has no detected agent."
-            )
-            return False
-
-        target_key = key.to_storage_key()
-        rate_limit = self._mutation_rate_limit(
-            actor_id=str(message.user_id),
-            container_id=str(message.chat_id),
-            target_key=target_key,
-        )
-        if rate_limit is not None:
-            self.store.add_transport_audit(
-                TransportAuditEntry(
-                    transport="telegram",
-                    actor_id=str(message.user_id),
-                    container_id=str(message.chat_id),
-                    conversation_id=str(message.message_thread_id),
-                    action="send_text",
-                    target_key=target_key,
-                    payload_preview=truncate(text, max_chars=200),
-                    outcome="rejected",
-                    detail=rate_limit,
-                )
-            )
-            await self._feedback(message, "Mutation rate limit exceeded.")
-            return False
-        audit_id = self.store.claim_transport_mutation(
-            event_key=event_key,
-            entry=TransportAuditEntry(
-                transport="telegram",
-                actor_id=str(message.user_id),
-                container_id=str(message.chat_id),
-                conversation_id=str(message.message_thread_id),
-                action="send_text",
-                target_key=target_key,
-                payload_preview=truncate(text, max_chars=200),
-                outcome="attempt",
-            ),
-        )
-        if audit_id is None:
-            return True
-
-        try:
-            receipt = None
-            if self.core_client is not None and key.runtime is RuntimeKind.HERDR_CORE:
-                receipt = await asyncio.to_thread(
-                    self.core_client.send_with_receipt,
-                    target.target,
-                    text,
-                )
-            else:
-                await asyncio.to_thread(self.client.send, target.target, text)
-        except MutationOutcomeUnknownError as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="outcome_unknown",
-                detail=truncate(str(exc), max_chars=500),
-            )
-            await self._safe_feedback(
-                message,
-                "⚠️ Prompt outcome is unknown. Inspect the agent before retrying.",
-            )
-        except HcRpcError as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="rejected" if exc.kind else "failed",
-                detail=truncate(str(exc), max_chars=500),
-            )
-            await self._safe_feedback(message, f"⚠️ Prompt rejected: {exc}")
-        except HerdrCliError as exc:
-            outcome = (
-                "outcome_unknown"
-                if "timed out" in str(exc).casefold()
-                else "failed"
-            )
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome=outcome,
-                detail=truncate(str(exc), max_chars=500),
-            )
-            feedback = (
-                "⚠️ Prompt outcome is unknown. Inspect the agent before retrying."
-                if outcome == "outcome_unknown"
-                else "⚠️ Prompt submission failed."
-            )
-            await self._safe_feedback(message, feedback)
-        except Exception as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="failed",
-                detail=truncate(str(exc), max_chars=500),
-            )
-            await self._safe_feedback(message, "⚠️ Prompt submission failed.")
-        else:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="succeeded",
-                detail=(
-                    truncate(str(receipt.result), max_chars=500)
-                    if receipt is not None
-                    else None
-                ),
-                observed_turn=(receipt.observed_turn if receipt is not None else None),
-            )
-            await self._safe_feedback(message, "✅ Prompt submitted.")
-        return True
-
-    async def _feedback(self, message, text: str) -> None:
-        await self.api.send_text(
-            chat_id=message.chat_id,
-            message_thread_id=message.message_thread_id,
-            text=text,
-        )
-
-    async def _safe_feedback(self, message, text: str) -> None:
-        try:
-            await self._feedback(message, text)
-        except Exception:
-            LOG.exception("Failed to send Telegram mutation feedback")
-
-    def _mutation_rate_limit(
-        self, *, actor_id: str, container_id: str, target_key: str
-    ) -> str | None:
-        since = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
-        checks = (
-            (
-                "actor",
-                self.telegram.actor_mutations_per_minute,
-                {"actor_id": actor_id},
-            ),
-            (
-                "chat",
-                self.telegram.chat_mutations_per_minute,
-                {"container_id": container_id},
-            ),
-            (
-                "target",
-                self.telegram.target_mutations_per_minute,
-                {"target_key": target_key},
-            ),
-        )
-        for label, limit, key in checks:
-            count = self.store.count_transport_mutations(
-                transport="telegram", since=since, **key
-            )
-            if count >= limit:
-                return f"rate limit: {label} has {count} mutations in the last minute"
-        return None
 
     def _load_offset(self) -> int | None:
         value = self.store.get_state(OFFSET_STATE_KEY)
