@@ -19,6 +19,7 @@ dev = [
 
 [project.scripts]
 herdrelay = "herdr_discord_bridge.main:main"
+herdrelay-telegram = "herdr_discord_bridge.telegram_main:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -120,7 +120,9 @@ class AppConfig:
     stop: ApprovalStrategy | None = None
 
 
-def load_config(path: str | Path = "config.yaml") -> AppConfig:
+def load_config(
+    path: str | Path = "config.yaml", *, require_discord_token: bool = True
+) -> AppConfig:
     load_dotenv()
     config_path = Path(path)
     data: dict[str, Any] = {}
@@ -131,7 +133,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         data = loaded
 
     token = os.environ.get("DISCORD_TOKEN", "")
-    if not token:
+    if require_discord_token and not token:
         raise ValueError("DISCORD_TOKEN is required in .env or environment")
 
     runtime_data = data.get("runtime") or {}

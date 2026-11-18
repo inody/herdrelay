@@ -223,7 +223,7 @@ def test_load_config_rejects_unsafe_telegram_settings(
     tmp_path, monkeypatch, runtime, telegram, message
 ):
     monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
     if "TELEGRAM_BOT_TOKEN" not in message:
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
     config_path = tmp_path / "config.yaml"

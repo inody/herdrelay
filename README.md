@@ -497,11 +497,23 @@ Treat every enabled Discord or Telegram destination as remote terminal access.
 
 ## Operations and troubleshooting
 
-Run in the foreground with:
+Run Discord, plus any enabled secondary transports, in the foreground with:
 
 ```bash
 scripts/run_bot.sh
 ```
+
+Run Telegram without starting or connecting a Discord client with:
+
+```bash
+uv run herdrelay-telegram --config /path/to/telegram-config.yaml
+```
+
+The standalone command does not require `DISCORD_TOKEN`, but it still requires
+an enabled `transports.telegram` block, `TELEGRAM_BOT_TOKEN`, an experimental
+Herdr Core runtime, exact chat/user/terminal allowlists, and a separate stable
+SQLite database. Use it for isolated acceptance testing before enabling
+Telegram in the Discord service.
 
 On macOS, install the supplied user LaunchAgent:
 
