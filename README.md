@@ -101,8 +101,9 @@ At a useful operational level:
 The stable default remains the legacy Herdr TUI with Discord. An explicit
 experimental path now supports an existing Herdr Core socket, Core status
 events, normal prompt submission, interrupt, and a read-only Telegram forum
-poller with `/agents` and `/help`. Telegram status delivery, topic lifecycle,
-prompt submission, and interrupt remain planned. See
+transport with `/agents`, `/help`, blocked/done notifications, and persisted
+topic create/rename/close/reopen state. Telegram prompt submission and interrupt
+remain planned. See
 [Herdr Core and Telegram architecture](docs/core-telegram-design.md) and the
 [implementation plan](docs/core-telegram-plan.md) for the current boundary and
 remaining stages.
@@ -410,7 +411,8 @@ If `database_path` is omitted, the code retains the legacy default
 - `runtime.core`: existing socket selection, timeouts, visibility policy, and
   exact `allowed_terminal_addresses`; an empty Core target list denies all.
 - `transports.telegram`: experimental read-only forum transport. Enabling it
-  requires exact nonempty chat/user allowlists and `TELEGRAM_BOT_TOKEN`.
+  requires exact nonempty chat/user allowlists, `forum_chat_id`, and
+  `TELEGRAM_BOT_TOKEN`; `statuses` is limited to `blocked` and `done`.
 - `auto_threads.refresh_seconds`: pane/thread reconciliation interval.
 - `streaming.mode`: `hooks` (recommended) or `poll`.
 - `streaming.refresh_seconds`, `tail_lines`, `initial_tail_lines`, and
@@ -452,9 +454,10 @@ Treat every enabled Discord or Telegram destination as remote terminal access.
 - Restrict Discord with both channel permissions and the configured guild,
   channel, and user allowlists. Empty Discord guild/channel lists are
   permissive; an empty user list denies guarded writes.
-- Telegram currently supports read-only `/agents` and `/help` commands through
-  outbound long polling. It requires an allowlisted forum supergroup and exact
-  user/chat IDs; ordinary Telegram text performs no Core mutation.
+- Telegram currently supports read-only `/agents` and `/help`, plus
+  status-only blocked/done notifications in persisted forum topics. It requires
+  an allowlisted forum supergroup and exact user/chat IDs; ordinary Telegram
+  text performs no Core mutation.
 - Telegram bots cannot use Secret Chats. Messages and agent metadata sent there
   are stored by Telegram's cloud service.
 - Automatic pane threads are **public threads** within the parent channel, not

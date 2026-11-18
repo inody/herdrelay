@@ -138,6 +138,8 @@ transports:
     mode: forum
     allowed_chat_ids: [-100123]
     allowed_user_ids: [42]
+    forum_chat_id: -100123
+    statuses: [blocked]
     poll_timeout_seconds: 20
     request_timeout_seconds: 30
     reconnect_delay_seconds: 2
@@ -150,6 +152,8 @@ transports:
     assert config.telegram.token == "telegram-secret"
     assert config.telegram.allowed_chat_ids == frozenset({-100123})
     assert config.telegram.allowed_user_ids == frozenset({42})
+    assert config.telegram.forum_chat_id == -100123
+    assert config.telegram.statuses == ("blocked",)
     assert config.telegram.poll_timeout_seconds == 20
     assert config.telegram.request_timeout_seconds == 30
     assert "telegram-secret" not in repr(config.telegram)
@@ -160,20 +164,38 @@ transports:
     [
         (
             "herdr-core",
-            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]",
+            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -1",
             "TELEGRAM_BOT_TOKEN",
         ),
         (
             "herdr-tui",
-            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]",
+            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -1",
             "requires runtime.provider",
         ),
-        ("herdr-core", "allowed_user_ids: [2]", "allowed_chat_id"),
-        ("herdr-core", "allowed_chat_ids: [-1]", "allowed_user_id"),
         (
             "herdr-core",
-            "mode: direct\n    allowed_chat_ids: [-1]\n    allowed_user_ids: [2]",
+            "allowed_user_ids: [2]\n    forum_chat_id: -1",
+            "allowed_chat_id",
+        ),
+        (
+            "herdr-core",
+            "allowed_chat_ids: [-1]\n    forum_chat_id: -1",
+            "allowed_user_id",
+        ),
+        (
+            "herdr-core",
+            "mode: direct\n    allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -1",
             "only 'forum'",
+        ),
+        (
+            "herdr-core",
+            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -2",
+            "forum_chat_id must be in allowed_chat_ids",
+        ),
+        (
+            "herdr-core",
+            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n    forum_chat_id: -1\n    statuses: [working]",
+            "only blocked and done",
         ),
     ],
 )

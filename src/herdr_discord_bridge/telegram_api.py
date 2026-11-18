@@ -169,6 +169,15 @@ class TelegramBotApi:
         )
         return _boolean_result(result, "editForumTopic")
 
+    async def reopen_forum_topic(
+        self, *, chat_id: int, message_thread_id: int
+    ) -> bool:
+        result = await self.call(
+            "reopenForumTopic",
+            {"chat_id": chat_id, "message_thread_id": message_thread_id},
+        )
+        return _boolean_result(result, "reopenForumTopic")
+
     async def close_forum_topic(
         self, *, chat_id: int, message_thread_id: int
     ) -> bool:

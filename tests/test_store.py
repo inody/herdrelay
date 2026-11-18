@@ -60,6 +60,44 @@ def test_upsert_replaces_existing_null_thread_binding(tmp_path):
     assert bindings[0].herdr_target == "1-2"
 
 
+def test_telegram_topic_route_upsert_and_close(tmp_path):
+    store = Store(tmp_path / "store.sqlite3")
+
+    store.upsert_telegram_topic(
+        core_id="core-1",
+        terminal_address="t1",
+        chat_id=-1001,
+        thread_id=77,
+        name="project/pi",
+    )
+    route = store.get_telegram_topic(core_id="core-1", terminal_address="t1")
+
+    assert route is not None
+    assert route.chat_id == "-1001"
+    assert route.thread_id == "77"
+    assert route.closed is False
+
+    store.set_telegram_topic_closed(
+        core_id="core-1", terminal_address="t1", closed=True
+    )
+    closed = store.get_telegram_topic(core_id="core-1", terminal_address="t1")
+    assert closed is not None and closed.closed is True
+
+    store.upsert_telegram_topic(
+        core_id="core-1",
+        terminal_address="t1",
+        chat_id=-1001,
+        thread_id=77,
+        name="project/pi done",
+        closed=False,
+    )
+    updated = store.get_telegram_topic(core_id="core-1", terminal_address="t1")
+    assert updated is not None
+    assert updated.name == "project/pi done"
+    assert updated.closed is False
+
+
+
 def test_state_roundtrip(tmp_path):
     store = Store(tmp_path / "bridge.sqlite3")
 

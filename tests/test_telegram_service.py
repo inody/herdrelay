@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +12,12 @@ from herdr_discord_bridge.config import (
     RuntimeConfig,
     TelegramConfig,
 )
+from herdr_discord_bridge.hc_client import HcClient
+from herdr_discord_bridge.hc_events import HcTerminalState
+from herdr_discord_bridge.hc_protocol import (
+    decode_notification_line,
+    parse_subscribe_result,
+)
 from herdr_discord_bridge.models import HerdrTarget
 from herdr_discord_bridge.store import Store
 from herdr_discord_bridge.telegram_api import TelegramApiError
@@ -17,6 +25,16 @@ from herdr_discord_bridge.telegram_service import (
     OFFSET_STATE_KEY,
     TelegramReadOnlyService,
 )
+
+ROOT = Path(__file__).parents[1]
+FIXTURES = ROOT / "tests/fixtures/hc"
+SUBSCRIBE = parse_subscribe_result(
+    json.loads((FIXTURES / "subscribe.json").read_text())
+)
+NOTIFICATIONS = [
+    decode_notification_line(line)
+    for line in (FIXTURES / "notifications.ndjson").read_bytes().splitlines()
+]
 
 
 def update(*, update_id=10, user_id=42, chat_id=-1001, text="/agents"):
@@ -41,13 +59,14 @@ def config() -> AppConfig:
         discord_token="unused",
         runtime=RuntimeConfig(
             provider="herdr-core",
-            core=HcRuntimeConfig(allowed_terminal_addresses=frozenset({"t1"})),
+            core=HcRuntimeConfig(allowed_terminal_addresses=frozenset({"t12"})),
         ),
         telegram=TelegramConfig(
             enabled=True,
             token="token",
             allowed_chat_ids=frozenset({-1001}),
             allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
         ),
     )
 
@@ -59,6 +78,10 @@ class FakeApi:
     update_calls: list[dict] = field(default_factory=list)
     sent: list[dict] = field(default_factory=list)
     closed: bool = False
+    created_topics: list[dict] = field(default_factory=list)
+    edited_topics: list[dict] = field(default_factory=list)
+    reopened_topics: list[dict] = field(default_factory=list)
+    closed_topics: list[dict] = field(default_factory=list)
 
     async def get_updates(self, **kwargs):
         self.update_calls.append(kwargs)
@@ -69,6 +92,22 @@ class FakeApi:
             raise TelegramApiError("send failed")
         self.sent.append(kwargs)
         return ()
+
+    async def create_forum_topic(self, **kwargs):
+        self.created_topics.append(kwargs)
+        return {"message_thread_id": 100 + len(self.created_topics)}
+
+    async def edit_forum_topic(self, **kwargs):
+        self.edited_topics.append(kwargs)
+        return True
+
+    async def reopen_forum_topic(self, **kwargs):
+        self.reopened_topics.append(kwargs)
+        return True
+
+    async def close_forum_topic(self, **kwargs):
+        self.closed_topics.append(kwargs)
+        return True
 
     async def close(self):
         self.closed = True
@@ -185,3 +224,82 @@ async def test_invalid_message_is_discarded_and_offset_advances(tmp_path):
     assert api.sent == []
     assert relay.store.get_state(OFFSET_STATE_KEY) == "11"
     assert relay.store.has_event_key("telegram:update:10") is True
+
+
+@pytest.mark.asyncio
+async def test_status_delivery_reconciles_topic_dedupes_and_closes(tmp_path):
+    app_config = config()
+    client = HcClient(app_config)
+    api = FakeApi([])
+    relay = TelegramReadOnlyService(
+        config=app_config,
+        store=Store(tmp_path / "status.sqlite3"),
+        client=client,
+        api=api,
+    )
+    state = HcTerminalState(SUBSCRIBE)
+
+    await relay._reconcile_topics("core-1", state)
+    assert api.created_topics == [
+        {"chat_id": -1001, "name": "herdrelay/pi · t12"}
+    ]
+    topic = relay.store.get_telegram_topic(
+        core_id="core-1", terminal_address="t12"
+    )
+    assert topic is not None and topic.thread_id == "101"
+
+    transition = state.apply(NOTIFICATIONS[0])[0]
+    await relay._deliver_status("core-1", state, transition)
+    await relay._deliver_status("core-1", state, transition)
+    assert len(api.sent) == 1
+    assert api.sent[0]["message_thread_id"] == 101
+    assert api.sent[0]["text"].startswith("🔴 herdrelay/pi\nblocked")
+
+    finished = decode_notification_line(
+        '{"jsonrpc":"2.0","method":"event","params":'
+        '{"seq":42,"type":"finished","terminal":"t12","data":'
+        '{"state":"finished","finished_ms":2000,"exit_code":0,'
+        '"signal":null,"reason":"exited"}}}'
+    )
+    state.apply(finished)
+    await relay._handle_lifecycle("core-1", state, finished)
+    assert api.closed_topics == [{"chat_id": -1001, "message_thread_id": 101}]
+    closed = relay.store.get_telegram_topic(
+        core_id="core-1", terminal_address="t12"
+    )
+    assert closed is not None and closed.closed is True
+
+
+@pytest.mark.asyncio
+async def test_existing_closed_topic_is_reopened_and_renamed(tmp_path):
+    app_config = config()
+    client = HcClient(app_config)
+    api = FakeApi([])
+    store = Store(tmp_path / "reopen.sqlite3")
+    store.upsert_telegram_topic(
+        core_id="core-1",
+        terminal_address="t12",
+        chat_id=-1001,
+        thread_id=77,
+        name="old",
+        closed=True,
+    )
+    relay = TelegramReadOnlyService(
+        config=app_config, store=store, client=client, api=api
+    )
+    target = client.project_terminal(state_terminal := SUBSCRIBE.terminals[0])
+
+    topic = await relay._ensure_topic("core-1", state_terminal.address, target)
+
+    assert api.reopened_topics == [
+        {"chat_id": -1001, "message_thread_id": 77}
+    ]
+    assert api.edited_topics == [
+        {
+            "chat_id": -1001,
+            "message_thread_id": 77,
+            "name": "herdrelay/pi · t12",
+        }
+    ]
+    assert topic.closed is False
+    assert topic.name == "herdrelay/pi · t12"

@@ -41,6 +41,8 @@ class TelegramConfig:
     mode: str = "forum"
     allowed_chat_ids: frozenset[int] = frozenset()
     allowed_user_ids: frozenset[int] = frozenset()
+    forum_chat_id: int | None = None
+    statuses: tuple[str, ...] = ("blocked", "done")
     poll_timeout_seconds: int = 25
     request_timeout_seconds: float = 35
     reconnect_delay_seconds: float = 5
@@ -247,6 +249,11 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             mode=str(telegram_data.get("mode") or "forum").casefold(),
             allowed_chat_ids=_id_set(telegram_data.get("allowed_chat_ids")),
             allowed_user_ids=_id_set(telegram_data.get("allowed_user_ids")),
+            forum_chat_id=_optional_int(telegram_data.get("forum_chat_id")),
+            statuses=tuple(
+                str(item).casefold()
+                for item in telegram_data.get("statuses", ("blocked", "done"))
+            ),
             poll_timeout_seconds=int(
                 telegram_data.get("poll_timeout_seconds", 25)
             ),
@@ -280,6 +287,14 @@ def _validate_telegram(config: AppConfig) -> None:
         raise ValueError("Telegram requires at least one allowed_chat_id")
     if not telegram.allowed_user_ids:
         raise ValueError("Telegram requires at least one allowed_user_id")
+    if telegram.forum_chat_id is None:
+        raise ValueError("Telegram requires forum_chat_id for status delivery")
+    if telegram.forum_chat_id not in telegram.allowed_chat_ids:
+        raise ValueError("Telegram forum_chat_id must be in allowed_chat_ids")
+    if not telegram.statuses or any(
+        status not in {"blocked", "done"} for status in telegram.statuses
+    ):
+        raise ValueError("Telegram statuses may contain only blocked and done")
     if not 1 <= telegram.poll_timeout_seconds <= 50:
         raise ValueError("Telegram poll_timeout_seconds must be between 1 and 50")
     if telegram.request_timeout_seconds <= telegram.poll_timeout_seconds:

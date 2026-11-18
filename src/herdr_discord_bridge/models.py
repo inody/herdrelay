@@ -24,6 +24,18 @@ class HerdrTarget:
 
 
 @dataclass(frozen=True)
+class TelegramTopicRoute:
+    core_id: str
+    terminal_address: str
+    chat_id: str
+    thread_id: str
+    name: str
+    closed: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class Binding:
     guild_id: str
     channel_id: str

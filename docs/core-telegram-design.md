@@ -541,6 +541,8 @@ transports:
     mode: forum
     allowed_chat_ids: []
     allowed_user_ids: []
+    forum_chat_id: null
+    statuses: [blocked, done]
     notification_detail: status
 ```
 

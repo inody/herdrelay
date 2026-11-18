@@ -6,7 +6,13 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import AuditEntry, Binding, PendingQuestion, QuestionOption
+from .models import (
+    AuditEntry,
+    Binding,
+    PendingQuestion,
+    QuestionOption,
+    TelegramTopicRoute,
+)
 
 
 class Store:
@@ -81,6 +87,19 @@ class Store:
                   options_json TEXT NOT NULL,
                   multi_select INTEGER NOT NULL,
                   created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS telegram_topics (
+                  core_id TEXT NOT NULL,
+                  terminal_address TEXT NOT NULL,
+                  chat_id TEXT NOT NULL,
+                  thread_id TEXT NOT NULL,
+                  name TEXT NOT NULL,
+                  closed INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  PRIMARY KEY(core_id, terminal_address),
+                  UNIQUE(chat_id, thread_id)
                 );
                 """
             )
@@ -277,6 +296,69 @@ class Store:
                 (key, value, now),
             )
 
+    def get_telegram_topic(
+        self, *, core_id: str, terminal_address: str
+    ) -> TelegramTopicRoute | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM telegram_topics
+                WHERE core_id = ? AND terminal_address = ?
+                """,
+                (core_id, terminal_address),
+            ).fetchone()
+        return _telegram_topic(row) if row else None
+
+    def upsert_telegram_topic(
+        self,
+        *,
+        core_id: str,
+        terminal_address: str,
+        chat_id: int | str,
+        thread_id: int | str,
+        name: str,
+        closed: bool = False,
+    ) -> None:
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO telegram_topics (
+                  core_id, terminal_address, chat_id, thread_id, name,
+                  closed, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(core_id, terminal_address) DO UPDATE SET
+                  chat_id = excluded.chat_id,
+                  thread_id = excluded.thread_id,
+                  name = excluded.name,
+                  closed = excluded.closed,
+                  updated_at = excluded.updated_at
+                """,
+                (
+                    core_id,
+                    terminal_address,
+                    str(chat_id),
+                    str(thread_id),
+                    name,
+                    int(closed),
+                    now,
+                    now,
+                ),
+            )
+
+    def set_telegram_topic_closed(
+        self, *, core_id: str, terminal_address: str, closed: bool
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE telegram_topics
+                SET closed = ?, updated_at = ?
+                WHERE core_id = ? AND terminal_address = ?
+                """,
+                (int(closed), _now(), core_id, terminal_address),
+            )
+
     def upsert_pending_question(self, question: PendingQuestion) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -410,6 +492,19 @@ def _pending_question(row: sqlite3.Row) -> PendingQuestion | None:
         prompt=str(row["prompt"]),
         options=options,
         multi_select=bool(row["multi_select"]),
+    )
+
+
+def _telegram_topic(row: sqlite3.Row) -> TelegramTopicRoute:
+    return TelegramTopicRoute(
+        core_id=str(row["core_id"]),
+        terminal_address=str(row["terminal_address"]),
+        chat_id=str(row["chat_id"]),
+        thread_id=str(row["thread_id"]),
+        name=str(row["name"]),
+        closed=bool(row["closed"]),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
     )
 
 
