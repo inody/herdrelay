@@ -62,6 +62,21 @@ When `general_router.enabled` is configured with an approved model:
 5. Confirm the selected Agent receives only the extracted instruction, not the
    routing words.
 
+## Optional General voice-message acceptance
+
+When `voice_input.enabled` is configured with an approved local transcriber:
+
+1. Record one short Telegram voice message in General that names exactly one
+   temporary Agent and gives one harmless instruction.
+2. Confirm HerdRelay displays the transcript and does not retain the temporary
+   audio file.
+3. Confirm the audit sequence is `transcribe_voice`, `route_text`, then
+   `send_text`, and that the Agent receives only the extracted instruction.
+4. Repeat with an intentionally ambiguous destination and confirm there is no
+   `send_text` audit or runtime mutation.
+5. Send an over-duration test file and confirm it is rejected before download
+   and transcription.
+
 ## Cleanup
 
 - Close the temporary Telegram topic.

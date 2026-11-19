@@ -697,6 +697,55 @@ transports:
     assert config.telegram.general_router.model.argv == ("router",)
 
 
+def test_load_config_reads_voice_input_provider(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+runtime:
+  provider: orca
+transports:
+  discord:
+    enabled: false
+  telegram:
+    enabled: true
+    allowed_chat_ids: [-1]
+    allowed_user_ids: [2]
+    forum_chat_id: -1
+    enable_send: true
+    general_router:
+      enabled: true
+      model:
+        provider: command
+        argv: [router]
+    voice_input:
+      enabled: true
+      scope: general
+      max_duration_seconds: 90
+      max_file_bytes: 5000000
+      transcription:
+        provider: mlx-whisper
+        model: mlx-community/whisper-large-v3-turbo
+        language: smart
+        python_path: /opt/voice/bin/python
+        pass_env: [HF_TOKEN]
+        timeout_seconds: 60
+"""
+    )
+
+    config = load_config(config_path)
+
+    voice = config.telegram.voice_input
+    assert voice.enabled is True
+    assert voice.max_duration_seconds == 90
+    assert voice.max_file_bytes == 5_000_000
+    assert voice.transcription.provider == "mlx-whisper"
+    assert voice.transcription.model == "mlx-community/whisper-large-v3-turbo"
+    assert voice.transcription.python_path == "/opt/voice/bin/python"
+    assert voice.transcription.pass_env == ("HF_TOKEN",)
+
+
 def test_load_config_rejects_invalid_core_runtime_values(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     config_path = tmp_path / "config.yaml"

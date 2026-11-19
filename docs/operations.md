@@ -131,6 +131,43 @@ Telegram installations that report General with a numeric thread ID, set
 `general_topic_id`; otherwise General is recognized by the absence of
 `message_thread_id`.
 
+## Telegram voice input
+
+`transports.telegram.voice_input.enabled` accepts authorized Telegram voice
+messages in General, downloads the Bot API file into a mode-0700 cache directory,
+transcribes it, deletes the temporary audio, and passes the transcript through
+the existing General router. Voice messages in bound topics are rejected; this
+prevents audio from silently bypassing destination classification.
+
+The default limits are 120 seconds and 10 MB. Telegram's advertised size is
+checked before download and the actual streamed byte count is checked again.
+A failed download, timeout, empty transcript, invalid provider output, ambiguous
+route, or changed runtime target causes no mutation and is not retried
+automatically. Successful processing records `transcribe_voice`, `route_text`,
+and `send_text` as distinct audit actions.
+
+The `mlx-whisper` provider invokes a separate Python interpreter and emits a
+small JSON transcript contract. Set `python_path` to an environment containing
+`mlx-whisper`; install the optional HerdRelay environment with
+`uv sync --extra voice-mlx`, or reuse a separately managed trusted environment.
+`ffmpeg` must be on the provider subprocess PATH. The provider inherits only
+HOME, locale, cache-related variables, and names explicitly listed in
+`pass_env`; Telegram and Discord credentials are not copied by default.
+`language: smart` performs automatic detection and retries clips of at most two
+minutes in Japanese when Whisper detects neither Japanese nor English.
+
+The provider-neutral `command` implementation executes an argv array without a
+shell. Use `{input}` where the temporary audio path should appear; if omitted,
+the path is appended. The command must write exactly one JSON object to stdout:
+
+```json
+{"text":"HJB FDMのパイに続けて","language":"ja","duration_seconds":3.2}
+```
+
+Do not enable voice input until the configured Python/command, `ffmpeg`, and
+model cache have been tested locally. Model downloads may be large and should be
+performed during explicit setup rather than an unattended production request.
+
 ## Thread and binding lifecycle
 
 `enable_auto_threads` starts a reconciliation loop using `herdr pane list`.

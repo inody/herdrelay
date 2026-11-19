@@ -251,6 +251,39 @@ decision on stdout. It is invoked as an argv array without a shell. Model
 timeout, invalid JSON, ambiguity, invented candidate IDs, or non-verbatim prompt
 text all fail closed without retry.
 
+### Optional Telegram voice input
+
+Authorized Telegram voice messages in General can be transcribed locally and
+then passed through the same General router. Bound topics remain text-only by
+default. Audio is downloaded to a private temporary directory, bounded by
+duration and file size, and deleted after each attempt.
+
+```yaml
+transports:
+  telegram:
+    voice_input:
+      enabled: true
+      scope: general
+      max_duration_seconds: 120
+      max_file_bytes: 10000000
+      transcription:
+        provider: mlx-whisper
+        model: mlx-community/whisper-large-v3-turbo
+        language: smart
+        python_path: /path/to/python-with-mlx-whisper
+        timeout_seconds: 120
+```
+
+The `mlx-whisper` provider runs in a separate Python subprocess with a minimal
+environment. Install its optional dependencies with `uv sync --extra voice-mlx`
+and make `ffmpeg` available, or point `python_path` at an existing trusted MLX
+Whisper environment. A provider-neutral `command` option is also available;
+its argv may contain `{input}` and must emit one JSON object containing at least
+a non-empty `text` field. Voice input and its model download are disabled by
+default. Transcription, routing, and prompt submission produce separate audit
+entries, and any download, transcription, or routing error fails closed without
+retry.
+
 ## Optional Discord transport
 
 Set `transports.discord.enabled: true`, provide `DISCORD_TOKEN` in `.env`, and

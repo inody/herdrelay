@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import os
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -23,6 +26,14 @@ class TelegramApiError(RuntimeError):
         super().__init__(message)
         self.error_code = error_code
         self.retry_after = retry_after
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramFile:
+    file_id: str
+    file_unique_id: str | None
+    file_size: int | None
+    file_path: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +104,86 @@ class TelegramBotApi:
         ):
             raise TelegramApiError("Telegram getUpdates result must be an array")
         return result
+
+    async def get_file(self, file_id: str) -> TelegramFile:
+        if not file_id:
+            raise ValueError("Telegram file_id must not be empty")
+        result = await self.call("getFile", {"file_id": file_id})
+        if not isinstance(result, dict):
+            raise TelegramApiError("Telegram getFile result must be an object")
+        file_path = result.get("file_path")
+        if not isinstance(file_path, str) or not file_path:
+            raise TelegramApiError("Telegram getFile file_path must be a string")
+        unique_id = result.get("file_unique_id")
+        if unique_id is not None and not isinstance(unique_id, str):
+            raise TelegramApiError("Telegram getFile file_unique_id must be a string")
+        file_size = result.get("file_size")
+        if file_size is not None and (
+            not isinstance(file_size, int)
+            or isinstance(file_size, bool)
+            or file_size < 0
+        ):
+            raise TelegramApiError(
+                "Telegram getFile file_size must be a non-negative integer"
+            )
+        returned_id = result.get("file_id", file_id)
+        if not isinstance(returned_id, str) or not returned_id:
+            raise TelegramApiError("Telegram getFile file_id must be a string")
+        return TelegramFile(
+            file_id=returned_id,
+            file_unique_id=unique_id,
+            file_size=file_size,
+            file_path=file_path,
+        )
+
+    async def download_file(
+        self,
+        *,
+        file_id: str,
+        destination: str | Path,
+        max_bytes: int,
+    ) -> TelegramFile:
+        if max_bytes <= 0:
+            raise ValueError("Telegram download max_bytes must be positive")
+        info = await self.get_file(file_id)
+        if info.file_size is not None and info.file_size > max_bytes:
+            raise TelegramApiError("Telegram file exceeds the configured size limit")
+        await self.start()
+        assert self._session is not None
+        safe_path = quote(info.file_path.lstrip("/"), safe="/")
+        url = f"{self._base_url}/file/bot{self._token}/{safe_path}"
+        path = Path(destination)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        written = 0
+        try:
+            async with self._session.get(url) as response:
+                if response.status >= 400:
+                    raise TelegramApiError(
+                        f"Telegram file download returned HTTP {response.status}"
+                    )
+                descriptor = os.open(
+                    path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+                with os.fdopen(descriptor, "wb") as stream:
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        written += len(chunk)
+                        if written > max_bytes:
+                            raise TelegramApiError(
+                                "Telegram file exceeds the configured size limit"
+                            )
+                        stream.write(chunk)
+        except asyncio.TimeoutError as exc:
+            path.unlink(missing_ok=True)
+            raise TelegramApiError("Telegram file download timed out") from exc
+        except (aiohttp.ClientError, OSError):
+            path.unlink(missing_ok=True)
+            raise
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        return info
 
     async def send_message(
         self,

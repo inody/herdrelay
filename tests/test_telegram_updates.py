@@ -76,6 +76,27 @@ def test_policy_rejects_non_allowlisted_or_non_forum_location(changes):
     assert policy().authorized(message) is False
 
 
+def test_parser_accepts_voice_message_without_text():
+    raw = update(text="", thread_id=None)
+    raw["message"].pop("text")
+    raw["message"]["voice"] = {
+        "file_id": "voice-file",
+        "file_unique_id": "voice-unique",
+        "duration": 12,
+        "mime_type": "audio/ogg",
+        "file_size": 1234,
+    }
+
+    message = parse_inbound_message(raw)
+
+    assert message is not None
+    assert message.text == ""
+    assert message.voice is not None
+    assert message.voice.file_id == "voice-file"
+    assert message.voice.duration_seconds == 12
+    assert policy().authorized(message) is True
+
+
 def test_parser_ignores_bot_nontext_and_nonmessage_updates():
     assert parse_inbound_message(update(is_bot=True)) is None
     nontext = update()

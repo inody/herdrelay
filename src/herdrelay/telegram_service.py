@@ -19,6 +19,8 @@ from .telegram_updates import (
     parse_inbound_callback,
     parse_inbound_message,
 )
+from .telegram_voice import TelegramVoiceHandler
+from .voice_transcription import VoiceTranscriber
 
 LOG = logging.getLogger(__name__)
 OFFSET_STATE_KEY = "telegram_next_update_id"
@@ -35,6 +37,7 @@ class TelegramService:
         client: RuntimeClient,
         api: TelegramBotApi | None = None,
         router_model: IntentModel | None = None,
+        voice_transcriber: VoiceTranscriber | None = None,
     ):
         self.config = config
         self.telegram = config.telegram
@@ -67,6 +70,17 @@ class TelegramService:
                 model=router_model,
             )
             if self.telegram.general_router.enabled
+            else None
+        )
+        self.voice_handler = (
+            TelegramVoiceHandler(
+                config=config,
+                store=store,
+                api=self.api,
+                router=self.general_router,
+                transcriber=voice_transcriber,
+            )
+            if self.telegram.voice_input.enabled and self.general_router is not None
             else None
         )
         self.status_relay = TelegramStatusRelay(
@@ -159,6 +173,15 @@ class TelegramService:
             )
         message = parse_inbound_message(update)
         if message is None or not self.policy.authorized(message):
+            return False
+        if message.voice is not None:
+            if self.voice_handler is not None:
+                return await self.voice_handler.handle(message, event_key=event_key)
+            await self.api.send_text(
+                chat_id=message.chat_id,
+                message_thread_id=message.message_thread_id,
+                text="音声入力は無効です。何も送信していません。",
+            )
             return False
         command = message.command
         if command in {"agents", "list"}:

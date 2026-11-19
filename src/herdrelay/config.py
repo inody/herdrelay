@@ -88,6 +88,29 @@ class RouterModelConfig:
 
 
 @dataclass(frozen=True)
+class VoiceTranscriptionConfig:
+    provider: str = "none"
+    model: str | None = None
+    language: str = "smart"
+    python_path: str = "python3"
+    argv: tuple[str, ...] = ()
+    pass_env: tuple[str, ...] = ()
+    timeout_seconds: float = 120
+    max_output_bytes: int = 1_048_576
+
+
+@dataclass(frozen=True)
+class TelegramVoiceInputConfig:
+    enabled: bool = False
+    scope: str = "general"
+    max_duration_seconds: int = 120
+    max_file_bytes: int = 10_000_000
+    transcription: VoiceTranscriptionConfig = field(
+        default_factory=VoiceTranscriptionConfig
+    )
+
+
+@dataclass(frozen=True)
 class TelegramGeneralRouterConfig:
     enabled: bool = False
     activation: str = "all-text"
@@ -119,6 +142,9 @@ class TelegramConfig:
     closed_topic_retention_days: int | None = None
     general_router: TelegramGeneralRouterConfig = field(
         default_factory=TelegramGeneralRouterConfig
+    )
+    voice_input: TelegramVoiceInputConfig = field(
+        default_factory=TelegramVoiceInputConfig
     )
 
 
@@ -235,6 +261,14 @@ def load_config(
     if not isinstance(router_model_data, dict):
         raise ValueError(
             "transports.telegram.general_router.model must be a YAML mapping"
+        )
+    voice_input_data = telegram_data.get("voice_input") or {}
+    if not isinstance(voice_input_data, dict):
+        raise ValueError("transports.telegram.voice_input must be a YAML mapping")
+    transcription_data = voice_input_data.get("transcription") or {}
+    if not isinstance(transcription_data, dict):
+        raise ValueError(
+            "transports.telegram.voice_input.transcription must be a YAML mapping"
         )
     storage_data = data.get("storage") or {}
     if not isinstance(storage_data, dict):
@@ -482,6 +516,41 @@ def load_config(
             closed_topic_retention_days=_optional_int(
                 telegram_data.get("closed_topic_retention_days")
             ),
+            voice_input=TelegramVoiceInputConfig(
+                enabled=bool(voice_input_data.get("enabled", False)),
+                scope=str(voice_input_data.get("scope") or "general").casefold(),
+                max_duration_seconds=int(
+                    voice_input_data.get("max_duration_seconds", 120)
+                ),
+                max_file_bytes=int(
+                    voice_input_data.get("max_file_bytes", 10_000_000)
+                ),
+                transcription=VoiceTranscriptionConfig(
+                    provider=str(
+                        transcription_data.get("provider") or "none"
+                    ).casefold(),
+                    model=_optional_str(transcription_data.get("model")),
+                    language=str(
+                        transcription_data.get("language") or "smart"
+                    ).casefold(),
+                    python_path=str(
+                        transcription_data.get("python_path") or "python3"
+                    ),
+                    argv=tuple(
+                        str(item) for item in transcription_data.get("argv") or ()
+                    ),
+                    pass_env=tuple(
+                        str(item)
+                        for item in transcription_data.get("pass_env") or ()
+                    ),
+                    timeout_seconds=float(
+                        transcription_data.get("timeout_seconds", 120)
+                    ),
+                    max_output_bytes=int(
+                        transcription_data.get("max_output_bytes", 1_048_576)
+                    ),
+                ),
+            ),
             general_router=TelegramGeneralRouterConfig(
                 enabled=bool(general_router_data.get("enabled", False)),
                 activation=str(
@@ -581,6 +650,45 @@ def _validate_telegram(config: AppConfig) -> None:
         raise ValueError(
             "Telegram closed_topic_retention_days must be at least 1 or null"
         )
+    voice = telegram.voice_input
+    if voice.enabled:
+        if not telegram.enable_send:
+            raise ValueError("Telegram voice_input requires enable_send: true")
+        if not telegram.general_router.enabled:
+            raise ValueError("Telegram voice_input requires general_router.enabled: true")
+        if voice.scope != "general":
+            raise ValueError(
+                "Telegram voice_input.scope currently supports only 'general'"
+            )
+        if not 1 <= voice.max_duration_seconds <= 3600:
+            raise ValueError(
+                "Telegram voice_input.max_duration_seconds must be between 1 and 3600"
+            )
+        if not 1024 <= voice.max_file_bytes <= 100_000_000:
+            raise ValueError(
+                "Telegram voice_input.max_file_bytes must be between 1024 and 100000000"
+            )
+        transcription = voice.transcription
+        if transcription.provider not in {"mlx-whisper", "command"}:
+            raise ValueError(
+                "Telegram voice transcription provider must be 'mlx-whisper' or 'command'"
+            )
+        if transcription.timeout_seconds <= 0:
+            raise ValueError("Telegram voice transcription timeout must be positive")
+        if transcription.max_output_bytes < 1024:
+            raise ValueError(
+                "Telegram voice transcription max_output_bytes must be at least 1024"
+            )
+        if transcription.provider == "mlx-whisper":
+            if not transcription.model or not transcription.python_path.strip():
+                raise ValueError(
+                    "Telegram mlx-whisper transcription requires model and python_path"
+                )
+        elif not transcription.argv:
+            raise ValueError(
+                "Telegram command transcription requires a non-empty argv list"
+            )
+
     router = telegram.general_router
     if not router.enabled:
         return

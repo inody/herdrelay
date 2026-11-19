@@ -49,10 +49,12 @@ class RouterCandidate:
 class RoutingRequest:
     utterance: str
     candidates: tuple[RouterCandidate, ...]
+    source_kind: str = "text"
 
     def public_data(self) -> dict[str, Any]:
         return {
-            "version": 1,
+            "version": 2,
+            "source_kind": self.source_kind,
             "utterance": self.utterance,
             "candidates": [candidate.public_data() for candidate in self.candidates],
             "output_contract": {
@@ -254,7 +256,11 @@ class TelegramGeneralRouter:
                 message, "利用可能なAgent topicがありません。何も送信していません。"
             )
             return False
-        request = RoutingRequest(utterance=utterance, candidates=candidates)
+        request = RoutingRequest(
+            utterance=utterance,
+            candidates=candidates,
+            source_kind=message.source_kind,
+        )
         try:
             decision = await self.model.classify(request)
         except Exception as exc:
@@ -501,7 +507,13 @@ Choose only from candidate ids supplied by the caller. Never invent an id.
 Extract message_verbatim as an exact contiguous substring of the utterance.
 Remove only the words that identify the destination; never rewrite, summarize,
 translate, correct, or expand the instruction itself.
-If the destination is not uniquely supported by the utterance and candidate
-metadata, return intent=unknown, candidate_id=null, message_verbatim=null,
-ambiguous=true. Do not guess based only on status or candidate order.
+For source_kind=voice, the utterance is an automatic speech transcript. Spoken
+letters, separators, Latin text, kana, and similar sounds may be mistranscribed.
+Use the full candidate metadata to infer the intended destination when exactly
+one candidate is clearly plausible; do not require a literal spelling match.
+If multiple candidates remain similarly plausible, return unknown rather than
+guessing. For source_kind=text, apply ordinary strict natural-language matching.
+If the destination is absent or not uniquely supported, return intent=unknown,
+candidate_id=null, message_verbatim=null, ambiguous=true. Never choose based only
+on status or candidate order.
 """

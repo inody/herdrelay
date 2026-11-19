@@ -113,3 +113,17 @@ transports:
         argv: []                   # command provider; executed without a shell
         timeout_seconds: 5
         max_output_bytes: 16384
+    voice_input:
+      enabled: false               # transcribe Telegram voice messages in General
+      scope: general               # bound topics remain text-only
+      max_duration_seconds: 120
+      max_file_bytes: 10000000
+      transcription:
+        provider: none             # mlx-whisper or command
+        model: null                # e.g. mlx-community/whisper-large-v3-turbo
+        language: smart            # auto, ja, en, or smart retry mode
+        python_path: python3        # Python containing mlx-whisper
+        argv: []                   # command provider; use {input} placeholder
+        pass_env: []               # extra env names; minimal by default
+        timeout_seconds: 120
+        max_output_bytes: 1048576

@@ -7,6 +7,15 @@ from .config import TelegramConfig
 
 
 @dataclass(frozen=True, slots=True)
+class TelegramInboundVoice:
+    file_id: str
+    file_unique_id: str
+    duration_seconds: int
+    mime_type: str | None
+    file_size: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramInboundMessage:
     update_id: int
     message_id: int
@@ -16,6 +25,8 @@ class TelegramInboundMessage:
     chat_type: str
     is_forum: bool
     text: str
+    voice: TelegramInboundVoice | None = None
+    source_kind: str = "text"
 
     @property
     def command(self) -> str | None:
@@ -115,8 +126,10 @@ def parse_inbound_message(value: Any) -> TelegramInboundMessage | None:
         return None
     if not isinstance(message, dict):
         raise ValueError("Telegram message must be an object")
-    text = message.get("text")
-    if not isinstance(text, str) or not text.strip():
+    raw_text = message.get("text")
+    text = raw_text if isinstance(raw_text, str) and raw_text.strip() else ""
+    voice = _voice(message.get("voice"))
+    if not text and voice is None:
         return None
     sender = message.get("from")
     if not isinstance(sender, dict):
@@ -146,6 +159,38 @@ def parse_inbound_message(value: Any) -> TelegramInboundMessage | None:
         chat_type=chat_type,
         is_forum=is_forum,
         text=text,
+        voice=voice,
+    )
+
+
+def _voice(value: Any) -> TelegramInboundVoice | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("Telegram voice must be an object")
+    file_id = value.get("file_id")
+    unique_id = value.get("file_unique_id")
+    if not isinstance(file_id, str) or not file_id:
+        raise ValueError("Telegram voice file_id must be a string")
+    if not isinstance(unique_id, str) or not unique_id:
+        raise ValueError("Telegram voice file_unique_id must be a string")
+    duration = _integer(value, "duration", label="voice duration")
+    if duration < 0:
+        raise ValueError("Telegram voice duration must not be negative")
+    mime_type = value.get("mime_type")
+    if mime_type is not None and not isinstance(mime_type, str):
+        raise ValueError("Telegram voice mime_type must be a string")
+    file_size = value.get("file_size")
+    if file_size is not None and (
+        not isinstance(file_size, int) or isinstance(file_size, bool) or file_size < 0
+    ):
+        raise ValueError("Telegram voice file_size must be a non-negative integer")
+    return TelegramInboundVoice(
+        file_id=file_id,
+        file_unique_id=unique_id,
+        duration_seconds=duration,
+        mime_type=mime_type,
+        file_size=file_size,
     )
 
 

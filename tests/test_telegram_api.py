@@ -13,6 +13,7 @@ from herdrelay.telegram_api import TelegramApiError, TelegramBotApi
 async def telegram_server(handler):
     app = web.Application()
     app.router.add_post("/bot{token}/{method}", handler)
+    app.router.add_get("/file/bot{token}/{path:.*}", handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -166,6 +167,42 @@ async def test_get_updates_uses_outbound_long_polling_parameters():
             "allowed_updates": ["message", "callback_query"],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_file_and_download_enforce_private_bounded_destination(tmp_path):
+    audio = b"OggS" + b"audio" * 20
+
+    async def handler(request):
+        if request.method == "GET":
+            assert request.match_info["path"] == "voice/file_1.oga"
+            return web.Response(body=audio, content_type="audio/ogg")
+        assert request.match_info["method"] == "getFile"
+        assert await request.json() == {"file_id": "voice-1"}
+        return web.json_response(
+            {
+                "ok": True,
+                "result": {
+                    "file_id": "voice-1",
+                    "file_unique_id": "unique-1",
+                    "file_size": len(audio),
+                    "file_path": "voice/file_1.oga",
+                },
+            }
+        )
+
+    destination = tmp_path / "voice.ogg"
+    async with telegram_server(handler) as base_url:
+        async with TelegramBotApi("test-token", base_url=base_url) as api:
+            info = await api.download_file(
+                file_id="voice-1",
+                destination=destination,
+                max_bytes=1024,
+            )
+
+    assert info.file_unique_id == "unique-1"
+    assert destination.read_bytes() == audio
+    assert destination.stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.asyncio

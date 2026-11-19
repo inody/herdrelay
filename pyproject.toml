@@ -12,6 +12,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+voice-mlx = [
+  "mlx-whisper>=0.4.3; platform_system == 'Darwin' and platform_machine == 'arm64'",
+]
 dev = [
   "pytest>=8.0,<9",
   "pytest-asyncio>=0.23,<1",
