@@ -269,12 +269,15 @@ an inherited legacy pane ID. A shared Codex app-server that does not inherit
 Core terminal identity remains unable to emit a version 2 event; HerdRelay does
 not guess a Core terminal from working-directory matches.
 
-For an Orca-managed Claude terminal, the hook reads the inherited exact
-`ORCA_PANE_KEY` and resolves it to exactly one terminal agent with `orca agent
-list --json`. The public CLI supplies the runtime ID, host ID, and current Orca
-session generation for a version 3 event. Missing, ambiguous, or failed CLI
-resolution emits nothing and never falls back to a legacy pane identity. The
-hook does not use Orca's private database or daemon socket.
+For an Orca-managed Claude terminal, the question hooks read the inherited
+exact `ORCA_PANE_KEY` and resolve it to exactly one terminal agent with `orca
+agent list --json`. The public CLI supplies the runtime ID, host ID, and current
+Orca session generation for version 3 question lifecycle events. Missing,
+ambiguous, or failed CLI resolution emits nothing and never falls back to a
+legacy pane identity. Claude Stop events do not emit Orca responses because the
+in-process public-CLI output source is authoritative for completed responses;
+this prevents duplicate delivery. The hook does not use Orca's private database
+or daemon socket.
 
 Supported `kind` values are:
 

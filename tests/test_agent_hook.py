@@ -10,6 +10,7 @@ from agent_stop_hook import (  # noqa: E402
     build_question_event,
     build_question_resolved_event,
     format_ask_user_question,
+    resolve_event_identity,
     write_event,
 )
 from manage_claude_hook import MARKER, update_settings  # noqa: E402
@@ -40,7 +41,7 @@ def test_build_event_ignores_agent_outside_supported_runtime(tmp_path):
     assert build_event(stop_input(tmp_path), {}) is None
 
 
-def test_build_event_uses_orca_v3_identity_from_public_cli(tmp_path, monkeypatch):
+def test_orca_v3_identity_comes_from_public_cli(monkeypatch):
     class Result:
         returncode = 0
         stdout = json.dumps(
@@ -69,12 +70,11 @@ def test_build_event_uses_orca_v3_identity_from_public_cli(tmp_path, monkeypatch
 
     monkeypatch.setattr(agent_stop_hook.subprocess, "run", run)
 
-    event = build_event(
-        stop_input(tmp_path),
+    event = resolve_event_identity(
         {
             "ORCA_PANE_KEY": "tab-1:pane-2",
             "HERDRELAY_ORCA_CLI": "/Applications/Orca.app/orca",
-        },
+        }
     )
 
     assert event is not None
@@ -91,6 +91,34 @@ def test_build_event_uses_orca_v3_identity_from_public_cli(tmp_path, monkeypatch
         "local",
         "--json",
     ]
+
+
+def test_orca_stop_event_is_left_to_public_cli_output_source(tmp_path, monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = json.dumps(
+            {
+                "ok": True,
+                "result": {
+                    "agents": [
+                        {
+                            "kind": "terminal",
+                            "agent": "claude",
+                            "hostId": "local",
+                            "paneKey": "tab:pane",
+                            "orcaSessionId": "session-1",
+                        }
+                    ]
+                },
+                "_meta": {"runtimeId": "runtime-1"},
+            }
+        )
+
+    monkeypatch.setattr(agent_stop_hook.subprocess, "run", lambda *args, **kwargs: Result())
+
+    assert build_event(
+        stop_input(tmp_path), {"ORCA_PANE_KEY": "tab:pane"}
+    ) is None
 
 
 def test_orca_identity_failure_does_not_fall_back_to_legacy(tmp_path, monkeypatch):

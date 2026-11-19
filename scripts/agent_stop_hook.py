@@ -164,6 +164,11 @@ def build_event(
         allow_herdr_lookup=agent == "codex",
         cwd=data.get("cwd"),
     )
+    # Orca's in-process output source is authoritative for completed responses.
+    # Keep Claude hooks for question lifecycle only so a Stop event and the
+    # public-CLI completion snapshot cannot deliver the same response twice.
+    if target_identity is not None and target_identity.get("backend") == "orca":
+        return None
     message = data.get("last_assistant_message")
     session_id = data.get("session_id")
     if target_identity is None or not isinstance(message, str) or not message.strip():

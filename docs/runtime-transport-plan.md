@@ -336,7 +336,11 @@ The hook resolved its inherited `ORCA_PANE_KEY` through public `orca agent list
 --json`, emitted a version 3 question event, and Telegram created the Claude
 topic and displayed the question, both options, and their descriptions. The
 inbox event was consumed and delivery dedupe recorded one question delivery.
-No answer controls were exposed.
+No answer controls were exposed. Answering in Orca resolved the question and
+produced the expected final response. That first run exposed duplicate final
+response delivery from both Claude's Stop hook and Orca completion polling; the
+Stop hook is now suppressed for Orca so the public-CLI output source is the
+single completion authority.
 
 ### Exit criteria
 
