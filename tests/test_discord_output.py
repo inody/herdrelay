@@ -95,6 +95,32 @@ def test_load_hook_output_event(tmp_path):
     assert event.text == "complete response"
 
 
+def test_load_orca_output_event_v3_with_generation(tmp_path):
+    path = tmp_path / "orca-v3.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "event_id": "orca-session-1-123",
+                "backend": "orca",
+                "instance_id": "runtime-1",
+                "target": "local/tab:pane",
+                "generation": "session-1",
+                "agent": "pi",
+                "text": "complete response",
+            }
+        )
+    )
+
+    event = load_hook_output_event(path, max_bytes=1000)
+
+    assert event.version == 3
+    assert event.target.backend.value == "orca"
+    assert event.target.instance_id == "runtime-1"
+    assert event.target.address == "local/tab:pane"
+    assert event.generation == "session-1"
+
+
 def test_load_core_hook_output_event_v2(tmp_path):
     path = tmp_path / "event-v2.json"
     path.write_text(
@@ -146,6 +172,25 @@ def test_load_core_hook_output_event_v2(tmp_path):
             "event_id": "bad-3",
             "pane_id": "legacy:p1",
             "core_id": "core-1",
+            "agent": "pi",
+            "text": "response",
+        },
+        {
+            "version": 3,
+            "event_id": "bad-4",
+            "backend": "orca",
+            "instance_id": "runtime-1",
+            "target": "local/tab:pane",
+            "pane_id": "legacy:p1",
+            "agent": "pi",
+            "text": "response",
+        },
+        {
+            "version": 3,
+            "event_id": "bad-5",
+            "backend": "herdr-core",
+            "instance_id": "core-1",
+            "target": "t1",
             "agent": "pi",
             "text": "response",
         },

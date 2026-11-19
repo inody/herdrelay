@@ -22,7 +22,9 @@ class HerdRelayApplication:
 
         self.config = config
         self.store = Store(config.database_path)
-        self.backend_provider: BackendProvider = build_backend_provider(config)
+        self.backend_provider: BackendProvider = build_backend_provider(
+            config, store=self.store
+        )
         self.client: RuntimeClient = self.backend_provider.client
         self.discord: HerdrDiscordBot | None = (
             build_bot(config, self.store, self.client)
@@ -55,6 +57,13 @@ class HerdRelayApplication:
                     name="herdrelay-telegram",
                 )
             )
+        for index, service in enumerate(self.backend_provider.services):
+            self._tasks.append(
+                asyncio.create_task(
+                    service.run_forever(),
+                    name=f"herdrelay-backend-{index}",
+                )
+            )
 
         try:
             done, _ = await asyncio.wait(
@@ -72,6 +81,8 @@ class HerdRelayApplication:
 
         if self.telegram is not None:
             self.telegram.stop()
+        for service in self.backend_provider.services:
+            service.stop()
         if self.discord is not None and not self.discord.is_closed():
             await self.discord.close()
 

@@ -40,6 +40,24 @@ def write_v2(path: Path, **fields) -> None:
     )
 
 
+def write_v3(path: Path, **fields) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "event_id": "orca-event-1",
+                "backend": "orca",
+                "instance_id": "runtime-1",
+                "target": "local/tab:pane",
+                "generation": "session-1",
+                "agent": "pi",
+                "text": "orca response",
+                **fields,
+            }
+        )
+    )
+
+
 def write_v1(path: Path, **fields) -> None:
     path.write_text(
         json.dumps(
@@ -98,6 +116,35 @@ async def test_core_output_is_delivered_to_exact_telegram_topic(tmp_path):
     assert not event_path.exists()
     assert store.has_event_key(
         "agent-output:telegram:-1001:77:pi:event-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_orca_output_is_delivered_to_exact_telegram_topic(tmp_path):
+    inbox, store, api, output = relay(tmp_path)
+    store.upsert_telegram_topic_for_target(
+        target=TargetKey.orca(
+            instance_id="runtime-1", address="local/tab:pane"
+        ),
+        chat_id=-1001,
+        thread_id=99,
+        name="project/pi",
+    )
+    event_path = inbox / "orca.json"
+    write_v3(event_path)
+
+    await output.drain_once(inbox)
+
+    assert api.sent == [
+        {
+            "chat_id": -1001,
+            "message_thread_id": 99,
+            "text": "orca response",
+        }
+    ]
+    assert not event_path.exists()
+    assert store.has_event_key(
+        "agent-output:telegram:-1001:99:pi:orca-event-1"
     )
 
 

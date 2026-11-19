@@ -19,9 +19,26 @@ def _load_telegram_config(path: str) -> AppConfig:
 
 async def run_telegram(config: AppConfig) -> None:
     store = Store(config.database_path)
-    provider = build_backend_provider(config)
+    provider = build_backend_provider(config, store=store)
     service = TelegramService(config=config, store=store, client=provider.client)
-    await service.run_forever()
+    tasks = [asyncio.create_task(service.run_forever())]
+    tasks.extend(
+        asyncio.create_task(backend_service.run_forever())
+        for backend_service in provider.services
+    )
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
+    finally:
+        service.stop()
+        for backend_service in provider.services:
+            backend_service.stop()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await service.close()
 
 
 def main() -> None:

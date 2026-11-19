@@ -4,10 +4,10 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from .domain import OutputEventKind, RuntimeKind, TargetKey
+from .domain import BackendKind, OutputEventKind, RuntimeKind, TargetKey
 from .models import PendingQuestion, QuestionOption
 
-SUPPORTED_OUTPUT_EVENT_VERSIONS = {1, 2}
+SUPPORTED_OUTPUT_EVENT_VERSIONS = {1, 2, 3}
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,7 @@ class HookOutputEvent:
     target: TargetKey
     text: str
     kind: str = OutputEventKind.RESPONSE.value
+    generation: str | None = None
     question: PendingQuestion | None = None
 
     @property
@@ -61,6 +62,13 @@ def load_hook_output_event(path: Path, *, max_bytes: int) -> HookOutputEvent:
         raise ValueError("event identifier or agent name is too long")
 
     target = _load_target(payload, version=version)
+    generation = payload.get("generation") if version == 3 else None
+    if generation is not None and (
+        not isinstance(generation, str) or not generation.strip()
+    ):
+        raise ValueError("generation must be a non-empty string or null")
+    if isinstance(generation, str) and len(generation) > 200:
+        raise ValueError("target generation is too long")
     question = _load_question(
         payload.get("question"),
         pane_id=target.address,
@@ -75,6 +83,7 @@ def load_hook_output_event(path: Path, *, max_bytes: int) -> HookOutputEvent:
         target=target,
         text=text,
         kind=kind,
+        generation=generation,
         question=question,
     )
 
@@ -90,19 +99,38 @@ def _load_target(payload: dict, *, version: int) -> TargetKey:
             raise ValueError("target identity is too long")
         return TargetKey.legacy(pane_id)
 
-    if payload.get("runtime") != RuntimeKind.HERDR_CORE.value:
-        raise ValueError("version 2 event runtime must be herdr-core")
-    if "pane_id" in payload:
-        raise ValueError("version 2 event has conflicting legacy identity")
-    core_id = payload.get("core_id")
+    if version == 2:
+        if payload.get("runtime") != RuntimeKind.HERDR_CORE.value:
+            raise ValueError("version 2 event runtime must be herdr-core")
+        if "pane_id" in payload:
+            raise ValueError("version 2 event has conflicting legacy identity")
+        core_id = payload.get("core_id")
+        address = payload.get("target")
+        if not isinstance(core_id, str) or not core_id:
+            raise ValueError("core_id must be a non-empty string")
+        if not isinstance(address, str) or not address:
+            raise ValueError("target must be a non-empty string")
+        if len(core_id) > 200 or len(address) > 200:
+            raise ValueError("target identity is too long")
+        return TargetKey.core(controller_core_id=core_id, address=address)
+
+    if any(key in payload for key in ("runtime", "core_id", "pane_id")):
+        raise ValueError("version 3 event has conflicting legacy identity")
+    try:
+        backend = BackendKind(payload.get("backend"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("version 3 event backend is unsupported") from exc
+    if backend is not BackendKind.ORCA:
+        raise ValueError("version 3 currently supports only the Orca backend")
+    instance_id = payload.get("instance_id")
     address = payload.get("target")
-    if not isinstance(core_id, str) or not core_id:
-        raise ValueError("core_id must be a non-empty string")
+    if not isinstance(instance_id, str) or not instance_id:
+        raise ValueError("instance_id must be a non-empty string")
     if not isinstance(address, str) or not address:
         raise ValueError("target must be a non-empty string")
-    if len(core_id) > 200 or len(address) > 200:
+    if len(instance_id) > 200 or len(address) > 200:
         raise ValueError("target identity is too long")
-    return TargetKey.core(controller_core_id=core_id, address=address)
+    return TargetKey.orca(instance_id=instance_id, address=address)
 
 
 def _load_question(

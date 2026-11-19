@@ -202,6 +202,27 @@ terminal address:
 }
 ```
 
+An Orca response uses version 3. It separates the stable Orca runtime and pane
+identity from the conversation generation:
+
+```json
+{
+  "version": 3,
+  "event_id": "stable-response-id",
+  "backend": "orca",
+  "instance_id": "orca-runtime-id",
+  "target": "local/tab:pane",
+  "generation": "orca-session-id",
+  "agent": "pi",
+  "text": "complete assistant response"
+}
+```
+
+The in-process Orca output source observes allowlisted agents through the public
+Orca CLI. Its first snapshot establishes a cursor without backfilling existing
+completed responses. A later changed `done` response is written atomically to
+the same private inbox and uses the normal per-destination delivery tracking.
+
 The Pi adapter and Claude/Codex hook prefer `HC_TERMINAL_ID`. They read the
 stable Core ID from `HERDRELAY_CORE_ID` when explicitly supplied, otherwise
 from `core.json` beside `HC_TERMINAL_SOCKET`. If a Core terminal lacks a
@@ -219,10 +240,12 @@ Supported `kind` values are:
 
 Validation and retention rules:
 
-- `version` must be `1` or `2`.
+- `version` must be `1`, `2`, or `3`.
 - Version 1 requires only `pane_id` and rejects conflicting Core identity.
 - Version 2 requires `runtime: herdr-core`, `core_id`, and `target`, and rejects
   a conflicting legacy `pane_id`.
+- Version 3 currently requires `backend: orca`, `instance_id`, `target`, and an
+  optional nonempty `generation`; it rejects legacy and Core identity fields.
 - Required identifiers must be non-empty strings; event IDs, Core IDs, and
   target addresses are limited to 200 characters and agent names to 50.
 - Files larger than `hook_max_event_bytes`, invalid JSON, and malformed events
@@ -234,10 +257,11 @@ Validation and retention rules:
   `agent-output:<agent>:<event_id>` remains readable for compatibility.
 - Discord and Telegram response dedupe keys include their destination IDs.
   Delivery to one transport does not suppress another route, and a shared
-  version 1 or version 2 file remains until all currently persisted routes have
-  completed.
-- Telegram stores normalized runtime target keys, so legacy pane IDs and
-  Core-ID-pinned terminal addresses use the same routing machinery.
+  version 1, version 2, or version 3 file remains until all currently persisted
+  routes have completed.
+- Telegram stores normalized backend target keys, so legacy pane IDs,
+  Core-ID-pinned terminal addresses, and Orca runtime/pane identities use the
+  same routing machinery.
 - Core Discord thread bindings store both the stable Core ID and terminal
   address. A changed Core identity is rejected before a thread mutation.
 - Text is posted as ordinary Discord message content with original newlines and

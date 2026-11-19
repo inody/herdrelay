@@ -41,7 +41,7 @@ def test_application_builds_enabled_transports_with_shared_dependencies(monkeypa
     monkeypatch.setattr("herdrelay.app.Store", make_store)
     monkeypatch.setattr(
         "herdrelay.app.build_backend_provider",
-        lambda supplied: SimpleNamespace(client=client),
+        lambda supplied, **kwargs: SimpleNamespace(client=client, services=()),
     )
     monkeypatch.setattr(
         "herdrelay.app.build_bot",
@@ -99,7 +99,7 @@ async def test_application_runs_discord_and_telegram_as_peers(monkeypatch):
     monkeypatch.setattr("herdrelay.app.Store", lambda path: object())
     monkeypatch.setattr(
         "herdrelay.app.build_backend_provider",
-        lambda supplied: SimpleNamespace(client=object()),
+        lambda supplied, **kwargs: SimpleNamespace(client=object(), services=()),
     )
     monkeypatch.setattr(
         "herdrelay.app.build_bot",
@@ -158,7 +158,7 @@ async def test_application_stops_discord_when_telegram_fails(monkeypatch):
     monkeypatch.setattr("herdrelay.app.Store", lambda path: object())
     monkeypatch.setattr(
         "herdrelay.app.build_backend_provider",
-        lambda supplied: SimpleNamespace(client=object()),
+        lambda supplied, **kwargs: SimpleNamespace(client=object(), services=()),
     )
     monkeypatch.setattr(
         "herdrelay.app.build_bot",
@@ -175,6 +175,54 @@ async def test_application_stops_discord_when_telegram_fails(monkeypatch):
         await application.run()
 
     assert bot.closed is True
+
+
+@pytest.mark.asyncio
+async def test_application_runs_and_stops_backend_services(monkeypatch):
+    config = AppConfig(discord_token="discord-token")
+    backend_started = asyncio.Event()
+    bot_closed = asyncio.Event()
+    seen = {"backend_stop": 0}
+
+    class FakeBot:
+        closed = False
+
+        async def start(self, token):
+            await bot_closed.wait()
+
+        def is_closed(self):
+            return self.closed
+
+        async def close(self):
+            self.closed = True
+            bot_closed.set()
+
+    class FakeBackendService:
+        async def run_forever(self):
+            backend_started.set()
+
+        def stop(self):
+            seen["backend_stop"] += 1
+
+    bot = FakeBot()
+    backend_service = FakeBackendService()
+    monkeypatch.setattr("herdrelay.app.Store", lambda path: object())
+    monkeypatch.setattr(
+        "herdrelay.app.build_backend_provider",
+        lambda supplied, **kwargs: SimpleNamespace(
+            client=object(), services=(backend_service,)
+        ),
+    )
+    monkeypatch.setattr(
+        "herdrelay.app.build_bot",
+        lambda supplied, store, client: bot,
+    )
+
+    await HerdRelayApplication(config).run()
+
+    assert backend_started.is_set()
+    assert bot.closed is True
+    assert seen["backend_stop"] == 1
 
 
 def test_application_rejects_no_enabled_transport():

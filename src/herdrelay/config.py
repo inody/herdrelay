@@ -528,8 +528,8 @@ def _validate_runtime_features(config: AppConfig) -> None:
         raise ValueError("Discord mutations are not implemented for the Orca backend")
     if config.enable_watcher:
         raise ValueError("Discord watcher is not implemented for the Orca backend")
-    if config.enable_streaming:
-        raise ValueError("response streaming is not implemented for the Orca backend")
+    if config.enable_streaming and config.streaming.mode != "hooks":
+        raise ValueError("Orca response streaming requires relay.streaming.mode: hooks")
     if config.telegram.enable_send or config.telegram.enable_interrupt:
         raise ValueError("Telegram mutations are not implemented for the Orca backend")
 

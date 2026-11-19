@@ -77,11 +77,19 @@ async def test_run_telegram_wires_store_runtime_and_service(monkeypatch):
         async def run_forever(self):
             seen["ran"] = True
 
+        def stop(self):
+            seen["stopped"] = True
+
+        async def close(self):
+            seen["closed"] = True
+
     runtime_client = object()
     monkeypatch.setattr("herdrelay.telegram_main.Store", FakeStore)
     monkeypatch.setattr(
         "herdrelay.telegram_main.build_backend_provider",
-        lambda supplied: SimpleNamespace(client=runtime_client),
+        lambda supplied, **kwargs: SimpleNamespace(
+            client=runtime_client, services=()
+        ),
     )
     monkeypatch.setattr(
         "herdrelay.telegram_main.TelegramService", FakeService
@@ -93,3 +101,5 @@ async def test_run_telegram_wires_store_runtime_and_service(monkeypatch):
     assert seen["config"] is config
     assert seen["client"] is runtime_client
     assert seen["ran"] is True
+    assert seen["stopped"] is True
+    assert seen["closed"] is True

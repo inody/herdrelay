@@ -46,6 +46,13 @@ class BackendEventSource(Protocol):
     async def events(self) -> AsyncIterator[RuntimeEvent]: ...
 
 
+@runtime_checkable
+class BackendService(Protocol):
+    async def run_forever(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class BackendProvider:
     """Selected backend plus the compatibility client used during migration."""
@@ -54,3 +61,4 @@ class BackendProvider:
     backend: RuntimeBackend
     client: RuntimeClient
     events: BackendEventSource | None = None
+    services: tuple[BackendService, ...] = ()

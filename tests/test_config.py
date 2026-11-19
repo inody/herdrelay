@@ -128,7 +128,7 @@ def test_load_config_rejects_orca_without_target_allowlist(tmp_path, monkeypatch
     [
         ("enable_send: true", "mutations"),
         ("enable_watcher: true", "watcher"),
-        ("enable_streaming: true", "streaming"),
+        ("enable_streaming: true\nstreaming:\n  mode: poll", "requires"),
     ],
 )
 def test_load_config_rejects_unimplemented_orca_features(

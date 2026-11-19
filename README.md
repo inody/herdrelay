@@ -1,8 +1,9 @@
 # HerdRelay
 
-HerdRelay connects local [Herdr](https://herdr.dev/) agents to authorized chat
-transports. It routes prompts, lifecycle notifications, and completed responses
-between Herdr Core or the legacy Herdr TUI and Discord or Telegram.
+HerdRelay connects local coding agents to authorized chat transports. It routes
+prompts, lifecycle notifications, and completed responses between Herdr Core or
+the legacy Herdr TUI and Discord or Telegram. An experimental read-only Orca
+backend can relay allowlisted agent status and newly completed responses.
 
 Herdr remains the runtime authority. HerdRelay does not start Core, expose its
 raw protocol, provide arbitrary shell access, or replace Herdr's own session
@@ -14,6 +15,7 @@ management.
 |---|---:|---:|
 | Herdr Core | Supported and live-E2E tested | Supported and live-E2E tested |
 | Legacy Herdr TUI | Compatibility path | Best-effort; automated tests only |
+| Orca | Experimental read-only; automated tests | Experimental read-only; automated tests |
 
 Herdr Core with Telegram and/or Discord is the supported production path.
 Telegram interrupt is Core-only. Raw keys, approval buttons, agent start, and
@@ -41,9 +43,10 @@ Pi TUI extension ───┴─> private JSON inbox ─> shared delivery tracke
                                                 └─> Telegram forum topic
 
 Discord thread ─┐
-Telegram topic ─┴─> authorization + audit ─> runtime client
+Telegram topic ─┴─> authorization + audit ─> runtime backend
                                              ├─> Herdr Core socket
-                                             └─> legacy Herdr CLI
+                                             ├─> legacy Herdr CLI
+                                             └─> Orca public CLI (read-only)
 
 Herdr lifecycle events ─> status routing ─> enabled chat transports
 HerdRelay state/audit  <──────────────────> SQLite
@@ -268,7 +271,8 @@ configuration compatibility. New installations should use the grouped schema in
 
 Settings are grouped by responsibility:
 
-- `runtime`: provider selection and runtime connection policy;
+- `runtime`: provider selection and runtime connection policy, including
+  deny-by-default Orca host and target allowlists;
 - `storage`: stable SQLite path;
 - `relay`: shared output, streaming, and text safety policy;
 - `transports.discord`: Discord access and controls; and
@@ -408,6 +412,9 @@ socket. It never types into an existing terminal.
   device acceptance testing; use
   [`docs/apple-watch-acceptance.md`](docs/apple-watch-acceptance.md).
 - Telegram interrupt is Core-only.
+- Orca is currently read-only: status and newly completed responses only;
+  prompt submission, interrupt, watcher events, and existing-response backfill
+  remain disabled.
 - Legacy TUI with Telegram is best-effort and not live-acceptance tested.
 - New Core terminals must be added to an exact allowlist before exposure.
 - Existing agent sessions must load the current adapter version before they can

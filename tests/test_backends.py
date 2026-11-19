@@ -15,6 +15,7 @@ from herdrelay.domain import (
 )
 from herdrelay.models import HerdrTarget
 from herdrelay.runtime import RuntimeCapabilities
+from herdrelay.store import Store
 
 
 @dataclass
@@ -139,6 +140,26 @@ def test_build_backend_provider_wraps_selected_runtime(monkeypatch):
     assert provider.kind is BackendKind.HERDR_CORE
     assert provider.client is client
     assert provider.backend.client is client
+
+
+def test_build_backend_provider_adds_orca_output_source_for_hook_streaming(
+    tmp_path,
+):
+    config = AppConfig(
+        discord_token="token",
+        database_path=str(tmp_path / "store.sqlite3"),
+        enable_streaming=True,
+        runtime=RuntimeConfig(
+            provider="orca",
+            orca=OrcaRuntimeConfig(allowed_pane_keys=frozenset({"tab:pane"})),
+        ),
+    )
+
+    provider = build_backend_provider(
+        config, store=Store(config.database_path)
+    )
+
+    assert len(provider.services) == 1
 
 
 def test_build_backend_provider_wraps_orca_read_only_runtime():
