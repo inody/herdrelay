@@ -5,12 +5,19 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Mapping
 
-TARGET_KEY_VERSION = 1
+LEGACY_TARGET_KEY_VERSION = 1
+TARGET_KEY_VERSION = 2
 
 
-class RuntimeKind(StrEnum):
+class BackendKind(StrEnum):
     HERDR_TUI = "herdr-tui"
     HERDR_CORE = "herdr-core"
+    ORCA = "orca"
+
+
+# Compatibility name for existing callers while the runtime/backend vocabulary
+# is migrated across the package.
+RuntimeKind = BackendKind
 
 
 class LifecycleState(StrEnum):
@@ -72,20 +79,39 @@ class MutationOutcomeUnknownError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class TargetKey:
-    runtime: RuntimeKind
+    backend: BackendKind
     address: str
-    controller_core_id: str | None = None
-    origin_core_id: str | None = None
+    instance_id: str | None = None
+    origin_instance_id: str | None = None
 
     def __post_init__(self) -> None:
-        _require_enum(self.runtime, RuntimeKind, "target runtime")
+        _require_enum(self.backend, BackendKind, "target backend")
         _require_nonempty(self.address, "target address")
-        if self.runtime is RuntimeKind.HERDR_CORE:
-            _require_nonempty(self.controller_core_id, "controller Core ID")
-            if self.origin_core_id is not None:
-                _require_nonempty(self.origin_core_id, "origin Core ID")
-        elif self.controller_core_id is not None or self.origin_core_id is not None:
-            raise ValueError("legacy Herdr targets cannot carry Core IDs")
+        if self.backend in {BackendKind.HERDR_CORE, BackendKind.ORCA}:
+            _require_nonempty(self.instance_id, "target instance ID")
+        elif self.instance_id is not None or self.origin_instance_id is not None:
+            raise ValueError("legacy Herdr targets cannot carry instance IDs")
+        if self.origin_instance_id is not None:
+            _require_nonempty(self.origin_instance_id, "origin instance ID")
+            if self.backend is not BackendKind.HERDR_CORE:
+                raise ValueError("only Herdr Core targets can carry an origin instance ID")
+
+    @property
+    def runtime(self) -> BackendKind:
+        """Compatibility alias for callers using the former runtime name."""
+        return self.backend
+
+    @property
+    def controller_core_id(self) -> str | None:
+        return self.instance_id if self.backend is BackendKind.HERDR_CORE else None
+
+    @property
+    def origin_core_id(self) -> str | None:
+        return (
+            self.origin_instance_id
+            if self.backend is BackendKind.HERDR_CORE
+            else None
+        )
 
     @classmethod
     def core(
@@ -96,30 +122,51 @@ class TargetKey:
         origin_core_id: str | None = None,
     ) -> TargetKey:
         return cls(
-            runtime=RuntimeKind.HERDR_CORE,
-            controller_core_id=controller_core_id,
-            origin_core_id=origin_core_id,
+            backend=BackendKind.HERDR_CORE,
+            instance_id=controller_core_id,
+            origin_instance_id=origin_core_id,
             address=address,
         )
 
     @classmethod
     def legacy(cls, pane_id: str) -> TargetKey:
-        return cls(runtime=RuntimeKind.HERDR_TUI, address=pane_id)
+        return cls(backend=BackendKind.HERDR_TUI, address=pane_id)
+
+    @classmethod
+    def orca(cls, *, instance_id: str, address: str) -> TargetKey:
+        return cls(
+            backend=BackendKind.ORCA,
+            instance_id=instance_id,
+            address=address,
+        )
 
     def to_route_value(self) -> str:
-        """Persist legacy pane IDs compatibly and Core identities exactly."""
-        if self.runtime is RuntimeKind.HERDR_TUI:
+        """Persist legacy pane IDs compatibly and other identities exactly."""
+        if self.backend is BackendKind.HERDR_TUI:
             return self.address
         return self.to_storage_key()
 
     def to_storage_key(self) -> str:
+        if self.backend is not BackendKind.ORCA:
+            return json.dumps(
+                {
+                    "v": LEGACY_TARGET_KEY_VERSION,
+                    "runtime": self.backend.value,
+                    "address": self.address,
+                    "controller_core_id": self.controller_core_id,
+                    "origin_core_id": self.origin_core_id,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
         return json.dumps(
             {
                 "v": TARGET_KEY_VERSION,
-                "runtime": self.runtime.value,
+                "backend": self.backend.value,
+                "instance_id": self.instance_id,
+                "origin_instance_id": self.origin_instance_id,
                 "address": self.address,
-                "controller_core_id": self.controller_core_id,
-                "origin_core_id": self.origin_core_id,
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -128,7 +175,7 @@ class TargetKey:
 
     @classmethod
     def from_route_value(cls, value: str) -> TargetKey:
-        """Read a normalized Core key or an existing raw legacy pane ID."""
+        """Read a normalized target key or an existing raw legacy pane ID."""
         if not isinstance(value, str) or not value.strip():
             raise ValueError("target route value must be a non-empty string")
         if not value.lstrip().startswith("{"):
@@ -143,17 +190,35 @@ class TargetKey:
             raise ValueError(f"invalid target key JSON: {exc}") from exc
         if not isinstance(item, dict):
             raise ValueError("target key must be a JSON object")
-        if item.get("v") != TARGET_KEY_VERSION:
-            raise ValueError(f"unsupported target key version: {item.get('v')!r}")
+        version = item.get("v")
+        if version == LEGACY_TARGET_KEY_VERSION:
+            return cls._from_legacy_storage_item(item)
+        if version != TARGET_KEY_VERSION:
+            raise ValueError(f"unsupported target key version: {version!r}")
         try:
-            runtime = RuntimeKind(item.get("runtime"))
+            backend = BackendKind(item.get("backend"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"unsupported backend: {item.get('backend')!r}") from exc
+        return cls(
+            backend=backend,
+            address=_optional_field(item, "address", required=True),
+            instance_id=_optional_field(item, "instance_id"),
+            origin_instance_id=_optional_field(item, "origin_instance_id"),
+        )
+
+    @classmethod
+    def _from_legacy_storage_item(cls, item: Mapping[str, Any]) -> TargetKey:
+        try:
+            backend = BackendKind(item.get("runtime"))
         except (TypeError, ValueError) as exc:
             raise ValueError(f"unsupported runtime: {item.get('runtime')!r}") from exc
+        if backend is BackendKind.ORCA:
+            raise ValueError("Orca target keys require version 2")
         return cls(
-            runtime=runtime,
+            backend=backend,
             address=_optional_field(item, "address", required=True),
-            controller_core_id=_optional_field(item, "controller_core_id"),
-            origin_core_id=_optional_field(item, "origin_core_id"),
+            instance_id=_optional_field(item, "controller_core_id"),
+            origin_instance_id=_optional_field(item, "origin_core_id"),
         )
 
 
@@ -161,6 +226,7 @@ class TargetKey:
 class TargetSnapshot:
     key: TargetKey
     lifecycle: LifecycleState
+    generation: str | None = None
     agent_state: AgentState = AgentState.UNKNOWN
     agent_app: str | None = None
     status_message: str | None = None
@@ -177,6 +243,8 @@ class TargetSnapshot:
     def __post_init__(self) -> None:
         _require_enum(self.lifecycle, LifecycleState, "target lifecycle")
         _require_enum(self.agent_state, AgentState, "agent state")
+        if self.generation is not None:
+            _require_nonempty(self.generation, "target generation")
         if self.turn < 0:
             raise ValueError("target turn must not be negative")
         for label, value in self.labels.items():

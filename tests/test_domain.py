@@ -8,6 +8,7 @@ import pytest
 from herdrelay.domain import (
     Actor,
     AgentState,
+    BackendKind,
     InboundAction,
     InboundActionKind,
     LifecycleState,
@@ -58,20 +59,37 @@ def test_route_values_keep_legacy_compatibility_and_pin_core_identity():
     assert TargetKey.from_route_value(core.to_route_value()) == core
 
 
-def test_target_key_rejects_cross_runtime_identity_and_unknown_versions():
-    with pytest.raises(ValueError, match="controller Core ID"):
-        TargetKey(runtime=RuntimeKind.HERDR_CORE, address="t1")
-    with pytest.raises(ValueError, match="cannot carry Core IDs"):
+def test_orca_target_key_uses_generic_versioned_identity():
+    key = TargetKey.orca(instance_id="runtime-1/local", address="pane-1")
+
+    encoded = key.to_storage_key()
+
+    assert TargetKey.from_storage_key(encoded) == key
+    assert '"v":2' in encoded
+    assert key.backend is BackendKind.ORCA
+    assert key.runtime is RuntimeKind.ORCA
+    assert key.instance_id == "runtime-1/local"
+    assert key.controller_core_id is None
+
+
+def test_target_key_rejects_cross_backend_identity_and_unknown_versions():
+    with pytest.raises(ValueError, match="target instance ID"):
+        TargetKey(backend=BackendKind.HERDR_CORE, address="t1")
+    with pytest.raises(ValueError, match="cannot carry instance IDs"):
         TargetKey(
-            runtime=RuntimeKind.HERDR_TUI,
+            backend=BackendKind.HERDR_TUI,
             address="w0:p1",
-            controller_core_id="core",
+            instance_id="core",
+        )
+    with pytest.raises(ValueError, match="only Herdr Core"):
+        TargetKey(
+            backend=BackendKind.ORCA,
+            address="pane-1",
+            instance_id="runtime-1",
+            origin_instance_id="remote-runtime",
         )
     with pytest.raises(ValueError, match="unsupported target key version"):
-        TargetKey.from_storage_key(
-            '{"v":2,"runtime":"herdr-core","address":"t1",'
-            '"controller_core_id":"core"}'
-        )
+        TargetKey.from_storage_key('{"v":3,"backend":"orca","address":"pane-1"}')
 
 
 def test_target_snapshot_keeps_mutable_display_metadata_outside_identity():
@@ -79,6 +97,7 @@ def test_target_snapshot_keeps_mutable_display_metadata_outside_identity():
     before = TargetSnapshot(
         key=key,
         lifecycle=LifecycleState.LIVE,
+        generation="session-1",
         agent_state=AgentState.WORKING,
         title="First title",
         cwd="/tmp/one",
@@ -89,6 +108,7 @@ def test_target_snapshot_keeps_mutable_display_metadata_outside_identity():
     after = TargetSnapshot(
         key=key,
         lifecycle=LifecycleState.LIVE,
+        generation="session-2",
         agent_state=AgentState.DONE,
         title="Second title",
         cwd="/tmp/two",
@@ -98,6 +118,7 @@ def test_target_snapshot_keeps_mutable_display_metadata_outside_identity():
     )
 
     assert before.key == after.key
+    assert before.generation != after.generation
     assert before != after
 
 
