@@ -1,6 +1,9 @@
 # Herdr Core and Telegram implementation plan
 
-Status: proposed
+Status: implementation history and remaining acceptance work
+
+Further backend/transport generalization and Orca support are planned in
+[Runtime and transport implementation plan](runtime-transport-plan.md).
 
 This plan implements the architecture in
 [Herdr Core and Telegram architecture](core-telegram-design.md). It is organized

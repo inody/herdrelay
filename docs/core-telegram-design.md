@@ -1,6 +1,10 @@
 # Herdr Core and Telegram architecture
 
-Status: proposed
+Status: implemented foundation; retained as the Core/Telegram-specific design
+
+The generalized backend/transport architecture, including Orca as a first-class
+runtime backend, is defined in
+[Runtime and transport architecture](runtime-transport-design.md).
 
 This document defines the target architecture for migrating HerdRelay from the
 legacy Herdr TUI to Herdr Core and for supporting Telegram alongside Discord.

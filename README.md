@@ -394,9 +394,12 @@ socket. It never types into an existing terminal.
   log rotation;
 - `tests/` — unit, regression, adapter, and isolated live-contract tests;
 - `docs/operations.md` — event formats and operational details;
-- `docs/core-telegram-design.md` — architecture and security boundary; and
-- `docs/core-telegram-plan.md` — staged implementation history and remaining
-  acceptance work.
+- `docs/core-telegram-design.md` — Core/Telegram architecture and security boundary;
+- `docs/core-telegram-plan.md` — Core/Telegram implementation history and remaining
+  acceptance work;
+- `docs/runtime-transport-design.md` — generalized backend/transport architecture,
+  including Orca; and
+- `docs/runtime-transport-plan.md` — staged refactor and Orca implementation plan.
 
 ## Current limitations
 
