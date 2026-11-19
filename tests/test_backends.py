@@ -151,7 +151,7 @@ def test_build_backend_provider_adds_orca_output_source_for_hook_streaming(
         enable_streaming=True,
         runtime=RuntimeConfig(
             provider="orca",
-            orca=OrcaRuntimeConfig(allowed_pane_keys=frozenset({"tab:pane"})),
+            orca=OrcaRuntimeConfig(),
         ),
     )
 
@@ -167,7 +167,7 @@ def test_build_backend_provider_wraps_orca_runtime():
         discord_token="token",
         runtime=RuntimeConfig(
             provider="orca",
-            orca=OrcaRuntimeConfig(allowed_pane_keys=frozenset({"tab:pane"})),
+            orca=OrcaRuntimeConfig(),
         ),
     )
 

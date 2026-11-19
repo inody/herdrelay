@@ -4,7 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from herdrelay.config import AppConfig, HcRuntimeConfig, RuntimeConfig
+from herdrelay.config import (
+    AppConfig,
+    HcRuntimeConfig,
+    HcTargetExposureConfig,
+    RuntimeConfig,
+)
 from herdrelay.models import HerdrTarget
 from herdrelay.target_cli import allow_target, remove_target
 
@@ -15,8 +20,9 @@ def config(path) -> AppConfig:
         runtime=RuntimeConfig(
             provider="herdr-core",
             core=HcRuntimeConfig(
-                allowed_terminal_addresses_file=str(path),
-                allowed_terminal_addresses=frozenset(),
+                target_exposure=HcTargetExposureConfig(
+                    mode="selected", addresses_file=str(path)
+                )
             ),
         ),
     )
@@ -44,9 +50,9 @@ def test_allow_and_remove_target_use_private_atomic_file(tmp_path, monkeypatch):
     assert path.read_text() == "t12\n"
     assert path.stat().st_mode & 0o777 == 0o600
 
-    assert remove_target(app_config, "t12") is True
-    assert remove_target(app_config, "t12") is False
-    assert path.read_text() == ""
+    with pytest.raises(ValueError, match="retain at least one"):
+        remove_target(app_config, "t12")
+    assert path.read_text() == "t12\n"
 
 
 def test_allow_target_requires_an_eligible_live_agent(tmp_path, monkeypatch):
@@ -60,11 +66,11 @@ def test_allow_target_requires_an_eligible_live_agent(tmp_path, monkeypatch):
         allow_target(app_config, "t99")
 
 
-def test_target_cli_requires_file_managed_allowlist():
+def test_target_cli_requires_selected_file_managed_targets():
     app_config = AppConfig(
         discord_token="",
         runtime=RuntimeConfig(provider="herdr-core"),
     )
 
-    with pytest.raises(ValueError, match="allowed_terminal_addresses_file"):
+    with pytest.raises(ValueError, match="mode=selected"):
         remove_target(app_config, "t1")

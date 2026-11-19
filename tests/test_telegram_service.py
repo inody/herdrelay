@@ -9,6 +9,7 @@ import pytest
 from herdrelay.config import (
     AppConfig,
     HcRuntimeConfig,
+    HcTargetExposureConfig,
     RuntimeConfig,
     TelegramConfig,
 )
@@ -82,7 +83,11 @@ def config() -> AppConfig:
         discord_token="unused",
         runtime=RuntimeConfig(
             provider="herdr-core",
-            core=HcRuntimeConfig(allowed_terminal_addresses=frozenset({"t12"})),
+            core=HcRuntimeConfig(
+                target_exposure=HcTargetExposureConfig(
+                    mode="selected", addresses=frozenset({"t12"})
+                )
+            ),
         ),
         telegram=TelegramConfig(
             enabled=True,
@@ -446,6 +451,56 @@ def mutation_service(
         config=app_config, store=store, client=client, api=api
     )
     return relay, client
+
+
+@pytest.mark.asyncio
+async def test_orca_topics_follow_exposed_agent_lifecycle(tmp_path):
+    target = HerdrTarget(
+        target="local/tab:pane",
+        agent_name="pi",
+        status="idle",
+        workspace_label="project",
+    )
+
+    class FakeOrcaClient(FakeLegacyClient):
+        def target_key(self, address):
+            return TargetKey.orca(
+                instance_id="runtime-1", address=address
+            )
+
+    client = FakeOrcaClient([target])
+    app_config = AppConfig(
+        discord_token="unused",
+        runtime=RuntimeConfig(provider="orca"),
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+        ),
+    )
+    api = FakeApi([])
+    relay = TelegramService(
+        config=app_config,
+        store=Store(tmp_path / "orca-lifecycle.sqlite3"),
+        client=client,
+        api=api,
+    )
+
+    await relay.status_relay.legacy_once()
+    route = relay.store.get_telegram_topic_for_target(
+        client.target_key(target.target)
+    )
+    assert route is not None
+    assert api.created_topics
+
+    client.panes = []
+    await relay.status_relay.legacy_once()
+
+    assert api.closed_topics == [
+        {"chat_id": -1001, "message_thread_id": 101}
+    ]
 
 
 @pytest.mark.asyncio

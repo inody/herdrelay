@@ -57,7 +57,7 @@ async def test_orca_output_source_emits_only_new_completed_responses(tmp_path):
         enable_streaming=True,
         runtime=RuntimeConfig(
             provider="orca",
-            orca=OrcaRuntimeConfig(allowed_pane_keys=frozenset({"tab:pane"})),
+            orca=OrcaRuntimeConfig(),
         ),
         streaming=StreamConfig(hook_inbox_path=str(inbox)),
     )

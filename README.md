@@ -3,7 +3,7 @@
 HerdRelay connects local coding agents to authorized chat transports. It routes
 prompts, lifecycle notifications, and completed responses between Herdr Core or
 the legacy Herdr TUI and Discord or Telegram. An experimental Orca backend can
-relay allowlisted agent status and newly completed responses and submit normal
+relay eligible agent status and newly completed responses and submit normal
 prompts through Orca's public CLI.
 
 Herdr remains the runtime authority. HerdRelay does not start Core, expose its
@@ -100,8 +100,8 @@ runtime:
   provider: herdr-core
   herdr_core:
     socket_path: ~/.local/state/herdr-core/default/default.sock
-    allowed_terminal_addresses: []
-    allowed_terminal_addresses_file: ~/.config/herdrelay/allowed-core-targets
+    target_exposure:
+      mode: all-eligible
     require_app_visible: true
     include_hidden_workers: false
     include_connected_machines: false
@@ -132,19 +132,14 @@ transports:
     enable_interrupt: false
 ```
 
-Core access is deny-by-default. HerdRelay connects directly to the configured
-existing Unix socket and never uses a CLI command that could start Core.
+`all-eligible` exposes every eligible local interactive agent while retaining
+visibility, hidden-worker, connected-machine, capability, and exact-identity
+checks. HerdRelay connects directly to the configured existing Unix socket and
+never uses a CLI command that could start Core.
 
-Add one exact live agent target locally:
-
-```bash
-uv run herdrelay-targets --config config.yaml list
-uv run herdrelay-targets --config config.yaml allow t12
-```
-
-The file-backed allowlist is written atomically with mode `0600`. Restart
-HerdRelay after adding or removing a target. Inline targets are merged with the
-file but are intentionally not removed by this CLI.
+Installations that intentionally need a smaller set can use explicit
+`selected` mode with exact addresses and an optional private file. The
+`herdrelay-targets` CLI manages that file only in `selected` mode.
 
 ### 4. Install agent output adapters
 
@@ -188,7 +183,7 @@ scripts/status_launchd.sh
 
 In Telegram:
 
-- `/agents` lists allowlisted live agents;
+- `/agents` lists currently available agents;
 - `/help` shows enabled controls;
 - each agent receives one persisted forum topic;
 - ordinary topic text submits a prompt only when `enable_send: true` and a
@@ -272,8 +267,8 @@ configuration compatibility. New installations should use the grouped schema in
 
 Settings are grouped by responsibility:
 
-- `runtime`: provider selection and runtime connection policy, including
-  deny-by-default Orca host and target allowlists;
+- `runtime`: provider selection, backend eligibility, host scope, and explicit
+  target exposure policy;
 - `storage`: stable SQLite path;
 - `relay`: shared output, streaming, and text safety policy;
 - `transports.discord`: Discord access and controls; and
@@ -284,7 +279,8 @@ Important defaults and invariants:
 - Discord defaults to enabled for compatibility; disable it explicitly for a
   Telegram-only process.
 - Telegram `enable_send` and `enable_interrupt` default to false.
-- Empty Core target allowlists expose no terminals.
+- New Core and Orca configurations default to `all-eligible`; `selected` and
+  `none` are explicit restrictions.
 - Telegram requires exact nonempty chat and user allowlists.
 - `storage.database_path` defaults to `herdrelay.sqlite3`. An existing legacy
   `herdr-discord-bridge.sqlite3` is reused only when the preferred file is
@@ -310,7 +306,8 @@ details.
 
 Treat every enabled chat destination as remote terminal access.
 
-- Core targets are exact and deny-by-default.
+- Backends expose only eligible targets; mutations revalidate exact runtime and
+  target identity immediately before input.
 - Telegram mutations require exact actor and chat authorization, atomic audit
   claims, per-actor/chat/target rate limits, and destination-bound topic routes.
 - Telegram interrupt confirmations are actor/chat/topic/target bound,
@@ -346,7 +343,7 @@ Run Telegram explicitly without creating a Discord client:
 uv run herdrelay-telegram --config config.yaml
 ```
 
-Manage Core target policy:
+Manage an optional file-backed Core selection (`selected` mode only):
 
 ```bash
 uv run herdrelay-targets --config config.yaml list
@@ -354,7 +351,7 @@ uv run herdrelay-targets --config config.yaml allow t12
 uv run herdrelay-targets --config config.yaml remove t12
 ```
 
-After changing code, `.env`, `config.yaml`, or the target allowlist:
+After changing code, `.env`, `config.yaml`, or target exposure settings:
 
 ```bash
 launchctl kickstart -k "gui/$UID/dev.herdrelay"
@@ -420,6 +417,7 @@ socket. It never types into an existing terminal.
   stop/approval/raw input, watcher events, and
   existing-response backfill remain disabled.
 - Legacy TUI with Telegram is best-effort and not live-acceptance tested.
-- New Core terminals must be added to an exact allowlist before exposure.
+- Native Orca chat agents remain excluded until a documented safe prompt path
+  is available; local Orca terminal agents are exposed automatically.
 - Existing agent sessions must load the current adapter version before they can
   emit Core-aware output events.

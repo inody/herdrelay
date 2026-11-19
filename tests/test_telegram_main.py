@@ -52,7 +52,7 @@ async def test_run_telegram_wires_store_runtime_and_service(monkeypatch):
         database_path="telegram.sqlite3",
         runtime=RuntimeConfig(
             provider="herdr-core",
-            core=HcRuntimeConfig(allowed_terminal_addresses=frozenset({"t12"})),
+            core=HcRuntimeConfig(),
         ),
         telegram=TelegramConfig(
             enabled=True,

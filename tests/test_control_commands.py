@@ -181,7 +181,7 @@ async def test_core_stop_uses_native_interrupt_and_core_help(tmp_path):
         allowed_user_ids=frozenset({10}),
         runtime=RuntimeConfig(
             provider="herdr-core",
-            core=HcRuntimeConfig(allowed_terminal_addresses=frozenset({"t1"})),
+            core=HcRuntimeConfig(),
         ),
     )
     client = Mock(spec=HcClient)

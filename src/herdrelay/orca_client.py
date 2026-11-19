@@ -239,7 +239,7 @@ class OrcaClient:
         return matches[0]
 
     def _target_from_agent(self, agent: OrcaAgent) -> HerdrTarget | None:
-        if agent.host_id not in self.orca.allowed_host_ids:
+        if agent.host_id not in self.orca.host_ids:
             return None
         if agent.kind == "terminal":
             if not self.orca.include_terminal_agents or not agent.pane_key:
@@ -251,9 +251,15 @@ class OrcaClient:
             endpoint = f"session:{agent.session_id}"
         else:
             return None
-        if (
-            endpoint not in self.orca.allowed_pane_keys
-            and (not agent.worktree_id or agent.worktree_id not in self.orca.allowed_worktree_ids)
+        exposure = self.orca.target_exposure
+        if exposure.mode == "none":
+            return None
+        if exposure.mode == "selected" and (
+            endpoint not in exposure.pane_keys
+            and (
+                not agent.worktree_id
+                or agent.worktree_id not in exposure.worktree_ids
+            )
         ):
             return None
 

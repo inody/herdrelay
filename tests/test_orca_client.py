@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from herdrelay.config import AppConfig, OrcaRuntimeConfig, RuntimeConfig
+from herdrelay.config import (
+    AppConfig,
+    OrcaRuntimeConfig,
+    OrcaTargetExposureConfig,
+    RuntimeConfig,
+)
 from herdrelay.domain import BackendKind
 from herdrelay.orca_cli import OrcaAgent, OrcaCliError, OrcaTerminal
 from herdrelay.orca_client import OrcaClient
@@ -48,22 +53,27 @@ def agent(
     )
 
 
-def make_client(*, allowed_panes=(), allowed_worktrees=("repo::/worktree",)):
+def make_client(
+    *, mode="all-eligible", pane_keys=(), worktree_ids=()
+):
     config = AppConfig(
         discord_token="",
         runtime=RuntimeConfig(
             provider="orca",
             orca=OrcaRuntimeConfig(
-                allowed_host_ids=frozenset({"local"}),
-                allowed_pane_keys=frozenset(allowed_panes),
-                allowed_worktree_ids=frozenset(allowed_worktrees),
+                host_ids=frozenset({"local"}),
+                target_exposure=OrcaTargetExposureConfig(
+                    mode=mode,
+                    pane_keys=frozenset(pane_keys),
+                    worktree_ids=frozenset(worktree_ids),
+                ),
             ),
         ),
     )
     return OrcaClient(config)
 
 
-def test_orca_client_lists_allowlisted_targets_and_pins_runtime_identity():
+def test_orca_client_lists_all_eligible_targets_and_pins_runtime_identity():
     client = make_client()
     client.cli = type(
         "FakeCli",
@@ -83,8 +93,8 @@ def test_orca_client_lists_allowlisted_targets_and_pins_runtime_identity():
     assert client.resolve_target_key(key) == target
 
 
-def test_orca_client_filters_hosts_kinds_and_deny_by_default_targets():
-    client = make_client(allowed_worktrees=())
+def test_orca_client_filters_hosts_and_unsupported_kinds():
+    client = make_client()
     client.cli = type(
         "FakeCli",
         (),
@@ -100,11 +110,31 @@ def test_orca_client_filters_hosts_kinds_and_deny_by_default_targets():
         },
     )()
 
-    assert client.list_targets() == []
+    assert [target.target for target in client.list_targets()] == [
+        "local/tab:pane"
+    ]
+
+
+def test_orca_client_selected_and_none_exposure_modes():
+    selected = make_client(
+        mode="selected", worktree_ids=("repo::/worktree",)
+    )
+    selected.cli = type(
+        "SelectedCli",
+        (),
+        {"agent_list": lambda self: ("runtime-1", [agent()])},
+    )()
+    none = make_client(mode="none")
+    none.cli = selected.cli
+
+    assert [target.target for target in selected.list_targets()] == [
+        "local/tab:pane"
+    ]
+    assert none.list_targets() == []
 
 
 def test_orca_client_reads_bounded_last_assistant_message():
-    client = make_client(allowed_panes=("tab:pane",), allowed_worktrees=())
+    client = make_client(mode="selected", pane_keys=("tab:pane",))
     item = agent(message="one\ntwo\nthree")
     client.cli = type(
         "FakeCli",

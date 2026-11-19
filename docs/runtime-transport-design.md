@@ -482,9 +482,12 @@ Eligible targets use one explicit exposure policy:
   available, and transport topics or threads follow its open/close lifecycle.
 - `selected` is an optional operator restriction for installations that need a
   smaller set. It requires at least one exact provider-specific selector.
+- `none` intentionally exposes no targets without disabling the backend or
+  transport process.
 
-An empty selector list never silently changes meaning. In `all-eligible` mode,
-selectors are absent. In `selected` mode, an empty selector set is invalid.
+An empty selector list never silently changes meaning. In `all-eligible` and
+`none` modes, selectors are absent. In `selected` mode, an empty selector set
+is invalid.
 Transport chat/user/guild/channel allowlists continue to decide who may access
 the exposed targets; target selection is not a substitute for transport
 authorization.

@@ -60,9 +60,14 @@ class HcClient:
         self._core_name = core_name
 
     def address_allowed(self, target: str) -> bool:
-        return target in self.config.runtime.core.allowed_terminal_addresses and (
-            self.config.runtime.core.include_connected_machines or "/" not in target
-        )
+        if not self.config.runtime.core.include_connected_machines and "/" in target:
+            return False
+        exposure = self.config.runtime.core.target_exposure
+        if exposure.mode == "all-eligible":
+            return True
+        if exposure.mode == "none":
+            return False
+        return target in exposure.addresses
 
     def project_terminal(self, terminal: HcTerminal) -> HerdrTarget:
         return self._target_from_terminal(terminal, raw={"address": terminal.address})
@@ -71,7 +76,7 @@ class HcClient:
         return [target for target in self.list_panes() if target.agent_name]
 
     def list_panes(self) -> list[HerdrTarget]:
-        """List allowlisted live Core terminals from one validated snapshot."""
+        """List exposed live Core terminals from one validated snapshot."""
         result = self._call("terminal.list", {"all": False, "labels": {}})
         items = result.get("terminals")
         if not isinstance(items, list):
@@ -92,7 +97,7 @@ class HcClient:
             self.list_panes()
         if self._core_id is None:
             raise HcRpcError("Core identity is unavailable")
-        self._ensure_target_allowed(target)
+        self._ensure_target_exposed(target)
         return TargetKey.core(controller_core_id=self._core_id, address=target)
 
     def resolve_target_key(self, key: TargetKey) -> HerdrTarget:
@@ -117,7 +122,7 @@ class HcClient:
         source: str | None = None,
     ) -> str:
         del fmt, source
-        self._ensure_target_allowed(target)
+        self._ensure_target_exposed(target)
         result = self._call(
             "terminal.read",
             {"terminal": target, "lines": lines, "caller": None},
@@ -131,7 +136,7 @@ class HcClient:
         self.send_with_receipt(target, message)
 
     def send_with_receipt(self, target: str, message: str) -> HcMutationReceipt:
-        self._ensure_target_allowed(target)
+        self._ensure_target_exposed(target)
         raw = self._call("terminal.get", {"terminal": target, "caller": None})
         terminal = parse_terminal(raw)
         if terminal.state != "live":
@@ -157,7 +162,7 @@ class HcClient:
         return self.interrupt_with_receipt(target).result
 
     def interrupt_with_receipt(self, target: str) -> HcMutationReceipt:
-        self._ensure_target_allowed(target)
+        self._ensure_target_exposed(target)
         raw = self._call("terminal.get", {"terminal": target, "caller": None})
         terminal = parse_terminal(raw)
         projected = self._target_from_terminal(terminal, raw=raw)
@@ -237,11 +242,13 @@ class HcClient:
         self.observe_core_identity(call.hello.core.id, call.hello.core.name)
         return call.result
 
-    def _ensure_target_allowed(self, target: str) -> None:
-        if target not in self.config.runtime.core.allowed_terminal_addresses:
-            raise HcRpcError(f"Core terminal is not allowlisted: {target}")
-        if not self.address_allowed(target):
+    def _ensure_target_exposed(self, target: str) -> None:
+        if not self.config.runtime.core.include_connected_machines and "/" in target:
             raise HcRpcError(f"connected-machine target is disabled: {target}")
+        if not self.address_allowed(target):
+            raise HcRpcError(
+                f"Core terminal is not exposed by target policy: {target}"
+            )
 
     def _target_from_terminal(
         self, terminal: HcTerminal, *, raw: dict[str, Any]

@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from herdrelay.config import AppConfig, HcRuntimeConfig, RuntimeConfig
+from herdrelay.config import (
+    AppConfig,
+    HcRuntimeConfig,
+    HcTargetExposureConfig,
+    RuntimeConfig,
+)
 from herdrelay.hc_client import HcClient
 from herdrelay.hc_events import HcEventStream, HcTerminalState
 
@@ -85,7 +90,10 @@ async def test_isolated_core_list_read_send_interrupt_and_events_contract():
                     provider="herdr-core",
                     core=HcRuntimeConfig(
                         socket_path=str(socket_path),
-                        allowed_terminal_addresses=frozenset(owned_targets),
+                        target_exposure=HcTargetExposureConfig(
+                            mode="selected",
+                            addresses=frozenset(owned_targets),
+                        ),
                     ),
                 ),
             )

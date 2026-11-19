@@ -501,7 +501,7 @@ class HerdrDiscordBot(commands.Bot):
                 "```\n"
                 "@herdr stop [<terminal>]                       Interrupt a working agent\n"
                 "  inside an agent thread: interrupts that terminal (no arg needed)\n"
-                "@herdr list                                    List allowlisted agents\n"
+                "@herdr list                                    List available agents\n"
                 "@herdr help                                    Show this help\n"
                 "```\n"
                 "Inside an agent thread, normal text submits a prompt. "

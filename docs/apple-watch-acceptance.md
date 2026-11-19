@@ -52,8 +52,8 @@ single short reply are the minimum acceptance criteria.
 ## Cleanup
 
 - Close the temporary Telegram topic.
-- Remove the temporary address from the Core allowlist.
-- Restart HerdRelay after the allowlist change.
+- If Core uses `selected` target exposure, remove the temporary address from
+  its selector set and restart HerdRelay.
 - Kill and remove only the temporary Core terminal.
 - Verify the production service is running and the temporary route is marked
   closed in SQLite.

@@ -58,7 +58,9 @@ runtime:
     require_app_visible: false
     include_hidden_workers: true
     include_connected_machines: true
-    allowed_terminal_addresses: [t12, remote/t7]
+    target_exposure:
+      mode: selected
+      addresses: [t12, remote/t7]
 enable_streaming: true
 streaming:
   mode: poll
@@ -75,12 +77,26 @@ streaming:
     assert config.runtime.core.require_app_visible is False
     assert config.runtime.core.include_hidden_workers is True
     assert config.runtime.core.include_connected_machines is True
-    assert config.runtime.core.allowed_terminal_addresses == frozenset(
+    assert config.runtime.core.target_exposure.mode == "selected"
+    assert config.runtime.core.target_exposure.addresses == frozenset(
         {"t12", "remote/t7"}
     )
 
 
-def test_load_config_reads_deny_by_default_orca_runtime_settings(
+def test_load_config_defaults_core_to_all_eligible_targets(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("runtime:\n  provider: herdr-core\n")
+
+    config = load_config(config_path)
+
+    assert config.runtime.core.target_exposure.mode == "all-eligible"
+    assert not config.runtime.core.target_exposure.addresses
+
+
+def test_load_config_reads_selected_orca_runtime_settings(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
@@ -96,9 +112,11 @@ def test_load_config_reads_deny_by_default_orca_runtime_settings(
     send_wait_seconds: 4
     include_terminal_agents: true
     include_chats: false
-    allowed_host_ids: [local]
-    allowed_pane_keys: [tab:pane]
-    allowed_worktree_ids: [repo::/worktree]
+    host_ids: [local]
+    target_exposure:
+      mode: selected
+      pane_keys: [tab:pane]
+      worktree_ids: [repo::/worktree]
 """
     )
 
@@ -109,19 +127,118 @@ def test_load_config_reads_deny_by_default_orca_runtime_settings(
     assert config.runtime.orca.command_timeout_seconds == 6
     assert config.runtime.orca.refresh_seconds == 3
     assert config.runtime.orca.send_wait_seconds == 4
-    assert config.runtime.orca.allowed_host_ids == frozenset({"local"})
-    assert config.runtime.orca.allowed_pane_keys == frozenset({"tab:pane"})
-    assert config.runtime.orca.allowed_worktree_ids == frozenset(
+    assert config.runtime.orca.host_ids == frozenset({"local"})
+    assert config.runtime.orca.target_exposure.mode == "selected"
+    assert config.runtime.orca.target_exposure.pane_keys == frozenset(
+        {"tab:pane"}
+    )
+    assert config.runtime.orca.target_exposure.worktree_ids == frozenset(
         {"repo::/worktree"}
     )
 
 
-def test_load_config_rejects_orca_without_target_allowlist(tmp_path, monkeypatch):
+def test_load_config_defaults_orca_to_all_eligible_local_agents(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     config_path = tmp_path / "config.yaml"
     config_path.write_text("runtime:\n  provider: orca\n")
 
-    with pytest.raises(ValueError, match="allowed_pane_key or allowed_worktree_id"):
+    config = load_config(config_path)
+
+    assert config.runtime.orca.host_ids == frozenset({"local"})
+    assert config.runtime.orca.target_exposure.mode == "all-eligible"
+    assert not config.runtime.orca.target_exposure.pane_keys
+    assert not config.runtime.orca.target_exposure.worktree_ids
+
+
+def test_load_config_preserves_legacy_empty_core_allowlist_as_none(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "runtime:\n"
+        "  provider: herdr-core\n"
+        "  herdr_core:\n"
+        "    allowed_terminal_addresses: []\n"
+    )
+
+    config = load_config(config_path)
+
+    assert config.runtime.core.target_exposure.mode == "none"
+
+
+def test_load_config_preserves_legacy_orca_allowlist_as_selected(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "runtime:\n"
+        "  provider: orca\n"
+        "  orca:\n"
+        "    allowed_host_ids: [local]\n"
+        "    allowed_pane_keys: [tab:pane]\n"
+    )
+
+    config = load_config(config_path)
+
+    assert config.runtime.orca.host_ids == frozenset({"local"})
+    assert config.runtime.orca.target_exposure.mode == "selected"
+    assert config.runtime.orca.target_exposure.pane_keys == frozenset(
+        {"tab:pane"}
+    )
+
+
+def test_load_config_preserves_legacy_empty_orca_allowlist_as_none(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "runtime:\n"
+        "  provider: orca\n"
+        "  orca:\n"
+        "    allowed_pane_keys: []\n"
+        "    allowed_worktree_ids: []\n"
+    )
+
+    config = load_config(config_path)
+
+    assert config.runtime.orca.target_exposure.mode == "none"
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        (
+            "runtime:\n  provider: orca\n  orca:\n"
+            "    target_exposure:\n      mode: selected\n",
+            "requires exact selectors",
+        ),
+        (
+            "runtime:\n  provider: orca\n  orca:\n"
+            "    target_exposure:\n      mode: all-eligible\n"
+            "      pane_keys: [tab:pane]\n",
+            "cannot include selectors",
+        ),
+        (
+            "runtime:\n  provider: orca\n  orca:\n"
+            "    target_exposure:\n      mode: all-eligible\n"
+            "    allowed_pane_keys: [tab:pane]\n",
+            "conflicts",
+        ),
+    ],
+)
+def test_load_config_rejects_ambiguous_target_exposure(
+    tmp_path, monkeypatch, body, message
+):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(body)
+
+    with pytest.raises(ValueError, match=message):
         load_config(config_path)
 
 
@@ -145,7 +262,8 @@ def test_load_config_rejects_unimplemented_orca_features(
         "runtime:\n"
         "  provider: orca\n"
         "  orca:\n"
-        "    allowed_pane_keys: [tab:pane]\n"
+        "    target_exposure:\n"
+        "      mode: all-eligible\n"
         f"{setting}\n"
     )
 
@@ -160,7 +278,8 @@ def test_load_config_allows_normal_send_for_orca(tmp_path, monkeypatch):
         "runtime:\n"
         "  provider: orca\n"
         "  orca:\n"
-        "    allowed_pane_keys: [tab:pane]\n"
+        "    target_exposure:\n"
+        "      mode: all-eligible\n"
         "transports:\n"
         "  discord:\n"
         "    enable_send: true\n"
@@ -302,15 +421,19 @@ def test_load_config_merges_file_managed_core_targets(tmp_path, monkeypatch):
         """runtime:
   provider: herdr-core
   herdr_core:
-    allowed_terminal_addresses: [t1]
-    allowed_terminal_addresses_file: targets.txt
+    target_exposure:
+      mode: selected
+      addresses: [t1]
+      addresses_file: targets.txt
 """
     )
 
     config = load_config(config_path)
 
-    assert config.runtime.core.allowed_terminal_addresses == frozenset({"t1", "t2"})
-    assert config.runtime.core.allowed_terminal_addresses_file == str(
+    assert config.runtime.core.target_exposure.addresses == frozenset(
+        {"t1", "t2"}
+    )
+    assert config.runtime.core.target_exposure.addresses_file == str(
         (tmp_path / "targets.txt").resolve()
     )
 
@@ -336,7 +459,8 @@ def test_load_config_accepts_grouped_runtime_sections(tmp_path, monkeypatch):
     assert config.runtime.tui.cli_path == "/opt/bin/herdr"
     assert config.herdr.command_timeout_seconds == 9
     assert config.runtime.core.socket_path == "/tmp/core.sock"
-    assert config.runtime.core.allowed_terminal_addresses == frozenset({"t1"})
+    assert config.runtime.core.target_exposure.mode == "selected"
+    assert config.runtime.core.target_exposure.addresses == frozenset({"t1"})
 
 
 def test_load_config_keeps_discord_enabled_by_default(tmp_path, monkeypatch):

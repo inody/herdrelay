@@ -44,11 +44,14 @@ Use `herdr status` in the same environment as the bot. HerdRelay does not add
 `--machine`, `--remote`, or `--session` flags to individual CLI calls and does
 not follow the machine selected in another Herdr client.
 
-## Orca backend selection
+## Orca backend exposure
 
-The experimental Orca backend uses only the documented `orca` CLI. Discovery
-is deny-by-default: an agent must match `allowed_host_ids` and either an exact
-`allowed_pane_keys` entry or an exact `allowed_worktree_ids` entry.
+The experimental Orca backend uses only the documented `orca` CLI. New
+configurations use `target_exposure.mode: all-eligible`: every recognized
+terminal agent on configured `host_ids` is available, and Telegram topics
+follow agent open/close lifecycle automatically. `selected` mode can optionally
+restrict exposure by exact pane keys and/or worktree IDs; `none` disables target
+exposure without disabling the transport.
 
 A durable route pins the Orca runtime ID and the host-qualified pane key. Before
 normal prompt submission, HerdRelay refreshes the agent list and maps the
@@ -60,7 +63,7 @@ title, repository name, cwd, or display label.
 Orca reports input acceptance and, where the agent provider supports it,
 submission observation. A transport timeout after input may have been accepted
 is recorded as `outcome_unknown` and is not retried automatically. Direct
-public-CLI live acceptance confirmed that an allowlisted Pi agent received the
+public-CLI live acceptance confirmed that an exposed Pi agent received the
 prompt and entered `working`.
 
 Telegram live E2E acceptance also succeeded: one authorized topic message was
@@ -179,11 +182,12 @@ requires an existing pane/thread binding.
 Blocked notifications intentionally mention all `allowed_user_ids`. Done and
 working notifications do not.
 
-## Core target allowlist operations
+## Optional Core target selection
 
-Core access remains deny-by-default. For installations that create and retire
-terminals frequently, configure
-`runtime.herdr_core.allowed_terminal_addresses_file` and manage it locally:
+Core defaults to `target_exposure.mode: all-eligible` after visible/root/local
+eligibility checks. Installations that intentionally need a smaller set can use
+`selected` mode with
+`runtime.herdr_core.target_exposure.addresses_file` and manage it locally:
 
 ```bash
 uv run herdrelay-targets --config config.yaml list
@@ -194,8 +198,9 @@ uv run herdrelay-targets --config config.yaml remove t12
 The command connects directly to the configured existing Core socket; it does
 not invoke a Core-starting CLI operation. `allow` verifies that the exact
 address is currently an eligible live agent. Writes are atomic and mode `0600`.
-Restart HerdRelay after changes. Inline addresses are merged with the file and
-cannot be removed through this command.
+Restart HerdRelay after changes. At least one selector must remain in
+`selected` mode; switch the configuration to `all-eligible` or `none` instead
+of relying on an ambiguous empty file.
 
 ## Hook-mode output relay
 
@@ -248,7 +253,7 @@ identity from the conversation generation:
 }
 ```
 
-The in-process Orca output source observes allowlisted agents through the public
+The in-process Orca output source observes exposed agents through the public
 Orca CLI. Its first snapshot establishes a cursor without backfilling existing
 completed responses. A later changed `done` response is written atomically to
 the same private inbox and uses the normal per-destination delivery tracking.

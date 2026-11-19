@@ -150,7 +150,7 @@ class TelegramService:
         if command in {"agents", "list"}:
             targets = await asyncio.to_thread(self.client.list_targets)
             if not targets:
-                text = "No allowlisted agents are currently available."
+                text = "No agents are currently available."
             else:
                 lines = []
                 for target in targets:
@@ -173,7 +173,7 @@ class TelegramService:
             )
             text = (
                 "HerdRelay Telegram\n"
-                "/agents — list allowlisted agents\n"
+                "/agents — list available agents\n"
                 "/help — show this message\n"
                 "//command — send /command to the agent\n"
                 f"{prompt_help}\n{interrupt_help}"

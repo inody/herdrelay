@@ -220,8 +220,8 @@ mutations.
   - agent discovery;
   - bounded conversation reads; and
   - state refresh.
-- Define exact target inclusion policy for host, workspace/project, agent kind,
-  and optional exact target allowlists.
+- Define backend eligibility for host and agent kind plus explicit
+  `all-eligible`, `selected`, and `none` target exposure modes.
 - Use Orca runtime/host identity plus pane or terminal identity for `TargetKey`.
 - Use `orcaSessionId` as generation metadata.
 - Persist refresh cursors and delivered response identity.
@@ -252,7 +252,7 @@ Verify identity across:
 
 ### Exit criteria
 
-- An allowlisted Orca agent produces status and completed-response deliveries to
+- An exposed Orca agent produces status and completed-response deliveries to
   Telegram and Discord.
 - No chat-originated Orca mutation is possible yet.
 

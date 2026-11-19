@@ -12,8 +12,11 @@ runtime:
     require_app_visible: true
     include_hidden_workers: false
     include_connected_machines: false
-    allowed_terminal_addresses: [] # inline exact addresses
-    allowed_terminal_addresses_file: null # optional local 0600 file managed by herdrelay-targets
+    target_exposure:
+      mode: all-eligible          # all-eligible, selected, or none
+      # selected mode only:
+      addresses: []               # exact terminal addresses
+      addresses_file: null        # optional local 0600 file managed by herdrelay-targets
   orca:                          # experimental public-CLI backend
     cli_path: orca
     environment: local
@@ -21,10 +24,13 @@ runtime:
     refresh_seconds: 2
     send_wait_seconds: 5       # observe submission without retrying input
     include_terminal_agents: true
-    include_chats: false
-    allowed_host_ids: [local]
-    allowed_pane_keys: []        # exact pane keys; combined with worktree allowlist
-    allowed_worktree_ids: []     # empty pane+worktree allowlists expose no agents
+    include_chats: false          # no documented safe prompt path yet
+    host_ids: [local]
+    target_exposure:
+      mode: all-eligible          # all eligible agents on host_ids
+      # selected mode only; pane and worktree selectors are ORed:
+      pane_keys: []
+      worktree_ids: []
 
 storage:
   database_path: herdrelay.sqlite3

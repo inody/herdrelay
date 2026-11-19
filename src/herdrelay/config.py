@@ -17,16 +17,31 @@ class HerdrCliConfig:
 
 
 @dataclass(frozen=True)
+class HcTargetExposureConfig:
+    mode: str = "all-eligible"
+    addresses: frozenset[str] = frozenset()
+    addresses_file: str | None = None
+
+
+@dataclass(frozen=True)
 class HcRuntimeConfig:
     socket_path: str | None = None
-    allowed_terminal_addresses_file: str | None = None
     connect_timeout_seconds: float = 5
     request_timeout_seconds: float = 20
     event_idle_timeout_seconds: float = 35
     require_app_visible: bool = True
     include_hidden_workers: bool = False
     include_connected_machines: bool = False
-    allowed_terminal_addresses: frozenset[str] = frozenset()
+    target_exposure: HcTargetExposureConfig = field(
+        default_factory=HcTargetExposureConfig
+    )
+
+
+@dataclass(frozen=True)
+class OrcaTargetExposureConfig:
+    mode: str = "all-eligible"
+    pane_keys: frozenset[str] = frozenset()
+    worktree_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -38,9 +53,10 @@ class OrcaRuntimeConfig:
     send_wait_seconds: float = 5
     include_terminal_agents: bool = True
     include_chats: bool = False
-    allowed_host_ids: frozenset[str] = frozenset({"local"})
-    allowed_pane_keys: frozenset[str] = frozenset()
-    allowed_worktree_ids: frozenset[str] = frozenset()
+    host_ids: frozenset[str] = frozenset({"local"})
+    target_exposure: OrcaTargetExposureConfig = field(
+        default_factory=OrcaTargetExposureConfig
+    )
 
 
 @dataclass(frozen=True)
@@ -233,13 +249,11 @@ def load_config(
         else data.get("stop")
     )
 
-    allowed_targets_file = _optional_config_path(
-        core_data.get("allowed_terminal_addresses_file"),
-        base=config_path.parent,
+    core_target_exposure = _core_target_exposure(
+        core_data, base=config_path.parent
     )
-    allowed_targets = _string_set(core_data.get("allowed_terminal_addresses"))
-    if allowed_targets_file is not None:
-        allowed_targets |= _read_target_allowlist(Path(allowed_targets_file))
+    orca_target_exposure = _orca_target_exposure(orca_data)
+    orca_host_ids = _orca_host_ids(orca_data)
 
     config = AppConfig(
         discord_token=token,
@@ -317,7 +331,6 @@ def load_config(
                     if core_data.get("socket_path")
                     else None
                 ),
-                allowed_terminal_addresses_file=allowed_targets_file,
                 connect_timeout_seconds=float(
                     core_data.get("connect_timeout_seconds", 5)
                 ),
@@ -336,7 +349,7 @@ def load_config(
                 include_connected_machines=bool(
                     core_data.get("include_connected_machines", False)
                 ),
-                allowed_terminal_addresses=allowed_targets,
+                target_exposure=core_target_exposure,
             ),
             orca=OrcaRuntimeConfig(
                 cli_path=str(orca_data.get("cli_path") or "orca"),
@@ -350,17 +363,8 @@ def load_config(
                     orca_data.get("include_terminal_agents", True)
                 ),
                 include_chats=bool(orca_data.get("include_chats", False)),
-                allowed_host_ids=(
-                    _string_set(orca_data.get("allowed_host_ids"))
-                    if "allowed_host_ids" in orca_data
-                    else frozenset({"local"})
-                ),
-                allowed_pane_keys=_string_set(
-                    orca_data.get("allowed_pane_keys")
-                ),
-                allowed_worktree_ids=_string_set(
-                    orca_data.get("allowed_worktree_ids")
-                ),
+                host_ids=orca_host_ids,
+                target_exposure=orca_target_exposure,
             ),
         ),
         watcher=WatcherConfig(
@@ -497,7 +501,13 @@ def _validate_telegram(config: AppConfig) -> None:
 
 def _validate_runtime_features(config: AppConfig) -> None:
     if config.runtime.provider == "herdr-core":
-        if config.runtime.core.connect_timeout_seconds <= 0:
+        core = config.runtime.core
+        _validate_target_exposure(
+            mode=core.target_exposure.mode,
+            selectors=core.target_exposure.addresses,
+            path="runtime.herdr_core.target_exposure",
+        )
+        if core.connect_timeout_seconds <= 0:
             raise ValueError("runtime.herdr_core.connect_timeout_seconds must be positive")
         if config.runtime.core.request_timeout_seconds <= 0:
             raise ValueError("runtime.herdr_core.request_timeout_seconds must be positive")
@@ -522,12 +532,16 @@ def _validate_runtime_features(config: AppConfig) -> None:
         raise ValueError("runtime.orca.send_wait_seconds must not be negative")
     if not orca.environment.strip():
         raise ValueError("runtime.orca.environment must not be empty")
-    if not orca.allowed_host_ids:
-        raise ValueError("runtime.orca.allowed_host_ids must not be empty")
-    if not orca.allowed_pane_keys and not orca.allowed_worktree_ids:
-        raise ValueError(
-            "Orca requires at least one allowed_pane_key or allowed_worktree_id"
-        )
+    if not orca.host_ids:
+        raise ValueError("runtime.orca.host_ids must not be empty")
+    _validate_target_exposure(
+        mode=orca.target_exposure.mode,
+        selectors=(
+            orca.target_exposure.pane_keys
+            | orca.target_exposure.worktree_ids
+        ),
+        path="runtime.orca.target_exposure",
+    )
     if config.enable_approve or config.enable_stop:
         raise ValueError(
             "Discord approval and stop are not implemented for the Orca backend"
@@ -540,6 +554,107 @@ def _validate_runtime_features(config: AppConfig) -> None:
         raise ValueError(
             "Telegram interrupt is not safely supported by the Orca backend"
         )
+
+
+def _validate_target_exposure(
+    *, mode: str, selectors: frozenset[str], path: str
+) -> None:
+    if mode == "selected" and not selectors:
+        raise ValueError(f"{path}.mode 'selected' requires exact selectors")
+    if mode in {"all-eligible", "none"} and selectors:
+        raise ValueError(f"{path}.mode '{mode}' cannot include selectors")
+
+
+def _core_target_exposure(
+    data: dict[str, Any], *, base: Path
+) -> HcTargetExposureConfig:
+    legacy_keys = {
+        "allowed_terminal_addresses",
+        "allowed_terminal_addresses_file",
+    }
+    legacy_present = any(key in data for key in legacy_keys)
+    raw = data.get("target_exposure")
+    if raw is not None and legacy_present:
+        raise ValueError(
+            "runtime.herdr_core.target_exposure conflicts with legacy allowed_* keys"
+        )
+    if raw is not None:
+        if not isinstance(raw, dict):
+            raise ValueError(
+                "runtime.herdr_core.target_exposure must be a YAML mapping"
+            )
+        mode = _target_exposure_mode(raw.get("mode"))
+        addresses_file = _optional_config_path(
+            raw.get("addresses_file"), base=base
+        )
+        addresses = _string_set(raw.get("addresses"))
+    else:
+        addresses_file = _optional_config_path(
+            data.get("allowed_terminal_addresses_file"), base=base
+        )
+        addresses = _string_set(data.get("allowed_terminal_addresses"))
+        mode = "all-eligible"
+    if addresses_file is not None:
+        addresses |= _read_target_allowlist(Path(addresses_file))
+    if raw is not None and mode != "selected" and addresses_file is not None:
+        raise ValueError(
+            "runtime.herdr_core.target_exposure addresses_file requires selected mode"
+        )
+    if raw is None and legacy_present:
+        mode = "selected" if addresses else "none"
+    return HcTargetExposureConfig(
+        mode=mode,
+        addresses=addresses,
+        addresses_file=addresses_file,
+    )
+
+
+def _orca_target_exposure(data: dict[str, Any]) -> OrcaTargetExposureConfig:
+    legacy_keys = {"allowed_pane_keys", "allowed_worktree_ids"}
+    legacy_present = any(key in data for key in legacy_keys)
+    raw = data.get("target_exposure")
+    if raw is not None and legacy_present:
+        raise ValueError(
+            "runtime.orca.target_exposure conflicts with legacy allowed_* keys"
+        )
+    if raw is not None:
+        if not isinstance(raw, dict):
+            raise ValueError("runtime.orca.target_exposure must be a YAML mapping")
+        mode = _target_exposure_mode(raw.get("mode"))
+        pane_keys = _string_set(raw.get("pane_keys"))
+        worktree_ids = _string_set(raw.get("worktree_ids"))
+    else:
+        pane_keys = _string_set(data.get("allowed_pane_keys"))
+        worktree_ids = _string_set(data.get("allowed_worktree_ids"))
+        mode = "all-eligible"
+    if raw is None and legacy_present:
+        mode = "selected" if pane_keys or worktree_ids else "none"
+    return OrcaTargetExposureConfig(
+        mode=mode,
+        pane_keys=pane_keys,
+        worktree_ids=worktree_ids,
+    )
+
+
+def _orca_host_ids(data: dict[str, Any]) -> frozenset[str]:
+    if "host_ids" in data and "allowed_host_ids" in data:
+        raise ValueError(
+            "runtime.orca.host_ids conflicts with legacy allowed_host_ids"
+        )
+    if "host_ids" in data:
+        return _string_set(data.get("host_ids"))
+    if "allowed_host_ids" in data:
+        return _string_set(data.get("allowed_host_ids"))
+    return frozenset({"local"})
+
+
+def _target_exposure_mode(value: Any) -> str:
+    mode = str(value or "all-eligible").casefold()
+    if mode not in {"all-eligible", "selected", "none"}:
+        raise ValueError(
+            "target exposure mode must be 'all-eligible', 'selected', or 'none'"
+        )
+    return mode
 
 
 def _runtime_provider(value: Any) -> str:
@@ -601,7 +716,7 @@ def _read_target_allowlist(path: Path) -> frozenset[str]:
         if line.strip() and not line.lstrip().startswith("#")
     }
     if any(any(character.isspace() for character in target) for target in targets):
-        raise ValueError(f"Core target allowlist contains whitespace: {path}")
+        raise ValueError(f"Core target selection contains whitespace: {path}")
     return frozenset(targets)
 
 

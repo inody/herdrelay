@@ -299,22 +299,27 @@ protocol generation or missing required capability. The raw socket and
 arbitrary RPC methods remain internal and are never exposed through a network
 API or chat command.
 
-### 7.2 Target inclusion policy
+### 7.2 Target eligibility and exposure policy
 
 A Core can contain app-visible terminals, hidden task workers, plain shells,
-finished history, and connected-machine terminals. The default policy is:
+finished history, and connected-machine terminals. Backend eligibility first:
 
-- include only exact terminal addresses in an explicit allowlist, with an empty
-  allowlist exposing no Core targets;
-- include only `state == live`;
-- require a recognized reported agent application;
-- require app visibility labels by default;
-- exclude child workers unless explicitly enabled; and
-- permit connected-machine targets only when the machine is connected and an
-  allowlist permits it.
+- includes only `state == live`;
+- requires a recognized reported agent application;
+- requires app visibility labels by default;
+- excludes child workers unless explicitly enabled; and
+- excludes connected-machine targets unless explicitly enabled.
 
-These rules must be configurable and covered by fixtures. A false negative is
-safer than exposing an unrelated shell or hidden worker.
+Eligible targets then use an explicit exposure mode. `all-eligible` is the
+normal interactive default, `selected` applies exact terminal-address
+selectors, and `none` exposes no targets. `selected` requires a nonempty
+selector set, so deleting the last selector cannot accidentally broaden or
+silently change policy.
+
+These rules must be configurable and covered by fixtures. Shells, hidden
+workers, remote machines, and unsupported operations remain excluded by
+eligibility and capability policy rather than by forcing routine users to
+maintain a per-agent allowlist.
 
 ## 8. Relay coordinator
 
@@ -532,7 +537,11 @@ runtime:
     connect_timeout_seconds: 5
     request_timeout_seconds: 20
     event_idle_timeout_seconds: 35
-    allowed_terminal_addresses: []
+    target_exposure:
+      mode: all-eligible
+      # selected mode only:
+      addresses: []
+      addresses_file: null
     include_hidden_workers: false
     include_connected_machines: false
 

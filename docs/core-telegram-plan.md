@@ -230,12 +230,13 @@ Implement local Core discovery, events, reads, normal sends, and interrupts.
 - Resolve the configured/session socket and connect to it directly. A missing
   Core is an error; automatic start remains unsupported in the first release.
 - Negotiate or verify protocol generation and required methods.
-- Implement target inclusion policy:
-  - exact terminal-address allowlist, empty by default;
+- Implement target eligibility and exposure policy:
   - recognized reported agent;
   - app-visible by default;
   - hidden workers off by default;
-  - connected machines off by default.
+  - connected machines off by default;
+  - `all-eligible` as the normal interactive exposure mode; and
+  - explicit nonempty exact addresses for optional `selected` mode.
 - Implement:
   - list/get;
   - bounded read;
@@ -490,8 +491,8 @@ Before enabling Core:
 - An existing Core is running under the intended user/session and the resolved
   socket is recorded.
 - Required Core methods are present.
-- The exact terminal-address allowlist excludes hidden workers, shells, and
-  unrelated visible agents as intended.
+- Backend eligibility excludes hidden workers, shells, and connected machines
+  unless explicitly enabled; the configured exposure mode is recorded.
 - Core ID and selected database are recorded in diagnostics.
 
 Before enabling Telegram:

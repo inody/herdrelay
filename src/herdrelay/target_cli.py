@@ -10,18 +10,22 @@ from .config import AppConfig, load_config
 from .hc_client import HcClient
 
 
-def _allowlist_path(config: AppConfig) -> Path:
-    value = config.runtime.core.allowed_terminal_addresses_file
-    if value is None:
+def _selection_path(config: AppConfig) -> Path:
+    exposure = config.runtime.core.target_exposure
+    if exposure.mode != "selected":
         raise ValueError(
-            "runtime.herdr_core.allowed_terminal_addresses_file is required "
+            "herdrelay-targets requires Core target_exposure.mode=selected"
+        )
+    if exposure.addresses_file is None:
+        raise ValueError(
+            "runtime.herdr_core.target_exposure.addresses_file is required "
             "for herdrelay-targets"
         )
-    return Path(value)
+    return Path(exposure.addresses_file)
 
 
 def _file_targets(config: AppConfig) -> set[str]:
-    path = _allowlist_path(config)
+    path = _selection_path(config)
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
@@ -54,12 +58,15 @@ def _write_targets(path: Path, targets: set[str]) -> None:
 
 
 def _client_with_target(config: AppConfig, address: str) -> HcClient:
-    core = replace(
-        config.runtime.core,
-        allowed_terminal_addresses=(
-            config.runtime.core.allowed_terminal_addresses | frozenset({address})
+    exposure = replace(
+        config.runtime.core.target_exposure,
+        mode="selected",
+        addresses=(
+            config.runtime.core.target_exposure.addresses
+            | frozenset({address})
         ),
     )
+    core = replace(config.runtime.core, target_exposure=exposure)
     return HcClient(replace(config, runtime=replace(config.runtime, core=core)))
 
 
@@ -70,7 +77,7 @@ def allow_target(config: AppConfig, address: str) -> bool:
     if config.runtime.provider != "herdr-core":
         raise ValueError("herdrelay-targets requires runtime.provider=herdr-core")
     targets = _file_targets(config)
-    if address in targets or address in config.runtime.core.allowed_terminal_addresses:
+    if address in targets or address in config.runtime.core.target_exposure.addresses:
         return False
     client = _client_with_target(config, address)
     live = next(
@@ -81,7 +88,7 @@ def allow_target(config: AppConfig, address: str) -> bool:
             f"{address} is not an eligible live agent in the configured Core"
         )
     targets.add(address)
-    _write_targets(_allowlist_path(config), targets)
+    _write_targets(_selection_path(config), targets)
     return True
 
 
@@ -89,15 +96,18 @@ def remove_target(config: AppConfig, address: str) -> bool:
     targets = _file_targets(config)
     if address not in targets:
         return False
-    targets.remove(address)
-    _write_targets(_allowlist_path(config), targets)
+    remaining = targets - {address}
+    inline = config.runtime.core.target_exposure.addresses - targets
+    if not remaining and not inline:
+        raise ValueError("selected target exposure must retain at least one address")
+    _write_targets(_selection_path(config), remaining)
     return True
 
 
 def list_targets(config: AppConfig) -> list[tuple[str, str]]:
     if config.runtime.provider != "herdr-core":
         raise ValueError("herdrelay-targets requires runtime.provider=herdr-core")
-    configured = sorted(config.runtime.core.allowed_terminal_addresses)
+    configured = sorted(config.runtime.core.target_exposure.addresses)
     client = HcClient(config)
     live = {target.target: target for target in client.list_targets()}
     return [
@@ -116,12 +126,12 @@ def list_targets(config: AppConfig) -> list[tuple[str, str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Manage exact Herdr Core target addresses for HerdRelay"
+        description="Manage selected Herdr Core target addresses for HerdRelay"
     )
     parser.add_argument("--config", default="config.yaml")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("list", help="list configured targets and live state")
-    allow_parser = subparsers.add_parser("allow", help="allow one live Core agent")
+    subparsers.add_parser("list", help="list selected targets and live state")
+    allow_parser = subparsers.add_parser("allow", help="select one live Core agent")
     allow_parser.add_argument("address")
     remove_parser = subparsers.add_parser("remove", help="remove one file-managed target")
     remove_parser.add_argument("address")
@@ -142,7 +152,7 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
     if changed:
-        print("Restart HerdRelay to apply the updated allowlist.")
+        print("Restart HerdRelay to apply the updated target selection.")
 
 
 if __name__ == "__main__":

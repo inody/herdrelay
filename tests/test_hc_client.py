@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from herdrelay.config import AppConfig, HcRuntimeConfig, RuntimeConfig
+from herdrelay.config import (
+    AppConfig,
+    HcRuntimeConfig,
+    HcTargetExposureConfig,
+    RuntimeConfig,
+)
 from herdrelay.domain import TargetKey
 from herdrelay.hc_client import HcClient, HcUnsupportedOperation
 from herdrelay.hc_protocol import parse_hello_result
@@ -22,18 +27,21 @@ HELLO = parse_hello_result(
 
 def core_config(**core_overrides) -> AppConfig:
     defaults = {
-        "allowed_terminal_addresses": frozenset(
-            {
-                "t1",
-                "t2",
-                "t3",
-                "t5",
-                "t6",
-                "remote/t1",
-                "remote/t4",
-                "blocked",
-                "shell",
-            }
+        "target_exposure": HcTargetExposureConfig(
+            mode="selected",
+            addresses=frozenset(
+                {
+                    "t1",
+                    "t2",
+                    "t3",
+                    "t5",
+                    "t6",
+                    "remote/t1",
+                    "remote/t4",
+                    "blocked",
+                    "shell",
+                }
+            ),
         )
     }
     defaults.update(core_overrides)
@@ -147,9 +155,20 @@ def test_core_client_lists_only_verified_visible_root_agents():
     assert client.core_id == "core-test-001"
 
 
-def test_core_client_empty_target_allowlist_exposes_nothing():
+def test_core_client_all_eligible_mode_exposes_local_agents():
     client, rpc = make_client(
-        core_config(allowed_terminal_addresses=frozenset())
+        core_config(target_exposure=HcTargetExposureConfig())
+    )
+    rpc.list_payload["terminals"] = [terminal("t1")]
+
+    assert [target.target for target in client.list_targets()] == ["t1"]
+
+
+def test_core_client_none_mode_exposes_nothing():
+    client, rpc = make_client(
+        core_config(
+            target_exposure=HcTargetExposureConfig(mode="none")
+        )
     )
     rpc.list_payload["terminals"] = [terminal("t1")]
 
@@ -239,7 +258,7 @@ def test_core_client_refuses_send_to_blocked_stale_or_unlisted_target():
         client.send("remote/t1", "continue")
     with pytest.raises(HcRpcError, match="not interruptible in state idle"):
         client.interrupt("t1")
-    with pytest.raises(HcRpcError, match="not allowlisted"):
+    with pytest.raises(HcRpcError, match="not exposed by target policy"):
         client.send("t99", "continue")
     assert rpc.sent == []
 

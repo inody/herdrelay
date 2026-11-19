@@ -9,6 +9,7 @@ import pytest
 from herdrelay.config import (
     AppConfig,
     HcRuntimeConfig,
+    HcTargetExposureConfig,
     RuntimeConfig,
     WatcherConfig,
 )
@@ -39,7 +40,9 @@ def core_config(*addresses: str, statuses=("blocked", "done")) -> AppConfig:
         runtime=RuntimeConfig(
             provider="herdr-core",
             core=HcRuntimeConfig(
-                allowed_terminal_addresses=frozenset(addresses)
+                target_exposure=HcTargetExposureConfig(
+                    mode="selected", addresses=frozenset(addresses)
+                )
             ),
         ),
         enable_watcher=True,
@@ -47,7 +50,7 @@ def core_config(*addresses: str, statuses=("blocked", "done")) -> AppConfig:
     )
 
 
-def test_core_status_events_apply_allowlist_visibility_and_status_filters():
+def test_core_status_events_apply_target_visibility_and_status_filters():
     client = HcClient(core_config("t12", "t14", "remote/t7"))
     state = HcTerminalState(SUBSCRIBE)
 
