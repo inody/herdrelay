@@ -225,6 +225,15 @@ class TelegramBotApi:
         )
         return _boolean_result(result, "closeForumTopic")
 
+    async def delete_forum_topic(
+        self, *, chat_id: int, message_thread_id: int
+    ) -> bool:
+        result = await self.call(
+            "deleteForumTopic",
+            {"chat_id": chat_id, "message_thread_id": message_thread_id},
+        )
+        return _boolean_result(result, "deleteForumTopic")
+
     async def call(self, method: str, payload: dict[str, Any]) -> Any:
         await self.start()
         assert self._session is not None

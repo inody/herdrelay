@@ -496,6 +496,7 @@ transports:
     poll_timeout_seconds: 20
     request_timeout_seconds: 30
     reconnect_delay_seconds: 2
+    closed_topic_retention_days: 1
 """
     )
 
@@ -515,6 +516,7 @@ transports:
     assert config.telegram.target_mutations_per_minute == 4
     assert config.telegram.poll_timeout_seconds == 20
     assert config.telegram.request_timeout_seconds == 30
+    assert config.telegram.closed_topic_retention_days == 1
     assert "telegram-secret" not in repr(config.telegram)
 
 
@@ -580,6 +582,12 @@ transports:
             "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n"
             "    forum_chat_id: -1\n    confirmation_ttl_seconds: 5",
             "confirmation_ttl_seconds",
+        ),
+        (
+            "herdr-core",
+            "allowed_chat_ids: [-1]\n    allowed_user_ids: [2]\n"
+            "    forum_chat_id: -1\n    closed_topic_retention_days: 0",
+            "closed_topic_retention_days",
         ),
     ],
 )

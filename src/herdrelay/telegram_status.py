@@ -39,7 +39,7 @@ class TelegramStatusRelay:
         self.stopped = stopped
         self.topics = topics
         self._legacy_statuses: dict[str, str | None] = {}
-        self._legacy_live_targets: set[str] = set()
+        self._legacy_live_targets: dict[str, TargetKey] = {}
 
     async def run_forever(self) -> None:
         while not self.stopped.is_set():
@@ -73,6 +73,7 @@ class TelegramStatusRelay:
         core_id = subscription.hello.core.id
         state = HcTerminalState(subscription.snapshot)
         await self.reconcile_core_topics(core_id, state)
+        await self.topics.cleanup_expired_closed()
 
         stop_task = asyncio.create_task(self.stopped.wait())
         notification_task: asyncio.Task | None = None
@@ -96,6 +97,7 @@ class TelegramStatusRelay:
                     await self.deliver_core_status(core_id, state, transition)
                 if isinstance(notification, HcEventNotification):
                     await self.handle_core_lifecycle(core_id, state, notification)
+                await self.topics.cleanup_expired_closed()
         finally:
             if notification_task is not None:
                 notification_task.cancel()
@@ -107,8 +109,9 @@ class TelegramStatusRelay:
     async def legacy_once(self) -> None:
         panes = await asyncio.to_thread(self.client.list_panes)
         live_targets = {
-            self.client.target_key(target.target).to_route_value()
+            key.address: key
             for target in panes
+            for key in (self.client.target_key(target.target),)
         }
         detected: set[str] = set()
         for target in panes:
@@ -136,13 +139,15 @@ class TelegramStatusRelay:
                         f"\n{current}"
                     ),
                 )
-        for route_target in self._legacy_live_targets - live_targets:
-            await self.topics.close(TargetKey.from_route_value(route_target))
-            self._legacy_statuses.pop(route_target, None)
+        for address in self._legacy_live_targets.keys() - live_targets.keys():
+            stale_key = self._legacy_live_targets[address]
+            await self.topics.close(stale_key)
+            self._legacy_statuses.pop(stale_key.to_route_value(), None)
         self._legacy_live_targets = live_targets
         for route_target in tuple(self._legacy_statuses):
             if route_target not in detected:
                 self._legacy_statuses.pop(route_target, None)
+        await self.topics.cleanup_expired_closed()
 
     async def reconcile_core_topics(
         self, core_id: str, state: HcTerminalState

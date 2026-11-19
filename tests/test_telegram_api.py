@@ -177,7 +177,12 @@ async def test_forum_topic_methods_use_exact_chat_and_thread_ids():
         payload = await request.json()
         requests.append((method, payload))
         result = {"message_thread_id": 55, "name": payload.get("name", "topic")}
-        if method in {"editForumTopic", "reopenForumTopic", "closeForumTopic"}:
+        if method in {
+            "editForumTopic",
+            "reopenForumTopic",
+            "closeForumTopic",
+            "deleteForumTopic",
+        }:
             result = True
         return web.json_response({"ok": True, "result": result})
 
@@ -189,6 +194,7 @@ async def test_forum_topic_methods_use_exact_chat_and_thread_ids():
             )
             await api.reopen_forum_topic(chat_id=-1001, message_thread_id=55)
             await api.close_forum_topic(chat_id=-1001, message_thread_id=55)
+            await api.delete_forum_topic(chat_id=-1001, message_thread_id=55)
 
     assert topic["message_thread_id"] == 55
     assert requests == [
@@ -199,6 +205,7 @@ async def test_forum_topic_methods_use_exact_chat_and_thread_ids():
         ),
         ("reopenForumTopic", {"chat_id": -1001, "message_thread_id": 55}),
         ("closeForumTopic", {"chat_id": -1001, "message_thread_id": 55}),
+        ("deleteForumTopic", {"chat_id": -1001, "message_thread_id": 55}),
     ]
 
 

@@ -348,6 +348,10 @@ def test_orca_runtime_rotation_reuses_stable_pane_topic(tmp_path):
     assert migrated.thread_id == "77"
     assert len(store.list_telegram_topics()) == 1
 
+    store.delete_telegram_topic_for_target(new)
+    assert store.get_telegram_topic_for_target(new) is None
+    assert store.list_telegram_topics() == ()
+
 
 def test_state_roundtrip(tmp_path):
     store = Store(tmp_path / "bridge.sqlite3")

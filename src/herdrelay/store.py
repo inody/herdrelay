@@ -736,6 +736,16 @@ class Store:
             closed=closed,
         )
 
+    def delete_telegram_topic_for_target(self, target: TargetKey | str) -> None:
+        route_target = (
+            target.to_route_value() if isinstance(target, TargetKey) else target
+        )
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM telegram_topics WHERE route_target = ?",
+                (route_target,),
+            )
+
     def upsert_pending_question(self, question: PendingQuestion) -> None:
         with self._connect() as conn:
             conn.execute(

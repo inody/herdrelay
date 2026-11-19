@@ -132,6 +132,7 @@ transports:
     statuses: [blocked, done]
     enable_send: false
     enable_interrupt: false
+    closed_topic_retention_days: 1
 ```
 
 `all-eligible` exposes every eligible local interactive agent while retaining
@@ -190,13 +191,20 @@ In Telegram:
 
 - `/agents` lists currently available agents;
 - `/help` shows enabled controls;
-- each agent receives one persisted forum topic;
+- each eligible runtime target (terminal/pane), not each workspace or agent
+  name, receives one forum topic;
 - ordinary topic text submits a prompt only when `enable_send: true` and a
   successful submission adds a 👀 reaction to that message;
 - `//reload` sends the agent command `/reload` without treating it as a Bot
   command; and
 - `/interrupt` requires `enable_interrupt: true` plus a one-time confirmation
   button.
+
+A target returning at the same stable address reopens its existing topic, and an
+Orca runtime-ID rotation does not create a new topic. A genuinely new pane gets
+a separate topic even when it has the same workspace and agent name. Closed
+topics are deleted after `closed_topic_retention_days`; set it to `null` to keep
+them indefinitely.
 
 Prompt and interrupt attempts are claimed and audited before the Core call.
 Timeouts are recorded as `outcome_unknown` and are never retried automatically.

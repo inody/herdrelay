@@ -56,9 +56,10 @@ reported. `selected` mode can optionally
 restrict exposure by exact pane keys and/or worktree IDs; `none` disables target
 exposure without disabling the transport.
 
-A durable route pins the Orca runtime ID and the host-qualified pane key. Before
-normal prompt submission, HerdRelay refreshes the agent list and maps the
-agent's exact `paneKey` to a single connected, writable terminal whose
+A live route includes the current Orca runtime ID and the host-qualified pane
+key. Topic continuity follows the stable pane address across runtime-ID
+rotation. Before normal prompt submission, HerdRelay refreshes the agent list
+and maps the agent's exact `paneKey` to a single connected, writable terminal whose
 `tabId:leafId`, host, worktree, and agent identity agree. It then calls
 `orca terminal send --enter --wait-submit`; it never selects a terminal by
 title, repository name, cwd, or display label.
@@ -79,6 +80,20 @@ Orca interrupt remains disabled. In live characterization,
 but the Pi agent remained `working`; input acceptance is therefore not treated
 as proof of a native interrupt. Chat does not expose raw terminal input,
 generic approval/denial, agent launch, or terminal close.
+
+## Telegram topic lifecycle
+
+Telegram creates one topic per eligible runtime target. Two simultaneous panes
+with the same workspace and agent name are distinct targets and intentionally
+receive separate topics. A target that returns at the same stable address
+reopens its previous topic; an Orca runtime-ID rotation alone does not close or
+replace that topic.
+
+When a target disappears, its topic is closed first. If
+`closed_topic_retention_days` is an integer, a closed topic that remains absent
+is deleted after that many days and its SQLite route is removed. `null` retains
+closed topics indefinitely. Do not delete a still-tracked topic manually: a
+missing Telegram topic with a retained SQLite route cannot be reopened.
 
 ## Thread and binding lifecycle
 

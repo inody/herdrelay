@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 
@@ -104,6 +105,8 @@ def config() -> AppConfig:
 class FakeApi:
     batches: list[list[dict]]
     fail_send: bool = False
+    reopen_error: Exception | None = None
+    close_error: Exception | None = None
     update_calls: list[dict] = field(default_factory=list)
     sent: list[dict] = field(default_factory=list)
     callback_answers: list[dict] = field(default_factory=list)
@@ -113,6 +116,7 @@ class FakeApi:
     edited_topics: list[dict] = field(default_factory=list)
     reopened_topics: list[dict] = field(default_factory=list)
     closed_topics: list[dict] = field(default_factory=list)
+    deleted_topics: list[dict] = field(default_factory=list)
 
     async def get_updates(self, **kwargs):
         self.update_calls.append(kwargs)
@@ -150,10 +154,18 @@ class FakeApi:
 
     async def reopen_forum_topic(self, **kwargs):
         self.reopened_topics.append(kwargs)
+        if self.reopen_error is not None:
+            raise self.reopen_error
         return True
 
     async def close_forum_topic(self, **kwargs):
         self.closed_topics.append(kwargs)
+        if self.close_error is not None:
+            raise self.close_error
+        return True
+
+    async def delete_forum_topic(self, **kwargs):
+        self.deleted_topics.append(kwargs)
         return True
 
     async def close(self):
@@ -449,6 +461,106 @@ async def test_existing_closed_topic_is_reopened_and_renamed(tmp_path):
     assert topic.name == "herdrelay/pi · t12"
 
 
+@pytest.mark.asyncio
+async def test_topic_state_updates_when_telegram_reports_already_in_desired_state(
+    tmp_path,
+):
+    app_config = config()
+    client = HcClient(app_config)
+    store = Store(tmp_path / "idempotent.sqlite3")
+    key = TargetKey.core(controller_core_id="core-1", address="t12")
+    store.upsert_telegram_topic_for_target(
+        target=key,
+        chat_id=-1001,
+        thread_id=77,
+        name="herdrelay/pi · t12",
+        closed=True,
+    )
+    api = FakeApi(
+        [],
+        reopen_error=TelegramApiError("Bad Request: TOPIC_NOT_MODIFIED"),
+        close_error=TelegramApiError("Bad Request: TOPIC_NOT_MODIFIED"),
+    )
+    relay = TelegramService(
+        config=app_config, store=store, client=client, api=api
+    )
+    target = client.project_terminal(SUBSCRIBE.terminals[0])
+
+    reopened = await relay.status_relay.ensure_core_topic("core-1", "t12", target)
+    assert reopened.closed is False
+
+    await relay.topics.close(key)
+    closed = store.get_telegram_topic_for_target(key)
+    assert closed is not None and closed.closed is True
+
+
+@pytest.mark.asyncio
+async def test_closed_topic_is_deleted_after_retention_period(tmp_path):
+    base = config()
+    app_config = replace(
+        base,
+        telegram=replace(base.telegram, closed_topic_retention_days=1),
+    )
+    api = FakeApi([])
+    store = Store(tmp_path / "retention.sqlite3")
+    key = TargetKey.core(controller_core_id="core-1", address="t12")
+    store.upsert_telegram_topic_for_target(
+        target=key,
+        chat_id=-1001,
+        thread_id=77,
+        name="herdrelay/pi · t12",
+        closed=True,
+    )
+    relay = TelegramService(
+        config=app_config,
+        store=store,
+        client=HcClient(app_config),
+        api=api,
+    )
+
+    deleted = await relay.topics.cleanup_expired_closed(
+        now=datetime.now(UTC) + timedelta(days=2)
+    )
+
+    assert deleted == (77,)
+    assert api.deleted_topics == [
+        {"chat_id": -1001, "message_thread_id": 77}
+    ]
+    assert store.get_telegram_topic_for_target(key) is None
+
+
+@pytest.mark.asyncio
+async def test_closed_topic_is_kept_within_retention_period(tmp_path):
+    base = config()
+    app_config = replace(
+        base,
+        telegram=replace(base.telegram, closed_topic_retention_days=1),
+    )
+    api = FakeApi([])
+    store = Store(tmp_path / "retention.sqlite3")
+    key = TargetKey.core(controller_core_id="core-1", address="t12")
+    store.upsert_telegram_topic_for_target(
+        target=key,
+        chat_id=-1001,
+        thread_id=77,
+        name="herdrelay/pi · t12",
+        closed=True,
+    )
+    relay = TelegramService(
+        config=app_config,
+        store=store,
+        client=HcClient(app_config),
+        api=api,
+    )
+
+    deleted = await relay.topics.cleanup_expired_closed(
+        now=datetime.now(UTC) + timedelta(hours=12)
+    )
+
+    assert deleted == ()
+    assert api.deleted_topics == []
+    assert store.get_telegram_topic_for_target(key) is not None
+
 
 def mutation_service(
     tmp_path,
@@ -536,6 +648,57 @@ async def test_orca_topics_follow_exposed_agent_lifecycle(tmp_path):
     assert api.closed_topics == [
         {"chat_id": -1001, "message_thread_id": 101}
     ]
+
+
+@pytest.mark.asyncio
+async def test_orca_runtime_rotation_keeps_live_topic_open(tmp_path):
+    target = HerdrTarget(
+        target="local/tab:pane",
+        agent_name="pi",
+        status="done",
+        workspace_label="project",
+    )
+
+    class RotatingOrcaClient(FakeLegacyClient):
+        runtime_id = "runtime-old"
+
+        def target_key(self, address):
+            return TargetKey.orca(instance_id=self.runtime_id, address=address)
+
+    client = RotatingOrcaClient([target])
+    app_config = AppConfig(
+        discord_token="unused",
+        runtime=RuntimeConfig(provider="orca"),
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+        ),
+    )
+    api = FakeApi([])
+    store = Store(tmp_path / "orca-rotation.sqlite3")
+    relay = TelegramService(
+        config=app_config,
+        store=store,
+        client=client,
+        api=api,
+    )
+
+    await relay.status_relay.legacy_once()
+    client.runtime_id = "runtime-new"
+    await relay.status_relay.legacy_once()
+
+    current_key = client.target_key(target.target)
+    route = store.get_telegram_topic_for_target(current_key)
+    assert route is not None and route.thread_id == "101"
+    assert route.route_target == current_key.to_route_value()
+    assert api.created_topics == [
+        {"chat_id": -1001, "name": "project/pi · local/tab:pane"}
+    ]
+    assert api.closed_topics == []
+    assert api.reopened_topics == []
 
 
 @pytest.mark.asyncio
