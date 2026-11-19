@@ -340,7 +340,10 @@ No answer controls were exposed. Answering in Orca resolved the question and
 produced the expected final response. That first run exposed duplicate final
 response delivery from both Claude's Stop hook and Orca completion polling; the
 Stop hook is now suppressed for Orca so the public-CLI output source is the
-single completion authority.
+single completion authority. A follow-up Telegram prompt received the exact
+Claude response once; the harmless prompt-time question-resolution event was
+consumed without posting, and only the `orca-` completion event produced a
+visible delivery.
 
 ### Exit criteria
 
