@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -46,22 +47,48 @@ class RouterCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class RecentRoutingContext:
+    candidate: RouterCandidate
+    age_seconds: int
+
+    def public_data(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate.candidate_id,
+            "age_seconds": self.age_seconds,
+            "workspace": self.candidate.target.workspace_label,
+            "title": self.candidate.target.tab_label,
+            "agent": self.candidate.target.agent_name,
+            "status": self.candidate.target.status or "unknown",
+            "alias": target_alias(self.candidate.target),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class RoutingRequest:
     utterance: str
     candidates: tuple[RouterCandidate, ...]
     source_kind: str = "text"
+    recent_context: RecentRoutingContext | None = None
 
     def public_data(self) -> dict[str, Any]:
         return {
-            "version": 2,
+            "version": 3,
             "source_kind": self.source_kind,
             "utterance": self.utterance,
+            "recent_context": (
+                self.recent_context.public_data()
+                if self.recent_context is not None
+                else None
+            ),
             "candidates": [candidate.public_data() for candidate in self.candidates],
             "output_contract": {
                 "intent": "send_prompt or unknown",
                 "candidate_id": "one candidate id or null",
                 "message_verbatim": "an exact non-empty substring of utterance or null",
                 "ambiguous": "boolean",
+                "routing_basis": (
+                    "explicit_destination, recent_context, or unknown"
+                ),
                 "reason": "short string",
             },
         }
@@ -74,6 +101,7 @@ class RoutingDecision:
     message_verbatim: str | None
     ambiguous: bool
     reason: str | None
+    routing_basis: str = "unknown"
 
 
 class IntentModel(Protocol):
@@ -256,10 +284,12 @@ class TelegramGeneralRouter:
                 message, "利用可能なAgent topicがありません。何も送信していません。"
             )
             return False
+        recent_context = self._recent_context(message, candidates)
         request = RoutingRequest(
             utterance=utterance,
             candidates=candidates,
             source_kind=message.source_kind,
+            recent_context=recent_context,
         )
         try:
             decision = await self.model.classify(request)
@@ -279,9 +309,23 @@ class TelegramGeneralRouter:
         by_id = {candidate.candidate_id: candidate for candidate in candidates}
         selected = by_id.get(decision.candidate_id or "")
         prompt = decision.message_verbatim or ""
+        valid_context_choice = (
+            decision.routing_basis != "recent_context"
+            or (
+                recent_context is not None
+                and selected is not None
+                and selected.candidate_id
+                == recent_context.candidate.candidate_id
+            )
+        )
         if (
             decision.intent != "send_prompt"
             or decision.ambiguous
+            or decision.routing_basis not in {
+                "explicit_destination",
+                "recent_context",
+            }
+            or not valid_context_choice
             or selected is None
             or not prompt
             or prompt not in utterance
@@ -305,7 +349,8 @@ class TelegramGeneralRouter:
             outcome="succeeded",
             detail=(
                 f"provider={self.model.provider_name} "
-                f"model={self.model.model_name or '-'} candidate={selected.candidate_id}"
+                f"model={self.model.model_name or '-'} candidate={selected.candidate_id} "
+                f"basis={decision.routing_basis}"
             ),
             payload=utterance,
             target_key=selected.key.to_storage_key(),
@@ -317,11 +362,88 @@ class TelegramGeneralRouter:
             text=prompt,
         )
         if claimed:
+            self._save_context(message, selected)
             await self._feedback(
                 message,
                 f"→ {selected.route.name}\n{truncate(prompt, max_chars=300)}",
             )
         return claimed
+
+    def clear_context(self, message) -> bool:
+        if self.router.context_ttl_seconds <= 0:
+            return False
+        key = self._context_key(message)
+        existed = self.store.get_state(key) is not None
+        self.store.delete_state(key)
+        if existed:
+            self.store.add_transport_audit(
+                TransportAuditEntry(
+                    transport="telegram",
+                    actor_id=str(message.user_id),
+                    container_id=str(message.chat_id),
+                    conversation_id=None,
+                    action="route_context",
+                    outcome="succeeded",
+                    detail="recent General destination cleared",
+                )
+            )
+        return existed
+
+    def _recent_context(
+        self,
+        message,
+        candidates: tuple[RouterCandidate, ...],
+    ) -> RecentRoutingContext | None:
+        ttl = self.router.context_ttl_seconds
+        if ttl <= 0:
+            return None
+        key = self._context_key(message)
+        value = self.store.get_state(key)
+        if value is None:
+            return None
+        try:
+            raw = json.loads(value)
+            thread_id = int(raw["thread_id"])
+            saved_at = float(raw["saved_at"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            self.store.delete_state(key)
+            return None
+        age = time.time() - saved_at
+        if age < 0 or age > ttl:
+            self.store.delete_state(key)
+            return None
+        candidate = next(
+            (
+                item
+                for item in candidates
+                if int(item.route.chat_id) == message.chat_id
+                and int(item.route.thread_id) == thread_id
+            ),
+            None,
+        )
+        if candidate is None:
+            self.store.delete_state(key)
+            return None
+        return RecentRoutingContext(candidate=candidate, age_seconds=int(age))
+
+    def _save_context(self, message, candidate: RouterCandidate) -> None:
+        if self.router.context_ttl_seconds <= 0:
+            return
+        self.store.set_state(
+            self._context_key(message),
+            json.dumps(
+                {
+                    "v": 1,
+                    "thread_id": int(candidate.route.thread_id),
+                    "saved_at": time.time(),
+                },
+                separators=(",", ":"),
+            ),
+        )
+
+    @staticmethod
+    def _context_key(message) -> str:
+        return f"telegram:general-context:{message.chat_id}:{message.user_id}"
 
     async def _candidates(self) -> tuple[RouterCandidate, ...]:
         targets = await asyncio.to_thread(self.client.list_targets)
@@ -468,6 +590,7 @@ def _parse_decision(value: str, *, request: RoutingRequest) -> RoutingDecision:
     candidate_id = raw.get("candidate_id")
     prompt = raw.get("message_verbatim")
     ambiguous = raw.get("ambiguous")
+    routing_basis = raw.get("routing_basis")
     reason = raw.get("reason")
     if intent not in {"send_prompt", "unknown"}:
         raise RouterError("Router model returned an unsupported intent")
@@ -480,6 +603,12 @@ def _parse_decision(value: str, *, request: RoutingRequest) -> RoutingDecision:
         raise RouterError("Router message_verbatim must be a string or null")
     if not isinstance(ambiguous, bool):
         raise RouterError("Router ambiguous must be boolean")
+    if routing_basis not in {
+        "explicit_destination",
+        "recent_context",
+        "unknown",
+    }:
+        raise RouterError("Router routing_basis is unsupported")
     if reason is not None and not isinstance(reason, str):
         raise RouterError("Router reason must be a string or null")
     return RoutingDecision(
@@ -488,6 +617,7 @@ def _parse_decision(value: str, *, request: RoutingRequest) -> RoutingDecision:
         message_verbatim=prompt.strip() if isinstance(prompt, str) else None,
         ambiguous=ambiguous,
         reason=reason,
+        routing_basis=routing_basis,
     )
 
 
@@ -507,13 +637,21 @@ Choose only from candidate ids supplied by the caller. Never invent an id.
 Extract message_verbatim as an exact contiguous substring of the utterance.
 Remove only the words that identify the destination; never rewrite, summarize,
 translate, correct, or expand the instruction itself.
+A non-null recent_context identifies the user's last successfully routed General
+destination. If the current utterance explicitly names a destination, prefer
+that destination even when it differs from recent_context, and return
+routing_basis=explicit_destination. If no destination is named and the utterance
+is a plausible conversational continuation, select recent_context and return
+routing_basis=recent_context. Do not use recent_context when it is null. Return
+routing_basis=unknown whenever no unique destination is supported.
 For source_kind=voice, the utterance is an automatic speech transcript. Spoken
 letters, separators, Latin text, kana, and similar sounds may be mistranscribed.
 Use the full candidate metadata to infer the intended destination when exactly
 one candidate is clearly plausible; do not require a literal spelling match.
 If multiple candidates remain similarly plausible, return unknown rather than
 guessing. For source_kind=text, apply ordinary strict natural-language matching.
-If the destination is absent or not uniquely supported, return intent=unknown,
-candidate_id=null, message_verbatim=null, ambiguous=true. Never choose based only
-on status or candidate order.
+If neither an explicit destination nor a usable recent_context uniquely supports
+a destination, return intent=unknown, candidate_id=null, message_verbatim=null,
+ambiguous=true, routing_basis=unknown. Never choose based only on status or
+candidate order.
 """

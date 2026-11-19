@@ -361,6 +361,8 @@ def test_state_roundtrip(tmp_path):
     store.set_state("dashboard_message_id", "456")
 
     assert store.get_state("dashboard_message_id") == "456"
+    store.delete_state("dashboard_message_id")
+    assert store.get_state("dashboard_message_id") is None
 
 
 def test_event_key_prefix_matches_legacy_bucketed_keys(tmp_path):

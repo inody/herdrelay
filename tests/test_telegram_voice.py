@@ -78,6 +78,7 @@ class FakeModel:
             message_verbatim="現在の状態を教えて",
             ambiguous=False,
             reason=None,
+            routing_basis="explicit_destination",
         )
 
 
@@ -125,6 +126,7 @@ def build_service(tmp_path, api, model, transcriber):
             enable_send=True,
             general_router=TelegramGeneralRouterConfig(
                 enabled=True,
+                context_ttl_seconds=1800,
                 model=RouterModelConfig(provider="none"),
             ),
             voice_input=TelegramVoiceInputConfig(

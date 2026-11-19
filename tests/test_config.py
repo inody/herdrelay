@@ -541,6 +541,7 @@ transports:
       enabled: true
       activation: all-text
       execution_policy: auto-unique
+      context_ttl_seconds: 1800
       model:
         provider: openai-compatible
         model: router-small
@@ -556,6 +557,7 @@ transports:
     assert router.enabled is True
     assert router.activation == "all-text"
     assert router.execution_policy == "auto-unique"
+    assert router.context_ttl_seconds == 1800
     assert router.model.provider == "openai-compatible"
     assert router.model.model == "router-small"
     assert router.model.base_url == "http://127.0.0.1:11434/v1"

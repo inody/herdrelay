@@ -102,6 +102,7 @@ def config() -> AppConfig:
             enable_send=True,
             general_router=TelegramGeneralRouterConfig(
                 enabled=True,
+                context_ttl_seconds=1800,
                 model=RouterModelConfig(provider="none"),
             ),
         ),
@@ -147,6 +148,7 @@ async def test_general_text_is_routed_to_exact_live_candidate(tmp_path):
             message_verbatim="テストを実行して",
             ambiguous=False,
             reason=None,
+            routing_basis="explicit_destination",
         )
     )
     relay, client, api, store = service(tmp_path, model, utterance)
@@ -162,6 +164,77 @@ async def test_general_text_is_routed_to_exact_live_candidate(tmp_path):
     assert "local/tab:pane" not in str(request)
     actions = [entry["action"] for entry in store.list_transport_audits()]
     assert actions == ["route_text", "send_text"]
+
+
+@pytest.mark.asyncio
+async def test_general_followup_uses_recent_context_selected_by_model(tmp_path):
+    model = FakeModel(
+        RoutingDecision(
+            intent="send_prompt",
+            candidate_id="candidate-1",
+            message_verbatim="状況を教えて",
+            ambiguous=False,
+            reason=None,
+            routing_basis="explicit_destination",
+        )
+    )
+    relay, client, api, store = service(
+        tmp_path,
+        model,
+        "チャットブリッジのパイに状況を教えて",
+    )
+
+    await relay.poll_once()
+
+    model.decision = RoutingDecision(
+        intent="send_prompt",
+        candidate_id="candidate-1",
+        message_verbatim="コミットは最新ですか?",
+        ambiguous=False,
+        reason="continuation of the recent destination",
+        routing_basis="recent_context",
+    )
+    api.batches.append([update("コミットは最新ですか?", update_id=11)])
+    await relay.poll_once()
+
+    assert client.sent == [
+        ("local/tab:pane", "状況を教えて"),
+        ("local/tab:pane", "コミットは最新ですか?"),
+    ]
+    request = model.requests[-1].public_data()
+    assert request["recent_context"]["candidate_id"] == "candidate-1"
+    assert request["recent_context"]["workspace"] == "herdr-chat-bridge"
+    audits = store.list_transport_audits()
+    assert "basis=recent_context" in audits[-2]["detail"]
+
+
+@pytest.mark.asyncio
+async def test_forget_clears_recent_general_context(tmp_path):
+    model = FakeModel(
+        RoutingDecision(
+            intent="send_prompt",
+            candidate_id="candidate-1",
+            message_verbatim="状況を教えて",
+            ambiguous=False,
+            reason=None,
+            routing_basis="explicit_destination",
+        )
+    )
+    relay, _client, api, store = service(
+        tmp_path,
+        model,
+        "チャットブリッジのパイに状況を教えて",
+    )
+    await relay.poll_once()
+    context_key = "telegram:general-context:-1001:42"
+    assert store.get_state(context_key) is not None
+
+    api.batches.append([update("/forget", update_id=11)])
+    await relay.poll_once()
+
+    assert store.get_state(context_key) is None
+    assert api.sent[-1]["text"] == "直近のGeneral送信先を解除しました。"
+    assert store.list_transport_audits()[-1]["action"] == "route_context"
 
 
 @pytest.mark.asyncio
@@ -239,7 +312,8 @@ async def test_command_model_uses_json_stdin_and_structured_stdout(tmp_path):
         "import json,sys; data=json.load(sys.stdin); "
         "assert data['candidates'][0]['workspace']=='herdr-chat-bridge'; "
         "print(json.dumps({'intent':'send_prompt','candidate_id':'candidate-1',"
-        "'message_verbatim':'テスト','ambiguous':False,'reason':None}, "
+        "'message_verbatim':'テスト','ambiguous':False,"
+        "'routing_basis':'explicit_destination','reason':None}, "
         "ensure_ascii=False))"
     )
     model = CommandIntentModel(
@@ -267,8 +341,11 @@ async def test_command_model_rejects_invented_candidate(tmp_path):
         candidates=await relay.general_router._candidates(),
     )
     script = (
-        "print('{\"intent\":\"send_prompt\",\"candidate_id\":\"made-up\",'"
-        "'\"message_verbatim\":\"テスト\",\"ambiguous\":false,\"reason\":null}')"
+        "import json; print(json.dumps({"
+        "'intent':'send_prompt','candidate_id':'made-up',"
+        "'message_verbatim':'テスト','ambiguous':False,"
+        "'routing_basis':'explicit_destination','reason':None}, "
+        "ensure_ascii=False))"
     )
     model = CommandIntentModel(
         RouterModelConfig(
@@ -315,6 +392,7 @@ print(json.dumps({
   'candidate_id': 'candidate-1',
   'message_verbatim': 'テスト',
   'ambiguous': False,
+  'routing_basis': 'explicit_destination',
   'reason': None,
 }, ensure_ascii=False))
 """

@@ -74,7 +74,13 @@ When `voice_input.enabled` is configured with an approved local transcriber:
    `send_text`, and that the Agent receives only the extracted instruction.
 4. Repeat with an intentionally ambiguous destination and confirm there is no
    `send_text` audit or runtime mutation.
-5. Send an over-duration test file and confirm it is rejected before download
+5. Send a follow-up voice message without a destination and confirm it uses the
+   recent General destination when `context_ttl_seconds` is positive.
+6. Name a different Agent explicitly and confirm the model switches to it and
+   replaces the recent destination.
+7. Send `/forget`, then send a destination-free follow-up and confirm it fails
+   closed without a runtime mutation.
+8. Send an over-duration test file and confirm it is rejected before download
    and transcription.
 
 ## Cleanup

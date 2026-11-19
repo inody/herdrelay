@@ -101,6 +101,7 @@ transports:
       activation: all-text         # General itself is the trigger
       execution_policy: auto-unique
       general_topic_id: null       # set only if Telegram reports one explicitly
+      context_ttl_seconds: 0       # 0 disables recent-target conversation context
       model:
         provider: none             # openai-compatible, pi-cli, or command
         model: null

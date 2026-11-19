@@ -201,7 +201,8 @@ class TelegramService:
             if self.telegram.general_router.enabled:
                 prompt_help = (
                     "Plain text in General is routed by the configured model; "
-                    "bound topics submit directly."
+                    "bound topics submit directly. Use /forget to clear the "
+                    "recent General destination."
                 )
             elif self.telegram.enable_send:
                 prompt_help = "Plain text in a bound topic submits a prompt."
@@ -216,9 +217,17 @@ class TelegramService:
                 "HerdRelay Telegram\n"
                 "/agents — list available agents\n"
                 "/help — show this message\n"
+                "/forget — clear the recent General destination\n"
                 "//command — send /command to the agent\n"
                 f"{prompt_help}\n{interrupt_help}"
             )
+        elif command == "forget":
+            if self.general_router is None:
+                text = "General routing context is disabled."
+            elif self.general_router.clear_context(message):
+                text = "直近のGeneral送信先を解除しました。"
+            else:
+                text = "保持されているGeneral送信先はありません。"
         elif command == "interrupt":
             if not self.telegram.enable_interrupt:
                 text = "Telegram interrupt is disabled."
@@ -226,7 +235,7 @@ class TelegramService:
                 await self.mutations.request_interrupt(message)
                 return False
         elif command is not None:
-            text = "Unknown command. Use /agents, /interrupt, or /help."
+            text = "Unknown command. Use /agents, /forget, /interrupt, or /help."
         elif self.general_router is not None and self.general_router.accepts(message):
             return await self.general_router.handle(message, event_key=event_key)
         elif self.telegram.enable_send:

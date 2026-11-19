@@ -116,6 +116,7 @@ class TelegramGeneralRouterConfig:
     activation: str = "all-text"
     execution_policy: str = "auto-unique"
     general_topic_id: int | None = None
+    context_ttl_seconds: int = 0
     model: RouterModelConfig = field(default_factory=RouterModelConfig)
 
 
@@ -562,6 +563,9 @@ def load_config(
                 general_topic_id=_optional_int(
                     general_router_data.get("general_topic_id")
                 ),
+                context_ttl_seconds=int(
+                    general_router_data.get("context_ttl_seconds", 0)
+                ),
                 model=RouterModelConfig(
                     provider=str(
                         router_model_data.get("provider") or "none"
@@ -704,6 +708,10 @@ def _validate_telegram(config: AppConfig) -> None:
         )
     if router.general_topic_id is not None and router.general_topic_id <= 0:
         raise ValueError("Telegram general_router.general_topic_id must be positive")
+    if not 0 <= router.context_ttl_seconds <= 86_400:
+        raise ValueError(
+            "Telegram general_router.context_ttl_seconds must be between 0 and 86400"
+        )
     model = router.model
     if model.provider not in {"openai-compatible", "pi-cli", "command"}:
         raise ValueError(

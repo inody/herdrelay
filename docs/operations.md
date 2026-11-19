@@ -131,6 +131,18 @@ Telegram installations that report General with a numeric thread ID, set
 `general_topic_id`; otherwise General is recognized by the absence of
 `message_thread_id`.
 
+When `context_ttl_seconds` is positive, a successful General route stores the
+selected topic ID with a timestamp under a chat-and-user-specific SQLite state
+key. On the next request, the model receives that current candidate as
+`recent_context` together with its age. The model returns
+`routing_basis=explicit_destination` when the utterance names a target, or
+`routing_basis=recent_context` for a conversational continuation. Explicit
+switches take priority. HerdRelay rejects a context-based decision unless it
+selects the exact stored candidate, which must still be live. Context expires at
+the configured TTL, disappears when its topic is unavailable, survives a
+service restart while fresh, and can be cleared with `/forget`. Ambiguous or
+failed requests do not replace it.
+
 ## Telegram voice input
 
 `transports.telegram.voice_input.enabled` accepts authorized Telegram voice

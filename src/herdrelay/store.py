@@ -511,6 +511,10 @@ class Store:
                 (key, value, now),
             )
 
+    def delete_state(self, key: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM bot_state WHERE key = ?", (key,))
+
     def create_telegram_confirmation(
         self,
         *,

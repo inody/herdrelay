@@ -251,6 +251,13 @@ decision on stdout. It is invoked as an argv array without a shell. Model
 timeout, invalid JSON, ambiguity, invented candidate IDs, or non-verbatim prompt
 text all fail closed without retry.
 
+Set `context_ttl_seconds` to let General retain the most recent successfully
+routed destination per chat and user. The model decides whether a new utterance
+explicitly switches destination or continues that recent conversation. An
+explicit destination takes priority. HerdRelay verifies that a
+`recent_context` decision selects the exact stored live candidate; `/forget`
+clears it. The default value `0` keeps the router stateless.
+
 ### Optional Telegram voice input
 
 Authorized Telegram voice messages in General can be transcribed locally and
