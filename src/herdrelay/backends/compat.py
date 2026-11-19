@@ -49,6 +49,11 @@ class CompatibilityBackend:
         *,
         expected_generation: str | None = None,
     ) -> MutationResult:
+        if not self.capabilities.normal_send:
+            return MutationResult(
+                outcome=MutationOutcome.REJECTED,
+                message=f"{self.kind.value} does not support prompt submission",
+            )
         snapshot = await self.get_target(key)
         mismatch = _generation_mismatch(snapshot, expected_generation)
         if mismatch is not None:

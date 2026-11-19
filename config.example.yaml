@@ -1,5 +1,5 @@
 runtime:
-  provider: herdr-tui             # herdr-tui or herdr-core
+  provider: herdr-tui             # herdr-tui, herdr-core, or orca
   herdr_tui:
     cli_path: herdr
     default_source: recent-unwrapped
@@ -14,6 +14,16 @@ runtime:
     include_connected_machines: false
     allowed_terminal_addresses: [] # inline exact addresses
     allowed_terminal_addresses_file: null # optional local 0600 file managed by herdrelay-targets
+  orca:                          # read-only status backend during initial rollout
+    cli_path: orca
+    environment: local
+    command_timeout_seconds: 10
+    refresh_seconds: 2
+    include_terminal_agents: true
+    include_chats: false
+    allowed_host_ids: [local]
+    allowed_pane_keys: []        # exact pane keys; combined with worktree allowlist
+    allowed_worktree_ids: []     # empty pane+worktree allowlists expose no agents
 
 storage:
   database_path: herdrelay.sqlite3

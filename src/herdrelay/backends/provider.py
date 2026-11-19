@@ -14,9 +14,6 @@ def build_backend_provider(config: AppConfig) -> BackendProvider:
         raise ValueError(
             f"unsupported runtime provider: {config.runtime.provider!r}"
         ) from exc
-    if kind is BackendKind.ORCA:
-        raise ValueError("Orca backend is not implemented yet")
-
     client = build_runtime_client(config)
     backend = CompatibilityBackend(kind=kind, client=client)
     return BackendProvider(kind=kind, backend=backend, client=client)

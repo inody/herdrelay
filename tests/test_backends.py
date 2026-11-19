@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from herdrelay.backends import CompatibilityBackend, build_backend_provider
-from herdrelay.config import AppConfig, RuntimeConfig
+from herdrelay.config import AppConfig, OrcaRuntimeConfig, RuntimeConfig
 from herdrelay.domain import (
     AgentState,
     BackendKind,
@@ -141,11 +141,16 @@ def test_build_backend_provider_wraps_selected_runtime(monkeypatch):
     assert provider.backend.client is client
 
 
-def test_build_backend_provider_rejects_orca_until_implemented():
+def test_build_backend_provider_wraps_orca_read_only_runtime():
     config = AppConfig(
         discord_token="token",
-        runtime=RuntimeConfig(provider="orca"),
+        runtime=RuntimeConfig(
+            provider="orca",
+            orca=OrcaRuntimeConfig(allowed_pane_keys=frozenset({"tab:pane"})),
+        ),
     )
 
-    with pytest.raises(ValueError, match="not implemented"):
-        build_backend_provider(config)
+    provider = build_backend_provider(config)
+
+    assert provider.kind is BackendKind.ORCA
+    assert provider.client.capabilities.normal_send is False

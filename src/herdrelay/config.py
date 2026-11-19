@@ -30,10 +30,24 @@ class HcRuntimeConfig:
 
 
 @dataclass(frozen=True)
+class OrcaRuntimeConfig:
+    cli_path: str = "orca"
+    environment: str = "local"
+    command_timeout_seconds: float = 10
+    refresh_seconds: float = 2
+    include_terminal_agents: bool = True
+    include_chats: bool = False
+    allowed_host_ids: frozenset[str] = frozenset({"local"})
+    allowed_pane_keys: frozenset[str] = frozenset()
+    allowed_worktree_ids: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     provider: str = "herdr-tui"
     tui: HerdrCliConfig = field(default_factory=HerdrCliConfig)
     core: HcRuntimeConfig = field(default_factory=HcRuntimeConfig)
+    orca: OrcaRuntimeConfig = field(default_factory=OrcaRuntimeConfig)
 
 
 @dataclass(frozen=True)
@@ -164,6 +178,9 @@ def load_config(
     ) or {}
     if not isinstance(tui_data, dict):
         raise ValueError("runtime.herdr_tui must be a YAML mapping")
+    orca_data = runtime_data.get("orca") or {}
+    if not isinstance(orca_data, dict):
+        raise ValueError("runtime.orca must be a YAML mapping")
     transports_data = data.get("transports") or {}
     if not isinstance(transports_data, dict):
         raise ValueError("transports must be a YAML mapping")
@@ -320,6 +337,29 @@ def load_config(
                 ),
                 allowed_terminal_addresses=allowed_targets,
             ),
+            orca=OrcaRuntimeConfig(
+                cli_path=str(orca_data.get("cli_path") or "orca"),
+                environment=str(orca_data.get("environment") or "local"),
+                command_timeout_seconds=float(
+                    orca_data.get("command_timeout_seconds", 10)
+                ),
+                refresh_seconds=float(orca_data.get("refresh_seconds", 2)),
+                include_terminal_agents=bool(
+                    orca_data.get("include_terminal_agents", True)
+                ),
+                include_chats=bool(orca_data.get("include_chats", False)),
+                allowed_host_ids=(
+                    _string_set(orca_data.get("allowed_host_ids"))
+                    if "allowed_host_ids" in orca_data
+                    else frozenset({"local"})
+                ),
+                allowed_pane_keys=_string_set(
+                    orca_data.get("allowed_pane_keys")
+                ),
+                allowed_worktree_ids=_string_set(
+                    orca_data.get("allowed_worktree_ids")
+                ),
+            ),
         ),
         watcher=WatcherConfig(
             statuses=tuple(
@@ -454,28 +494,54 @@ def _validate_telegram(config: AppConfig) -> None:
 
 
 def _validate_runtime_features(config: AppConfig) -> None:
-    if config.runtime.provider != "herdr-core":
+    if config.runtime.provider == "herdr-core":
+        if config.runtime.core.connect_timeout_seconds <= 0:
+            raise ValueError("runtime.herdr_core.connect_timeout_seconds must be positive")
+        if config.runtime.core.request_timeout_seconds <= 0:
+            raise ValueError("runtime.herdr_core.request_timeout_seconds must be positive")
+        if config.runtime.core.event_idle_timeout_seconds <= 15:
+            raise ValueError(
+                "runtime.herdr_core.event_idle_timeout_seconds must exceed Core's 15s heartbeat"
+            )
+        if config.enable_approve:
+            raise ValueError(
+                "enable_approve is disabled for Herdr Core until guarded actions exist"
+            )
         return
-    if config.runtime.core.connect_timeout_seconds <= 0:
-        raise ValueError("runtime.herdr_core.connect_timeout_seconds must be positive")
-    if config.runtime.core.request_timeout_seconds <= 0:
-        raise ValueError("runtime.herdr_core.request_timeout_seconds must be positive")
-    if config.runtime.core.event_idle_timeout_seconds <= 15:
+    if config.runtime.provider != "orca":
+        return
+
+    orca = config.runtime.orca
+    if orca.command_timeout_seconds <= 0:
+        raise ValueError("runtime.orca.command_timeout_seconds must be positive")
+    if orca.refresh_seconds <= 0:
+        raise ValueError("runtime.orca.refresh_seconds must be positive")
+    if not orca.environment.strip():
+        raise ValueError("runtime.orca.environment must not be empty")
+    if not orca.allowed_host_ids:
+        raise ValueError("runtime.orca.allowed_host_ids must not be empty")
+    if not orca.allowed_pane_keys and not orca.allowed_worktree_ids:
         raise ValueError(
-            "runtime.herdr_core.event_idle_timeout_seconds must exceed Core's 15s heartbeat"
+            "Orca requires at least one allowed_pane_key or allowed_worktree_id"
         )
-    if config.enable_approve:
-        raise ValueError(
-            "enable_approve is disabled for Herdr Core until guarded actions exist"
-        )
+    if config.enable_send or config.enable_approve or config.enable_stop:
+        raise ValueError("Discord mutations are not implemented for the Orca backend")
+    if config.enable_watcher:
+        raise ValueError("Discord watcher is not implemented for the Orca backend")
+    if config.enable_streaming:
+        raise ValueError("response streaming is not implemented for the Orca backend")
+    if config.telegram.enable_send or config.telegram.enable_interrupt:
+        raise ValueError("Telegram mutations are not implemented for the Orca backend")
 
 
 def _runtime_provider(value: Any) -> str:
     provider = str(value or "herdr-tui").casefold()
     aliases = {"tui": "herdr-tui", "core": "herdr-core", "hc": "herdr-core"}
     provider = aliases.get(provider, provider)
-    if provider not in {"herdr-tui", "herdr-core"}:
-        raise ValueError("runtime.provider must be 'herdr-tui' or 'herdr-core'")
+    if provider not in {"herdr-tui", "herdr-core", "orca"}:
+        raise ValueError(
+            "runtime.provider must be 'herdr-tui', 'herdr-core', or 'orca'"
+        )
     return provider
 
 
