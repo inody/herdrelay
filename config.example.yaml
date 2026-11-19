@@ -103,7 +103,7 @@ transports:
     forum_chat_id: null
     statuses: [blocked, done]
     enable_send: false
-    enable_interrupt: false        # Core or Orca, with one-time confirmation
+    enable_interrupt: false        # Core-only, with one-time confirmation
     confirmation_ttl_seconds: 60
     actor_mutations_per_minute: 6
     chat_mutations_per_minute: 12

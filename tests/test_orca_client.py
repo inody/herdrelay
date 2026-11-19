@@ -173,48 +173,6 @@ def test_orca_client_sends_to_exact_writable_terminal():
     ]
 
 
-def test_orca_client_interrupts_exact_working_terminal():
-    client = make_client()
-    calls = []
-
-    class FakeCli:
-        def agent_list(self):
-            return "runtime-1", [agent(state="working")]
-
-        def terminal_list(self):
-            return "runtime-1", [terminal()]
-
-        def terminal_interrupt(self, **kwargs):
-            calls.append(kwargs)
-            return {"submitted": True, "action": "interrupt"}
-
-    client.cli = FakeCli()
-    [target] = client.list_targets()
-
-    receipt = client.interrupt_with_receipt(target.target)
-
-    assert receipt.observed_turn is None
-    assert receipt.result == {"submitted": True, "action": "interrupt"}
-    assert calls == [{"handle": "term-1"}]
-
-
-def test_orca_client_rejects_interrupt_in_nonworking_state():
-    client = make_client()
-    client.cli = type(
-        "DoneCli",
-        (),
-        {
-            "agent_list": lambda self: ("runtime-1", [agent(state="done")]),
-            "terminal_list": lambda self: ("runtime-1", [terminal()]),
-        },
-    )()
-
-    with pytest.raises(OrcaCliError, match="not interruptible") as caught:
-        client.interrupt("local/tab:pane")
-
-    assert caught.value.kind == "not_interruptible"
-
-
 def test_orca_client_rejects_changed_runtime_and_ambiguous_terminal():
     client = make_client()
     client.cli = type(

@@ -127,19 +127,6 @@ class OrcaCli:
         ).get("result")
         return _object(result, "Orca terminal send result")
 
-    def terminal_interrupt(self, *, handle: str) -> dict[str, Any]:
-        result = self._json(
-            [
-                "terminal",
-                "send",
-                "--terminal",
-                handle,
-                "--interrupt",
-            ],
-            mutation=True,
-        ).get("result")
-        return _object(result, "Orca terminal interrupt result")
-
     def _parse_terminal(self, value: Any) -> OrcaTerminal:
         item = _object(value, "Orca terminal")
         connected = item.get("connected")

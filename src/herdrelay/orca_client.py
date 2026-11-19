@@ -29,7 +29,7 @@ class OrcaClient:
         normal_send=True,
         bounded_read=True,
         native_events=False,
-        native_interrupt=True,
+        native_interrupt=False,
         raw_input=False,
         guarded_approval=False,
         agent_start=False,
@@ -123,21 +123,6 @@ class OrcaClient:
             text=message,
             wait_submit_seconds=self.orca.send_wait_seconds,
         )
-        return OrcaMutationReceipt(observed_turn=None, result=result)
-
-    def interrupt(self, target: str) -> dict[str, Any]:
-        return self.interrupt_with_receipt(target).result
-
-    def interrupt_with_receipt(self, target: str) -> OrcaMutationReceipt:
-        current = self._resolve_live_target(target)
-        state = current.status.casefold() if current.status else "unknown"
-        if state not in {"working", "blocked"}:
-            raise OrcaCliError(
-                f"Orca agent is not interruptible in state {state}: {target}",
-                kind="not_interruptible",
-            )
-        _, terminal = self._resolve_mutation_terminal(target, current=current)
-        result = self.cli.terminal_interrupt(handle=terminal.handle)
         return OrcaMutationReceipt(observed_turn=None, result=result)
 
     def send_keys(

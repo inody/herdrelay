@@ -130,6 +130,10 @@ def test_load_config_rejects_orca_without_target_allowlist(tmp_path, monkeypatch
     [
         ("enable_watcher: true", "watcher"),
         ("enable_streaming: true\nstreaming:\n  mode: poll", "requires"),
+        (
+            "transports:\n  telegram:\n    enable_interrupt: true",
+            "interrupt",
+        ),
     ],
 )
 def test_load_config_rejects_unimplemented_orca_features(
@@ -149,7 +153,7 @@ def test_load_config_rejects_unimplemented_orca_features(
         load_config(config_path)
 
 
-def test_load_config_allows_supported_orca_mutations(tmp_path, monkeypatch):
+def test_load_config_allows_normal_send_for_orca(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -160,14 +164,11 @@ def test_load_config_allows_supported_orca_mutations(tmp_path, monkeypatch):
         "transports:\n"
         "  discord:\n"
         "    enable_send: true\n"
-        "  telegram:\n"
-        "    enable_interrupt: true\n"
     )
 
     config = load_config(config_path)
 
     assert config.enable_send is True
-    assert config.telegram.enable_interrupt is True
 
 
 def test_load_config_rejects_unknown_runtime_provider(tmp_path, monkeypatch):

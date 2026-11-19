@@ -296,9 +296,10 @@ send and interrupt.
 
 ## 10. Phase 8 — Orca send and interrupt
 
-**Status:** Implemented with automated coverage. Normal text is available to
-Telegram and Discord; confirmation-gated interrupt is available to Telegram.
-Live chat mutation acceptance remains pending.
+**Status:** Normal text is implemented with automated coverage and direct
+public-CLI live acceptance; live Telegram and Discord acceptance remains
+pending. Orca interrupt failed live semantic acceptance and remains disabled:
+the CLI accepted interrupt-style input but the tested Pi turn stayed working.
 
 ### Scope
 

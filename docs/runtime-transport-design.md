@@ -323,8 +323,8 @@ includes:
 
 - `orca agent list --json` for discovery and state;
 - `orca agent read <session-id> --json` for conversation output;
-- `orca terminal send` for accepted terminal input and interruption where a
-  live terminal handle is available;
+- `orca terminal send` for accepted terminal input and interrupt-style input
+  where a live terminal handle is available;
 - `agent.status.changed` for plugin event-driven status updates; and
 - plugin host APIs such as `agents.list` and `terminal.sendText`.
 
@@ -537,6 +537,9 @@ HerdRelay or needs an independent release lifecycle.
 
 These questions require characterization tests rather than assumptions:
 
+- Which documented Orca operation can semantically stop a recognized agent
+  turn. `terminal send --interrupt` accepted one byte in live characterization,
+  but the tested Pi agent remained `working`.
 - Whether `agent.status.changed` covers native chats and terminal agents with
   the same identity guarantees.
 - How Orca reports a completed response after restart or while a workspace is
@@ -547,4 +550,5 @@ These questions require characterization tests rather than assumptions:
   interface without scraping terminal output.
 
 The Orca rollout remains experimental pending live chat mutation acceptance and
-continues to fail closed on ambiguous identity.
+continues to fail closed on ambiguous identity or unverified interrupt
+semantics.

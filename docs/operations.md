@@ -55,14 +55,19 @@ normal prompt submission, HerdRelay refreshes the agent list and maps the
 agent's exact `paneKey` to a single connected, writable terminal whose
 `tabId:leafId`, host, worktree, and agent identity agree. It then calls
 `orca terminal send --enter --wait-submit`; it never selects a terminal by
-title, repository name, cwd, or display label. A confirmed Telegram interrupt
-uses the same identity checks before `orca terminal send --interrupt`.
+title, repository name, cwd, or display label.
 
-Orca reports an accepted-input/submission receipt. A transport timeout after
-input may have been accepted is recorded as `outcome_unknown` and is not retried
-automatically. Discord stop/approval/raw input, launch, and terminal close
-remain disabled. The Orca path currently has automated tests and local
-read-only discovery checks but no live Telegram or Discord mutation acceptance.
+Orca reports input acceptance and, where the agent provider supports it,
+submission observation. A transport timeout after input may have been accepted
+is recorded as `outcome_unknown` and is not retried automatically. Direct
+public-CLI live acceptance confirmed that an allowlisted Pi agent received the
+prompt and entered `working`. It did not confirm Telegram or Discord delivery.
+
+Orca interrupt remains disabled. In live characterization,
+`orca terminal send --interrupt` returned `accepted: true` and wrote one byte,
+but the Pi agent remained `working`; input acceptance is therefore not treated
+as proof of a native interrupt. Discord stop/approval/raw input, launch, and
+terminal close also remain disabled.
 
 ## Thread and binding lifecycle
 

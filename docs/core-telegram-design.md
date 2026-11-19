@@ -107,11 +107,10 @@ supported devices.
 ### 4.6 Runtime mutations remain deliberately narrow
 
 Telegram permits normal prompt submission to supported runtimes after an
-atomic claim and audit write. Core and Orca additionally permit
-confirmation-gated native interrupt; legacy TUI interrupt is not exposed
-through Telegram. Telegram does not expose raw keys or force-send behavior.
-Mutation timeouts produce an unknown outcome and are never retried
-automatically.
+atomic claim and audit write. Core additionally permits confirmation-gated
+native interrupt; Orca and legacy TUI interrupt are not exposed through
+Telegram. Telegram does not expose raw keys or force-send behavior. Mutation
+timeouts produce an unknown outcome and are never retried automatically.
 
 ### 4.7 Herdr Wear remains a separate client path
 
