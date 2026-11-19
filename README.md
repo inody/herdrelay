@@ -83,8 +83,8 @@ Use a dedicated Bot and a private forum-enabled supergroup.
    ```
 
 2. Create a private supergroup and enable **Topics**.
-3. Add the Bot. Grant only **Manage Topics**; unrelated administration
-   permissions should remain disabled.
+3. Add the Bot. Grant **Manage Topics**; unrelated administration permissions
+   should remain disabled.
 4. Keep Bot Privacy Mode enabled. An administrator Bot still receives group
    messages.
 5. Obtain the exact forum chat ID and your Telegram user ID. Both allowlists must
@@ -133,7 +133,7 @@ transports:
     enable_send: false
     enable_interrupt: false
     target_absence_grace_seconds: 60
-    closed_topic_retention_days: 1
+    closed_topic_retention_minutes: 10
 ```
 
 `all-eligible` exposes every eligible local interactive agent while retaining
@@ -205,8 +205,9 @@ A target returning at the same stable address reopens its existing topic, and an
 Orca runtime-ID rotation does not create a new topic. Transient discovery gaps
 shorter than `target_absence_grace_seconds` do not close a topic. A genuinely
 new pane gets a separate topic even when it has the same workspace and agent
-name. Closed topics are deleted after `closed_topic_retention_days`; set it to
-`null` to keep them indefinitely.
+name. Closed topics are deleted after `closed_topic_retention_minutes`; set it
+to `null` to keep them indefinitely. The legacy day-based setting remains
+accepted, but it cannot be combined with the minute-based setting.
 
 Prompt and interrupt attempts are claimed and audited before the Core call.
 Timeouts are recorded as `outcome_unknown` and are never retried automatically.

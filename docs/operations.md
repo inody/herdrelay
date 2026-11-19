@@ -95,9 +95,13 @@ replace that topic.
 A polling backend does not close a topic until the target has remained absent
 for `target_absence_grace_seconds`; this prevents transient incomplete Orca
 snapshots from producing close/reopen loops. When sustained absence is
-confirmed, the topic is closed. If `closed_topic_retention_days` is an integer,
-a closed topic that remains absent is deleted after that many days and its
-SQLite route is removed. `null` retains closed topics indefinitely. Do not
+confirmed, the topic is closed. If `closed_topic_retention_minutes` is an
+integer, a closed topic that remains absent is deleted after that many minutes
+and its SQLite route is removed. `null` retains closed topics indefinitely. The
+legacy `closed_topic_retention_days` setting remains accepted for existing
+installations, but the two settings cannot be combined. The Bot needs **Manage
+Topics**. Deletion API failures are isolated per topic and retried later instead of
+stopping status reconciliation. Do not
 delete a still-tracked topic manually: a missing Telegram topic with a retained
 SQLite route cannot be reopened.
 

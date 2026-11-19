@@ -95,7 +95,7 @@ transports:
     reconnect_delay_seconds: 5
     status_refresh_seconds: 5      # legacy TUI/Orca polling; Core uses native events
     target_absence_grace_seconds: 60 # ignore transient discovery gaps
-    closed_topic_retention_days: 1 # null keeps closed topics indefinitely
+    closed_topic_retention_minutes: 10 # null keeps closed topics indefinitely
     general_router:
       enabled: false               # route authorized General text with one LLM call
       activation: all-text         # General itself is the trigger

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 
 from .config import AppConfig
@@ -28,6 +29,7 @@ class TelegramTopicManager:
         self.telegram = config.telegram
         self.store = store
         self.api = api
+        self._cleanup_retry_after: dict[int, float] = {}
 
     async def ensure(
         self, key: TargetKey, target: HerdrTarget
@@ -119,34 +121,52 @@ class TelegramTopicManager:
     async def cleanup_expired_closed(
         self, *, now: datetime | None = None
     ) -> tuple[int, ...]:
+        retention_minutes = self.telegram.closed_topic_retention_minutes
         retention_days = self.telegram.closed_topic_retention_days
         chat_id = self.telegram.forum_chat_id
-        if retention_days is None or chat_id is None:
+        if retention_minutes is None and retention_days is None:
             return ()
+        if chat_id is None:
+            return ()
+        retention = (
+            timedelta(minutes=retention_minutes)
+            if retention_minutes is not None
+            else timedelta(days=retention_days or 0)
+        )
         current_time = now or datetime.now(UTC)
-        cutoff = current_time - timedelta(days=retention_days)
+        cutoff = current_time - retention
         deleted: list[int] = []
+        monotonic_now = time.monotonic()
         for topic in self.store.list_telegram_topics():
+            thread_id = int(topic.thread_id)
             if (
                 not topic.closed
                 or int(topic.chat_id) != chat_id
                 or datetime.fromisoformat(topic.updated_at) > cutoff
+                or self._cleanup_retry_after.get(thread_id, 0) > monotonic_now
             ):
                 continue
             try:
                 await self.api.delete_forum_topic(
                     chat_id=chat_id,
-                    message_thread_id=int(topic.thread_id),
+                    message_thread_id=thread_id,
                 )
             except TelegramApiError as exc:
                 if not _topic_missing(exc):
-                    raise
+                    self._cleanup_retry_after[thread_id] = monotonic_now + 3600
+                    LOG.warning(
+                        "Could not delete expired Telegram topic %s; retrying later: %s",
+                        thread_id,
+                        exc,
+                    )
+                    continue
                 LOG.info(
                     "Telegram topic %s was already absent during retention cleanup",
-                    topic.thread_id,
+                    thread_id,
                 )
+            self._cleanup_retry_after.pop(thread_id, None)
             self.store.delete_telegram_topic_for_target(topic.route_target)
-            deleted.append(int(topic.thread_id))
+            deleted.append(thread_id)
         return tuple(deleted)
 
 

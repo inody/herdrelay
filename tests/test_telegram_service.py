@@ -107,6 +107,7 @@ class FakeApi:
     fail_send: bool = False
     reopen_error: Exception | None = None
     close_error: Exception | None = None
+    delete_errors: dict[int, Exception] = field(default_factory=dict)
     update_calls: list[dict] = field(default_factory=list)
     sent: list[dict] = field(default_factory=list)
     callback_answers: list[dict] = field(default_factory=list)
@@ -166,6 +167,9 @@ class FakeApi:
 
     async def delete_forum_topic(self, **kwargs):
         self.deleted_topics.append(kwargs)
+        error = self.delete_errors.get(kwargs["message_thread_id"])
+        if error is not None:
+            raise error
         return True
 
     async def close(self):
@@ -495,11 +499,11 @@ async def test_topic_state_updates_when_telegram_reports_already_in_desired_stat
 
 
 @pytest.mark.asyncio
-async def test_closed_topic_is_deleted_after_retention_period(tmp_path):
+async def test_closed_topic_is_deleted_after_minute_retention_period(tmp_path):
     base = config()
     app_config = replace(
         base,
-        telegram=replace(base.telegram, closed_topic_retention_days=1),
+        telegram=replace(base.telegram, closed_topic_retention_minutes=10),
     )
     api = FakeApi([])
     store = Store(tmp_path / "retention.sqlite3")
@@ -519,7 +523,7 @@ async def test_closed_topic_is_deleted_after_retention_period(tmp_path):
     )
 
     deleted = await relay.topics.cleanup_expired_closed(
-        now=datetime.now(UTC) + timedelta(days=2)
+        now=datetime.now(UTC) + timedelta(minutes=20)
     )
 
     assert deleted == (77,)
@@ -530,11 +534,11 @@ async def test_closed_topic_is_deleted_after_retention_period(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_closed_topic_is_kept_within_retention_period(tmp_path):
+async def test_closed_topic_is_kept_within_minute_retention_period(tmp_path):
     base = config()
     app_config = replace(
         base,
-        telegram=replace(base.telegram, closed_topic_retention_days=1),
+        telegram=replace(base.telegram, closed_topic_retention_minutes=10),
     )
     api = FakeApi([])
     store = Store(tmp_path / "retention.sqlite3")
@@ -554,12 +558,58 @@ async def test_closed_topic_is_kept_within_retention_period(tmp_path):
     )
 
     deleted = await relay.topics.cleanup_expired_closed(
-        now=datetime.now(UTC) + timedelta(hours=12)
+        now=datetime.now(UTC) + timedelta(minutes=5)
     )
 
     assert deleted == ()
     assert api.deleted_topics == []
     assert store.get_telegram_topic_for_target(key) is not None
+
+
+@pytest.mark.asyncio
+async def test_retention_cleanup_isolates_topic_delete_permission_failure(tmp_path):
+    base = config()
+    app_config = replace(
+        base,
+        telegram=replace(base.telegram, closed_topic_retention_minutes=10),
+    )
+    api = FakeApi(
+        [],
+        delete_errors={
+            77: TelegramApiError("Bad Request: CHAT_ADMIN_REQUIRED")
+        },
+    )
+    store = Store(tmp_path / "retention-errors.sqlite3")
+    failed = TargetKey.core(controller_core_id="core-1", address="t12")
+    successful = TargetKey.core(controller_core_id="core-1", address="t13")
+    for key, thread_id in ((failed, 77), (successful, 78)):
+        store.upsert_telegram_topic_for_target(
+            target=key,
+            chat_id=-1001,
+            thread_id=thread_id,
+            name=f"herdrelay/pi · {key.address}",
+            closed=True,
+        )
+    relay = TelegramService(
+        config=app_config,
+        store=store,
+        client=HcClient(app_config),
+        api=api,
+    )
+
+    deleted = await relay.topics.cleanup_expired_closed(
+        now=datetime.now(UTC) + timedelta(minutes=20)
+    )
+
+    assert deleted == (78,)
+    assert store.get_telegram_topic_for_target(failed) is not None
+    assert store.get_telegram_topic_for_target(successful) is None
+    assert [item["message_thread_id"] for item in api.deleted_topics] == [77, 78]
+
+    await relay.topics.cleanup_expired_closed(
+        now=datetime.now(UTC) + timedelta(minutes=21)
+    )
+    assert [item["message_thread_id"] for item in api.deleted_topics] == [77, 78]
 
 
 def mutation_service(

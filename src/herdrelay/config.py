@@ -140,6 +140,7 @@ class TelegramConfig:
     reconnect_delay_seconds: float = 5
     status_refresh_seconds: float = 5
     target_absence_grace_seconds: float = 60
+    closed_topic_retention_minutes: int | None = None
     closed_topic_retention_days: int | None = None
     general_router: TelegramGeneralRouterConfig = field(
         default_factory=TelegramGeneralRouterConfig
@@ -514,6 +515,9 @@ def load_config(
             target_absence_grace_seconds=float(
                 telegram_data.get("target_absence_grace_seconds", 60)
             ),
+            closed_topic_retention_minutes=_optional_int(
+                telegram_data.get("closed_topic_retention_minutes")
+            ),
             closed_topic_retention_days=_optional_int(
                 telegram_data.get("closed_topic_retention_days")
             ),
@@ -646,6 +650,20 @@ def _validate_telegram(config: AppConfig) -> None:
     if telegram.target_absence_grace_seconds < 0:
         raise ValueError(
             "Telegram target_absence_grace_seconds must not be negative"
+        )
+    if (
+        telegram.closed_topic_retention_minutes is not None
+        and telegram.closed_topic_retention_days is not None
+    ):
+        raise ValueError(
+            "Telegram closed topic retention must use minutes or legacy days, not both"
+        )
+    if (
+        telegram.closed_topic_retention_minutes is not None
+        and telegram.closed_topic_retention_minutes < 1
+    ):
+        raise ValueError(
+            "Telegram closed_topic_retention_minutes must be at least 1 or null"
         )
     if (
         telegram.closed_topic_retention_days is not None
