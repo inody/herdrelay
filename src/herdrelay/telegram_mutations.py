@@ -446,7 +446,7 @@ class TelegramMutationHandler:
                 ),
                 observed_turn=(receipt.observed_turn if receipt is not None else None),
             )
-            await self._safe_feedback(message, "✅ Prompt submitted.")
+            await self._safe_reaction(message, "👀")
         return True
 
     async def _feedback(self, message, text: str) -> None:
@@ -461,6 +461,16 @@ class TelegramMutationHandler:
             await self._feedback(message, text)
         except Exception:
             LOG.exception("Failed to send Telegram mutation feedback")
+
+    async def _safe_reaction(self, message, emoji: str) -> None:
+        try:
+            await self.api.set_message_reaction(
+                chat_id=message.chat_id,
+                message_id=message.message_id,
+                emoji=emoji,
+            )
+        except Exception:
+            LOG.exception("Failed to set Telegram mutation reaction")
 
     def _mutation_rate_limit(
         self, *, actor_id: str, container_id: str, target_key: str

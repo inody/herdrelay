@@ -187,7 +187,8 @@ In Telegram:
 - `/agents` lists allowlisted live agents;
 - `/help` shows enabled controls;
 - each agent receives one persisted forum topic;
-- ordinary topic text submits a prompt only when `enable_send: true`;
+- ordinary topic text submits a prompt only when `enable_send: true` and a
+  successful submission adds a 👀 reaction to that message;
 - `//reload` sends the agent command `/reload` without treating it as a Bot
   command; and
 - `/interrupt` requires `enable_interrupt: true` plus a one-time confirmation

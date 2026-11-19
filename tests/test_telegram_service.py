@@ -101,6 +101,7 @@ class FakeApi:
     update_calls: list[dict] = field(default_factory=list)
     sent: list[dict] = field(default_factory=list)
     callback_answers: list[dict] = field(default_factory=list)
+    reactions: list[dict] = field(default_factory=list)
     closed: bool = False
     created_topics: list[dict] = field(default_factory=list)
     edited_topics: list[dict] = field(default_factory=list)
@@ -125,6 +126,12 @@ class FakeApi:
 
     async def answer_callback_query(self, **kwargs):
         self.callback_answers.append(kwargs)
+        return True
+
+    async def set_message_reaction(self, **kwargs):
+        if self.fail_send:
+            raise TelegramApiError("reaction failed")
+        self.reactions.append(kwargs)
         return True
 
     async def create_forum_topic(self, **kwargs):
@@ -537,7 +544,10 @@ async def test_enabled_prompt_send_is_claimed_audited_and_not_repeated(tmp_path)
     assert audit["outcome"] == "succeeded"
     assert audit["observed_turn"] == 4
     assert audit["payload_preview"] == "continue"
-    assert api.sent[-1]["text"] == "✅ Prompt submitted."
+    assert api.sent == []
+    assert api.reactions == [
+        {"chat_id": -1001, "message_id": 5, "emoji": "👀"}
+    ]
     assert relay.store.get_state(OFFSET_STATE_KEY) == "11"
 
 

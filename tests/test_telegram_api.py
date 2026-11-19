@@ -116,6 +116,34 @@ async def test_send_message_supports_inline_confirmation_and_callback_answer():
 
 
 @pytest.mark.asyncio
+async def test_set_message_reaction_uses_standard_emoji_reaction():
+    requests = []
+
+    async def handler(request):
+        requests.append((request.match_info["method"], await request.json()))
+        return web.json_response({"ok": True, "result": True})
+
+    async with telegram_server(handler) as base_url:
+        async with TelegramBotApi("test-token", base_url=base_url) as api:
+            await api.set_message_reaction(
+                chat_id=-1001,
+                message_id=5,
+                emoji="👀",
+            )
+
+    assert requests == [
+        (
+            "setMessageReaction",
+            {
+                "chat_id": -1001,
+                "message_id": 5,
+                "reaction": [{"type": "emoji", "emoji": "👀"}],
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_updates_uses_outbound_long_polling_parameters():
     requests = []
 

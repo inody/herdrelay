@@ -165,6 +165,25 @@ class TelegramBotApi:
         result = await self.call("answerCallbackQuery", payload)
         return _boolean_result(result, "answerCallbackQuery")
 
+    async def set_message_reaction(
+        self,
+        *,
+        chat_id: int,
+        message_id: int,
+        emoji: str,
+    ) -> bool:
+        if not emoji:
+            raise ValueError("Telegram reaction emoji must not be empty")
+        result = await self.call(
+            "setMessageReaction",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reaction": [{"type": "emoji", "emoji": emoji}],
+            },
+        )
+        return _boolean_result(result, "setMessageReaction")
+
     async def create_forum_topic(
         self, *, chat_id: int, name: str
     ) -> dict[str, Any]:
