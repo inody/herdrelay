@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from .domain import TargetKey
-from .models import HerdrTarget, StartedAgent
+from .models import HerdrTarget, PendingQuestion, StartedAgent
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +53,15 @@ class RawInputRuntime(Protocol):
     def send_raw_text(self, target: str, text: str) -> None: ...
 
     def send_text_enter(self, target: str, text: str) -> None: ...
+
+
+@runtime_checkable
+class QuestionAnswerRuntime(Protocol):
+    """Answer one normalized structured question through a backend adapter."""
+
+    def answer_question(
+        self, question: PendingQuestion, selected: tuple[int, ...]
+    ) -> None: ...
 
 
 @runtime_checkable

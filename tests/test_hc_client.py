@@ -17,6 +17,7 @@ from herdrelay.hc_protocol import parse_hello_result
 from herdrelay.hc_rpc import HcCallResult, HcRpcError
 from herdrelay.runtime import (
     AgentStartRuntime,
+    QuestionAnswerRuntime,
     RawInputRuntime,
     RuntimeClient,
     TargetCloseRuntime,
@@ -276,9 +277,11 @@ def test_runtime_client_factory_keeps_legacy_default():
     assert isinstance(legacy, RuntimeClient)
     assert isinstance(core, RuntimeClient)
     assert isinstance(legacy, RawInputRuntime)
+    assert isinstance(legacy, QuestionAnswerRuntime)
     assert isinstance(legacy, AgentStartRuntime)
     assert isinstance(legacy, TargetCloseRuntime)
     assert not isinstance(core, RawInputRuntime)
+    assert not isinstance(core, QuestionAnswerRuntime)
     assert not isinstance(core, AgentStartRuntime)
     assert not isinstance(core, TargetCloseRuntime)
     assert legacy.capabilities.native_interrupt is False

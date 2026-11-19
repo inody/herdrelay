@@ -7,7 +7,8 @@ from typing import Any
 from .config import AppConfig
 from .domain import MutationOutcomeUnknownError, RuntimeKind, TargetKey
 from .herdr_cli import HerdrCli, HerdrCliError
-from .models import HerdrTarget, StartedAgent
+from .models import HerdrTarget, PendingQuestion, StartedAgent
+from .questions import QUESTION_KEY_INTERVAL_SECONDS, selection_keys
 from .runtime import RuntimeCapabilities
 
 
@@ -124,6 +125,15 @@ class HerdrClient:
 
     def send_text_enter(self, target: str, text: str) -> None:
         self.cli.pane_run(target, text)
+
+    def answer_question(
+        self, question: PendingQuestion, selected: tuple[int, ...]
+    ) -> None:
+        self.send_keys(
+            question.pane_id,
+            selection_keys(question, selected),
+            interval_seconds=QUESTION_KEY_INTERVAL_SECONDS,
+        )
 
     def agent_start(
         self,

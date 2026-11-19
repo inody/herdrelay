@@ -166,7 +166,9 @@ sessions after installing their hooks.
 
 Adapters write private versioned events to the local inbox. Core events require
 `HC_TERMINAL_ID` and a verifiable stable Core ID; HerdRelay does not guess Core
-identity from a working directory.
+identity from a working directory. Orca-managed Claude hooks use the exact
+`ORCA_PANE_KEY` and Orca's public `agent list` CLI to produce version 3 response
+and structured-question events.
 
 ### 5. Run HerdRelay
 
@@ -413,9 +415,11 @@ socket. It never types into an existing terminal.
 - Telegram interrupt is Core-only.
 - Orca prompt submission has automated coverage, direct public-CLI acceptance,
   and live Telegram send/output acceptance; live Discord acceptance remains
-  pending. Orca interrupt is disabled because `terminal send --interrupt`
-  accepted input without stopping the tested Pi turn. Discord
-  stop/approval/raw input, watcher events, and
+  pending. Orca-managed Claude question identity has automated coverage but no
+  live acceptance yet. Question text and options are display-only because no
+  safe public structured-answer operation has been accepted. Orca interrupt is
+  disabled because `terminal send --interrupt` accepted input without stopping
+  the tested Pi turn. Discord stop/approval/raw input, watcher events, and
   existing-response backfill remain disabled.
 - Legacy TUI with Telegram is best-effort and not live-acceptance tested.
 - Native Orca chat agents remain excluded until a documented safe prompt path

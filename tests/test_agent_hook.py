@@ -36,8 +36,78 @@ def test_build_event_uses_herdr_pane_and_complete_message(tmp_path):
     assert len(event["event_id"]) == 64
 
 
-def test_build_event_ignores_agent_outside_herdr(tmp_path):
+def test_build_event_ignores_agent_outside_supported_runtime(tmp_path):
     assert build_event(stop_input(tmp_path), {}) is None
+
+
+def test_build_event_uses_orca_v3_identity_from_public_cli(tmp_path, monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = json.dumps(
+            {
+                "ok": True,
+                "result": {
+                    "agents": [
+                        {
+                            "kind": "terminal",
+                            "agent": "claude",
+                            "hostId": "local",
+                            "paneKey": "tab-1:pane-2",
+                            "orcaSessionId": "session-orca-1",
+                        }
+                    ]
+                },
+                "_meta": {"runtimeId": "runtime-1"},
+            }
+        )
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return Result()
+
+    monkeypatch.setattr(agent_stop_hook.subprocess, "run", run)
+
+    event = build_event(
+        stop_input(tmp_path),
+        {
+            "ORCA_PANE_KEY": "tab-1:pane-2",
+            "HERDRELAY_ORCA_CLI": "/Applications/Orca.app/orca",
+        },
+    )
+
+    assert event is not None
+    assert event["version"] == 3
+    assert event["backend"] == "orca"
+    assert event["instance_id"] == "runtime-1"
+    assert event["target"] == "local/tab-1:pane-2"
+    assert event["generation"] == "session-orca-1"
+    assert calls[0][0] == [
+        "/Applications/Orca.app/orca",
+        "agent",
+        "list",
+        "--environment",
+        "local",
+        "--json",
+    ]
+
+
+def test_orca_identity_failure_does_not_fall_back_to_legacy(tmp_path, monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = json.dumps(
+            {"ok": True, "result": {"agents": []}, "_meta": {"runtimeId": "r1"}}
+        )
+
+    monkeypatch.setattr(agent_stop_hook.subprocess, "run", lambda *args, **kwargs: Result())
+
+    event = build_event(
+        stop_input(tmp_path),
+        {"ORCA_PANE_KEY": "missing:pane", "HERDR_PANE_ID": "legacy:p1"},
+    )
+
+    assert event is None
 
 
 def test_build_event_uses_core_v2_identity(tmp_path):
@@ -165,6 +235,54 @@ def test_build_question_event_formats_claude_ask_user_question():
         "Which approach should I use?\nOptions:\n"
         "- Safe: Preserve compatibility\n- Fast: Prioritize speed"
     )
+
+
+def test_orca_question_event_uses_v3_identity(monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = json.dumps(
+            {
+                "ok": True,
+                "result": {
+                    "agents": [
+                        {
+                            "kind": "terminal",
+                            "agent": "claude",
+                            "hostId": "local",
+                            "paneKey": "tab:pane",
+                            "orcaSessionId": "orca-session",
+                        }
+                    ]
+                },
+                "_meta": {"runtimeId": "runtime-1"},
+            }
+        )
+
+    monkeypatch.setattr(agent_stop_hook.subprocess, "run", lambda *args, **kwargs: Result())
+    data = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "claude-session",
+        "tool_use_id": "tool-1",
+        "tool_name": "AskUserQuestion",
+        "tool_input": {
+            "questions": [
+                {
+                    "question": "Continue?",
+                    "options": [{"label": "Yes"}, {"label": "No"}],
+                }
+            ]
+        },
+    }
+
+    event = build_question_event(data, {"ORCA_PANE_KEY": "tab:pane"})
+
+    assert event is not None
+    assert event["version"] == 3
+    assert event["backend"] == "orca"
+    assert event["instance_id"] == "runtime-1"
+    assert event["target"] == "local/tab:pane"
+    assert event["generation"] == "orca-session"
+    assert event["kind"] == "question"
 
 
 def test_core_question_event_uses_v2_identity():

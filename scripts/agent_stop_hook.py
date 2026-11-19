@@ -60,7 +60,7 @@ def resolve_pane_id(
 def resolve_event_identity(
     environ: dict[str, str], *, allow_herdr_lookup: bool = False, cwd: object = None
 ) -> dict[str, object] | None:
-    """Resolve one unambiguous legacy pane or Core terminal identity."""
+    """Resolve one unambiguous legacy, Core, or Orca terminal identity."""
     core_target = environ.get("HC_TERMINAL_ID", "").strip()
     if core_target:
         core_id = environ.get("HERDRELAY_CORE_ID", "").strip()
@@ -84,6 +84,10 @@ def resolve_event_identity(
             "target": core_target,
         }
 
+    orca_pane_key = environ.get("ORCA_PANE_KEY", "").strip()
+    if orca_pane_key:
+        return resolve_orca_identity(environ, pane_key=orca_pane_key)
+
     pane_id = resolve_pane_id(
         environ,
         allow_herdr_lookup=allow_herdr_lookup,
@@ -92,6 +96,62 @@ def resolve_event_identity(
     if not pane_id:
         return None
     return {"version": 1, "pane_id": pane_id}
+
+
+def resolve_orca_identity(
+    environ: dict[str, str], *, pane_key: str
+) -> dict[str, object] | None:
+    """Resolve an Orca hook pane through the public ``agent list`` CLI."""
+    cli_path = environ.get("HERDRELAY_ORCA_CLI", "orca").strip() or "orca"
+    environment = (
+        environ.get("HERDRELAY_ORCA_ENVIRONMENT", "local").strip() or "local"
+    )
+    try:
+        result = subprocess.run(
+            [cli_path, "agent", "list", "--environment", environment, "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return None
+        payload = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return None
+    metadata = payload.get("_meta")
+    runtime_id = metadata.get("runtimeId") if isinstance(metadata, dict) else None
+    body = payload.get("result")
+    agents = body.get("agents") if isinstance(body, dict) else None
+    if not isinstance(runtime_id, str) or not runtime_id.strip():
+        return None
+    if not isinstance(agents, list):
+        return None
+    matches = [
+        item
+        for item in agents
+        if isinstance(item, dict)
+        and item.get("kind") == "terminal"
+        and item.get("paneKey") == pane_key
+        and isinstance(item.get("hostId"), str)
+        and item["hostId"].strip()
+    ]
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    host_id = match["hostId"].strip()
+    identity: dict[str, object] = {
+        "version": 3,
+        "backend": "orca",
+        "instance_id": runtime_id.strip(),
+        "target": f"{host_id}/{pane_key}",
+    }
+    session_id = match.get("orcaSessionId")
+    if isinstance(session_id, str) and session_id.strip():
+        identity["generation"] = session_id.strip()
+    return identity
 
 
 def build_event(

@@ -6,7 +6,7 @@ from herdrelay.config import AppConfig
 from herdrelay.domain import MutationOutcomeUnknownError, TargetKey
 from herdrelay.herdr_cli import HerdrCliError
 from herdrelay.herdr_client import HerdrClient, normalize_targets
-from herdrelay.models import HerdrTarget
+from herdrelay.models import HerdrTarget, PendingQuestion, QuestionOption
 
 
 def test_normalize_targets_from_result_agents():
@@ -269,6 +269,23 @@ def test_legacy_client_preserves_raw_pane_route_identity():
     assert target == TargetKey.legacy("w1:p1")
     assert target.to_route_value() == "w1:p1"
     assert client.resolve_target_key(target).target == "w1:p1"
+
+
+def test_answer_question_keeps_tui_key_sequence_inside_legacy_backend():
+    client = HerdrClient.__new__(HerdrClient)
+    client.send_keys = Mock()
+    question = PendingQuestion(
+        pane_id="w1:p1",
+        event_id="question-1",
+        prompt="Choose",
+        options=(QuestionOption("One"), QuestionOption("Two")),
+    )
+
+    client.answer_question(question, (1,))
+
+    client.send_keys.assert_called_once_with(
+        "w1:p1", ("Down", "Enter"), interval_seconds=0.5
+    )
 
 
 def test_send_keys_pauses_between_keys_when_asked(monkeypatch):

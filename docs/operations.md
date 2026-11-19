@@ -269,6 +269,13 @@ an inherited legacy pane ID. A shared Codex app-server that does not inherit
 Core terminal identity remains unable to emit a version 2 event; HerdRelay does
 not guess a Core terminal from working-directory matches.
 
+For an Orca-managed Claude terminal, the hook reads the inherited exact
+`ORCA_PANE_KEY` and resolves it to exactly one terminal agent with `orca agent
+list --json`. The public CLI supplies the runtime ID, host ID, and current Orca
+session generation for a version 3 event. Missing, ambiguous, or failed CLI
+resolution emits nothing and never falls back to a legacy pane identity. The
+hook does not use Orca's private database or daemon socket.
+
 Supported `kind` values are:
 
 - `response` (default): relay `text` and clear any pending question;
@@ -317,16 +324,21 @@ The Claude installer registers:
 - `UserPromptSubmit` to clear a question when a new prompt is submitted; and
 - `Stop` to relay the completed assistant response.
 
-Only a tool call containing exactly one question gets structured controls. A
-single-choice question with up to five options uses buttons. Larger or
-multi-select questions with up to 25 options use a select menu. Pending
-questions have no timeout and are restored from SQLite after a bot restart.
+Only a tool call containing exactly one question gets a normalized structured
+question event. Every transport may render the question text and options, but
+answer controls appear only when the backend implements structured question
+answering. For the legacy TUI on Discord, a single-choice question with up to
+five options uses buttons. Larger or multi-select questions with up to 25
+options use a select menu. Pending questions have no timeout and are restored
+from SQLite after a bot restart.
 
-Discord selections type navigation keys into the Claude TUI. A multi-select
-answer toggles options, moves through the extra rows to Submit, and confirms the
-review screen. Keys are spaced by 0.5 seconds because the dialog can drop rapid
-input. The sequence assumes the cursor and selected options have not been
-changed manually.
+The legacy backend implements `answer_question` by typing navigation keys into
+the Claude TUI. A multi-select answer toggles options, moves through the extra
+rows to Submit, and confirms the review screen. Keys are spaced by 0.5 seconds
+because the dialog can drop rapid input. The sequence assumes the cursor and
+selected options have not been changed manually. Core and Orca currently render
+questions without answer controls because no safe public structured-answer
+operation has been accepted.
 
 Pressing Escape in the terminal does not itself emit a resolution hook. A later
 new prompt, answered tool call, delivered final response, pane closure, or

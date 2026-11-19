@@ -382,12 +382,14 @@ current common flags are normal prompt submission and guarded native interrupt.
 Discovery, bounded read, normal send, and target resolution form the required
 runtime protocol.
 
-Legacy TUI operations are not represented by false methods on every backend.
-Raw terminal input, agent start, and target close use separate optional
-interfaces implemented only by the legacy client. Discord must check both
-configuration and the relevant interface before rendering or invoking a legacy
-control. Core and Orca therefore cannot receive a legacy-only approval button
-or start/close command accidentally.
+Optional operations are not represented by false methods on every backend.
+Raw terminal input, normalized structured-question answering, agent start, and
+target close use separate interfaces. The legacy client currently implements
+all four; future Core or Orca adapters may implement question answering without
+exposing raw terminal input. Transports must check both configuration and the
+relevant interface before rendering or invoking a control. Core and Orca
+therefore cannot receive a legacy-only approval button or start/close command
+accidentally.
 
 Completed-response and native-event handling belong to backend services rather
 than the synchronous runtime client capability record. See

@@ -24,15 +24,11 @@ from .hc_client import HcClient
 from .core_discord_watcher import CoreEventWatcher
 from .herdr_client import TargetResolutionError
 from .models import AuditEntry, HerdrTarget, PendingQuestion
-from .questions import (
-    QUESTION_KEY_INTERVAL_SECONDS,
-    parse_question_answer,
-    selected_labels,
-    selection_keys,
-)
+from .questions import parse_question_answer, selected_labels
 from .runtime import (
     AgentStartRuntime,
     InterruptRuntime,
+    QuestionAnswerRuntime,
     RawInputRuntime,
     RuntimeClient,
     TargetCloseRuntime,
@@ -98,7 +94,7 @@ class HerdrDiscordBot(commands.Bot):
             self._thread_task = asyncio.create_task(self.thread_manager.run_forever())
             LOG.info("Started auto thread manager")
         question_choices_enabled = self.config.enable_approve and isinstance(
-            self.client, RawInputRuntime
+            self.client, QuestionAnswerRuntime
         )
         # Legacy TUI question choices wait indefinitely, so restore them after
         # a restart only when raw input and approval are actually enabled.
@@ -269,23 +265,21 @@ class HerdrDiscordBot(commands.Bot):
     async def _answer_pending_question(
         self, question: PendingQuestion, selected: tuple[int, ...]
     ) -> str:
-        if not isinstance(self.client, RawInputRuntime):
-            raise ApprovalError("Question choices require legacy TUI raw input.")
+        if not isinstance(self.client, QuestionAnswerRuntime):
+            raise ApprovalError("Question answering is unavailable for this backend.")
         current = self.store.get_pending_question(question.pane_id)
         if current is None or current.event_id != question.event_id:
             raise ApprovalError("This question is no longer pending.")
         target_info = await asyncio.to_thread(self.client.resolve_target, question.pane_id)
         ensure_blocked_for_approval(target_info)
-        keys = selection_keys(question, selected)
-        # Claim the question before the slow key sequence so a second click
-        # cannot type a competing answer into the same dialog.
+        # Claim the question before the backend operation so a second click
+        # cannot submit a competing answer.
         self.store.clear_pending_question(question.pane_id, event_id=question.event_id)
         try:
             await asyncio.to_thread(
-                self.client.send_keys,
-                question.pane_id,
-                keys,
-                interval_seconds=QUESTION_KEY_INTERVAL_SECONDS,
+                self.client.answer_question,
+                question,
+                selected,
             )
         except Exception:
             self.store.upsert_pending_question(question)
