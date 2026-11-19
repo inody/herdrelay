@@ -55,49 +55,41 @@ def test_blocklist_is_case_insensitive():
         policy.ensure_send_allowed(10, DiscordLocation(guild_id=1, channel_id=2), "RM -RF /tmp/x")
 
 
-def test_deny_shares_approve_guard():
-    policy = SecurityPolicy(
-        AppConfig(
-            discord_token="token",
-            enable_approve=False,
-            allowed_user_ids=frozenset({10}),
-        )
-    )
-
-    with pytest.raises(SecurityError, match="Approve is disabled"):
-        policy.ensure_deny_allowed(10, DiscordLocation(guild_id=1, channel_id=2))
-
-
-def test_deny_requires_allowed_user():
-    policy = SecurityPolicy(
-        AppConfig(
-            discord_token="token",
-            enable_approve=True,
-            allowed_user_ids=frozenset({10}),
-        )
-    )
-    location = DiscordLocation(guild_id=1, channel_id=2)
-
-    policy.ensure_deny_allowed(10, location)
-    with pytest.raises(SecurityError):
-        policy.ensure_deny_allowed(11, location)
-
-
-def test_stop_requires_enable_flag_and_user():
+def test_question_answer_requires_enable_flag_and_user():
     location = DiscordLocation(guild_id=1, channel_id=2)
     disabled = SecurityPolicy(
         AppConfig(discord_token="token", allowed_user_ids=frozenset({10}))
     )
-    with pytest.raises(SecurityError, match="Stop is disabled"):
-        disabled.ensure_stop_allowed(10, location)
+    with pytest.raises(SecurityError, match="Question answering is disabled"):
+        disabled.ensure_question_answer_allowed(10, location)
 
     enabled = SecurityPolicy(
         AppConfig(
             discord_token="token",
-            enable_stop=True,
+            enable_questions=True,
             allowed_user_ids=frozenset({10}),
         )
     )
-    enabled.ensure_stop_allowed(10, location)
+    enabled.ensure_question_answer_allowed(10, location)
     with pytest.raises(SecurityError):
-        enabled.ensure_stop_allowed(11, location)
+        enabled.ensure_question_answer_allowed(11, location)
+
+
+def test_interrupt_requires_enable_flag_and_user():
+    location = DiscordLocation(guild_id=1, channel_id=2)
+    disabled = SecurityPolicy(
+        AppConfig(discord_token="token", allowed_user_ids=frozenset({10}))
+    )
+    with pytest.raises(SecurityError, match="Interrupt is disabled"):
+        disabled.ensure_interrupt_allowed(10, location)
+
+    enabled = SecurityPolicy(
+        AppConfig(
+            discord_token="token",
+            enable_interrupt=True,
+            allowed_user_ids=frozenset({10}),
+        )
+    )
+    enabled.ensure_interrupt_allowed(10, location)
+    with pytest.raises(SecurityError):
+        enabled.ensure_interrupt_allowed(11, location)

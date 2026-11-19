@@ -94,13 +94,6 @@ class TelegramConfig:
 
 
 @dataclass(frozen=True)
-class ApprovalStrategy:
-    method: str
-    text: str | None = None
-    keys: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class WatcherConfig:
     statuses: tuple[str, ...] = ("blocked", "done")
     reconnect_delay_seconds: float = 5
@@ -141,9 +134,9 @@ class AppConfig:
     max_output_chars: int = 1800
     max_message_chars: int = 2000
     enable_send: bool = False
-    enable_approve: bool = False
+    enable_questions: bool = False
     enable_watcher: bool = False
-    enable_stop: bool = False
+    enable_interrupt: bool = False
     enable_auto_threads: bool = False
     enable_streaming: bool = False
     allow_pane_send_fallback: bool = False
@@ -154,9 +147,6 @@ class AppConfig:
     streaming: StreamConfig = field(default_factory=StreamConfig)
     discord: DiscordTransportConfig = field(default_factory=DiscordTransportConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
-    approval: dict[str, ApprovalStrategy] = field(default_factory=dict)
-    deny: dict[str, ApprovalStrategy] = field(default_factory=dict)
-    stop: ApprovalStrategy | None = None
 
     @property
     def herdr(self) -> HerdrCliConfig:
@@ -233,27 +223,12 @@ def load_config(
         if "streaming" in relay_data
         else data.get("streaming")
     ) or {}
-    approval_data = (
-        discord_data.get("approval")
-        if "approval" in discord_data
-        else data.get("approval")
-    ) or {}
-    deny_data = (
-        discord_data.get("deny")
-        if "deny" in discord_data
-        else data.get("deny")
-    ) or {}
-    stop_data = (
-        discord_data.get("stop")
-        if "stop" in discord_data
-        else data.get("stop")
-    )
-
     core_target_exposure = _core_target_exposure(
         core_data, base=config_path.parent
     )
     orca_target_exposure = _orca_target_exposure(orca_data)
     orca_host_ids = _orca_host_ids(orca_data)
+    runtime_provider = _runtime_provider(runtime_data.get("provider"))
 
     config = AppConfig(
         discord_token=token,
@@ -284,14 +259,30 @@ def load_config(
         enable_send=bool(
             discord_data.get("enable_send", data.get("enable_send", False))
         ),
-        enable_approve=bool(
-            discord_data.get("enable_approve", data.get("enable_approve", False))
+        enable_questions=bool(
+            discord_data.get(
+                "enable_questions",
+                discord_data.get(
+                    "enable_approve",
+                    data.get("enable_questions", data.get("enable_approve", False)),
+                ),
+            )
         ),
         enable_watcher=bool(
             discord_data.get("enable_watcher", data.get("enable_watcher", False))
         ),
-        enable_stop=bool(
-            discord_data.get("enable_stop", data.get("enable_stop", False))
+        enable_interrupt=bool(
+            discord_data.get(
+                "enable_interrupt",
+                data.get(
+                    "enable_interrupt",
+                    (
+                        discord_data.get("enable_stop", data.get("enable_stop", False))
+                        if runtime_provider == "herdr-core"
+                        else False
+                    ),
+                ),
+            )
         ),
         enable_auto_threads=bool(
             discord_data.get(
@@ -315,7 +306,7 @@ def load_config(
             )
         ),
         runtime=RuntimeConfig(
-            provider=_runtime_provider(runtime_data.get("provider")),
+            provider=runtime_provider,
             tui=HerdrCliConfig(
                 cli_path=str(tui_data.get("cli_path") or "herdr"),
                 default_source=str(
@@ -447,9 +438,6 @@ def load_config(
                 telegram_data.get("status_refresh_seconds", 5)
             ),
         ),
-        approval=_approval_strategies(approval_data),
-        deny=_approval_strategies(deny_data),
-        stop=_single_strategy(stop_data),
     )
     _validate_runtime_features(config)
     _validate_telegram(config)
@@ -515,9 +503,15 @@ def _validate_runtime_features(config: AppConfig) -> None:
             raise ValueError(
                 "runtime.herdr_core.event_idle_timeout_seconds must exceed Core's 15s heartbeat"
             )
-        if config.enable_approve:
+        if config.enable_questions:
             raise ValueError(
-                "enable_approve is disabled for Herdr Core until guarded actions exist"
+                "Discord question answering is unavailable for Herdr Core"
+            )
+        return
+    if config.runtime.provider == "herdr-tui":
+        if config.enable_interrupt:
+            raise ValueError(
+                "Discord interrupt requires a guarded native backend operation"
             )
         return
     if config.runtime.provider != "orca":
@@ -542,9 +536,9 @@ def _validate_runtime_features(config: AppConfig) -> None:
         ),
         path="runtime.orca.target_exposure",
     )
-    if config.enable_approve or config.enable_stop:
+    if config.enable_questions or config.enable_interrupt:
         raise ValueError(
-            "Discord approval and stop are not implemented for the Orca backend"
+            "Discord question answering and interrupt are unavailable for Orca"
         )
     if config.enable_watcher:
         raise ValueError("Discord watcher is not implemented for the Orca backend")
@@ -732,32 +726,3 @@ def _optional_int(value: Any) -> int | None:
     if value in (None, ""):
         return None
     return int(value)
-
-
-def _single_strategy(value: Any) -> ApprovalStrategy | None:
-    if not value:
-        return None
-    if not isinstance(value, dict):
-        raise ValueError("stop must be a YAML mapping")
-    return ApprovalStrategy(
-        method=str(value.get("method") or ""),
-        text=value.get("text"),
-        keys=tuple(str(key) for key in value.get("keys") or ()),
-    )
-
-
-def _approval_strategies(value: Any) -> dict[str, ApprovalStrategy]:
-    if not value:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError("approval must be a YAML mapping")
-    strategies: dict[str, ApprovalStrategy] = {}
-    for agent, raw in value.items():
-        if not isinstance(raw, dict):
-            raise ValueError(f"approval.{agent} must be a mapping")
-        strategies[str(agent)] = ApprovalStrategy(
-            method=str(raw.get("method") or ""),
-            text=raw.get("text"),
-            keys=tuple(str(key) for key in raw.get("keys") or ()),
-        )
-    return strategies

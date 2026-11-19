@@ -62,9 +62,9 @@ transports:
     allowed_user_ids: []
     thread_parent_channel_id: null
     enable_send: false
-    enable_approve: false          # unavailable for Herdr Core
+    enable_questions: false        # legacy TUI structured answers only
     enable_watcher: false
-    enable_stop: false
+    enable_interrupt: false        # guarded native interrupt; Core only
     enable_auto_threads: false
     allow_pane_send_fallback: false
     auto_threads:
@@ -77,30 +77,6 @@ transports:
       blocked_notification_delay_seconds: 1.5
       blocked_tail_lines: 80
       done_tail_lines: 60
-    approval:
-      codex:
-        method: send_text_enter
-        text: "y"
-      claude:
-        method: send_keys
-        keys: [Enter]
-      pi:
-        method: send_keys
-        keys: [Enter]
-    deny:
-      codex:
-        method: send_keys
-        keys: [Escape]
-      claude:
-        method: send_keys
-        keys: [Escape]
-      pi:
-        method: send_keys
-        keys: [Escape]
-    stop:
-      method: send_keys
-      keys: [C-c]
-
   telegram:
     enabled: false
     mode: forum

@@ -305,7 +305,7 @@ def test_load_config_rejects_unknown_runtime_provider(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "body, message",
-    [("enable_approve: true", "enable_approve")],
+    [("enable_questions: true", "question answering")],
 )
 def test_load_config_rejects_unimplemented_core_features(
     tmp_path, monkeypatch, body, message
@@ -340,7 +340,7 @@ def test_load_config_accepts_core_event_watcher(tmp_path, monkeypatch):
 
     config = load_config(config_path)
     assert config.enable_watcher is True
-    assert config.enable_stop is True
+    assert config.enable_interrupt is True
 
 
 
@@ -690,40 +690,37 @@ def test_load_config_accepts_empty_watcher_statuses(tmp_path, monkeypatch):
     assert load_config(config_path).watcher.statuses == ()
 
 
-def test_load_config_parses_deny_and_stop(tmp_path, monkeypatch):
+def test_legacy_enable_approve_maps_to_structured_questions(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         """
-enable_stop: true
+runtime:
+  provider: herdr-tui
+enable_approve: true
 approval:
-  codex:
-    method: send_text_enter
-    text: "y"
-deny:
   claude:
     method: send_keys
-    keys: ["Escape"]
-stop:
-  method: send_keys
-  keys: ["C-c"]
+    keys: ["Enter"]
 """
     )
 
     config = load_config(config_path)
 
-    assert config.enable_stop is True
-    assert config.approval["codex"].text == "y"
-    assert config.deny["claude"].keys == ("Escape",)
-    assert config.stop is not None
-    assert config.stop.method == "send_keys"
-    assert config.stop.keys == ("C-c",)
+    assert config.enable_questions is True
 
 
-def test_load_config_defaults_stop_disabled(tmp_path, monkeypatch):
+def test_legacy_tui_enable_stop_no_longer_enables_pane_close(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("enable_stop: true\n")
+
+    assert load_config(config_path).enable_interrupt is False
+
+
+def test_load_config_defaults_optional_discord_actions_disabled(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     config = load_config(tmp_path / "empty.yaml")
 
-    assert config.enable_stop is False
-    assert config.deny == {}
-    assert config.stop is None
+    assert config.enable_questions is False
+    assert config.enable_interrupt is False

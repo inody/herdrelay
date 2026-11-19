@@ -36,53 +36,45 @@ state rather than a stable agent API:
 
 | Feature | Current implementation | Assessment |
 |---|---|---|
-| Raw key aliases such as `!esc`, `!enter`, and `!down` | Discord thread text is translated into terminal keys or escape sequences | Brittle and transport-specific; retirement candidate |
-| Approve / Deny cards | Agent-specific key or text strategies are injected into a blocked TUI | Brittle screen automation; retirement candidate |
-| Cancel card | A configurable `C-c`-style key sequence is injected after confirmation | Duplicates guarded interrupt semantics without an outcome contract; retirement candidate |
+| Raw key aliases such as `!esc`, `!enter`, and `!down` | Removed | Retired as brittle, transport-specific terminal injection |
+| Approve / Deny cards | Removed | Retired as generic screen automation without a guarded semantic operation |
+| Cancel card | Removed | Replaced by guarded native interrupt where a backend supports it |
 | Structured question buttons | Discord choices are normalized first; the legacy backend converts the selected indexes into cursor movement and Enter key sequences | Preserve and generalize; keep the TUI key sequence behind a backend-specific answer operation |
-| `@herdr start` | Discord parses workspace, tab, split, cwd, and argv options and creates a pane | Session management belongs to the runtime UI; retirement candidate |
-| Legacy `@herdr stop` | Discord closes the pane rather than interrupting a turn | Destructive and semantically different from Core interrupt; retirement candidate |
+| `@herdr start` | Removed | Session management remains in the runtime UI |
+| Legacy `@herdr stop` pane close | Removed; `stop` is only a compatibility alias for guarded native interrupt | Chat can no longer close a pane or terminal |
 | Legacy socket watcher | Directly consumes Herdr TUI event frames | Keep only while TUI status compatibility is supported |
 | Visible-screen polling fallback | Reads screen snapshots when recent output has no diff | Keep only while poll-mode TUI output compatibility is supported |
 
 ## Redundant scaffolding removed
 
-The first cleanup pass removes architecture left behind by the backend split:
+The cleanup removes architecture left behind by the backend split:
 
 - Core and Orca no longer implement raw-input, start, or close methods that can
   only throw an unsupported-operation exception.
 - The common `RuntimeClient` protocol now contains only discovery, bounded read,
   normal send, and target resolution.
-- Legacy raw input, normalized question answering, agent start, and target close
-  are isolated behind separate structural protocols.
+- Normalized question answering is isolated behind its own optional protocol;
+  raw input, agent start, and target close protocols have been removed.
 - Unused capability flags for raw input, approval, start, close, bounded read,
   and native events were removed. Only capabilities used by common mutation
   routing remain as data.
-- Discord no longer restores or renders structured-question controls when
-  approval is disabled or the selected backend lacks a question-answer
-  operation.
-- Non-legacy backends now receive generic help instead of the TUI start/close
-  command help.
+- Discord restores and renders structured-question controls only when
+  `enable_questions` is set and the backend implements question answering.
+- Mention controls are reduced to `list`, `help`, and guarded native
+  `interrupt`; the legacy `stop` spelling cannot close a target.
+- Orca question visibility resolves `ORCA_PANE_KEY` through the public CLI and
+  has live Telegram acceptance, while Orca answers remain disabled.
 
 ## Recommended next cleanup
 
-Retain legacy TUI as a best-effort backend for the common relay surface and as
-the first backend capable of answering normalized structured questions, but
-remove its unrelated remote terminal-control layer:
-
-1. preserve question detection, option rendering, pending-question state, and
-   transport components;
-2. keep TUI cursor navigation only inside its backend-specific
-   `answer_question` implementation;
-3. add question visibility for Orca by resolving `ORCA_PANE_KEY` through the
-   public CLI, while keeping Orca answers disabled until a safe public operation
-   exists;
-4. remove raw key aliases and generic approval, denial, and cancel strategies;
-5. remove remote agent start and pane close commands; and
-6. split the remaining Discord transport into routing, text submission, status,
-   and output components without TUI-specific branches.
+1. Split the remaining Discord transport into routing, text submission,
+   structured questions, status, and output components.
+2. Converge Discord and Telegram delivery/storage paths behind transport-neutral
+   route and delivery interfaces.
+3. Remove compatibility configuration aliases after an announced migration
+   window.
 
 Normal prompt submission, output delivery, target discovery, topics/threads,
-status notifications, and structured question display would continue across
-backends. Answer controls must only appear when the selected backend implements
-the normalized question-answer operation.
+status notifications, and structured question display continue across
+backends. Answer controls appear only when the selected backend implements the
+normalized question-answer operation.

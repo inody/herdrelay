@@ -77,8 +77,8 @@ the same topic. Discord live acceptance remains pending.
 Orca interrupt remains disabled. In live characterization,
 `orca terminal send --interrupt` returned `accepted: true` and wrote one byte,
 but the Pi agent remained `working`; input acceptance is therefore not treated
-as proof of a native interrupt. Discord stop/approval/raw input, launch, and
-terminal close also remain disabled.
+as proof of a native interrupt. Chat does not expose raw terminal input,
+generic approval/denial, agent launch, or terminal close.
 
 ## Thread and binding lifecycle
 
@@ -114,9 +114,11 @@ manual bind command in the Discord interface.
 For an ordinary bound-thread message, HerdRelay:
 
 1. ignores bot authors, empty content, non-thread channels, and unbound threads;
-2. verifies guild/channel, user, feature flag, message length, and blocklist;
-3. interprets a recognized `!key` message as a terminal key;
-4. otherwise calls `herdr agent prompt <pane-id> <message>`; and
+2. checks for a pending structured question and accepts a valid numeric answer
+   only when `enable_questions` and backend question answering are available;
+3. otherwise verifies guild/channel, user, `enable_send`, message length, and
+   blocklist;
+4. submits one normal backend prompt; and
 5. writes an audit entry and adds ✅, or writes an error entry and adds ⚠️.
 
 The reaction reports submission success only. It does not wait for an agent
@@ -126,34 +128,25 @@ With `allow_pane_send_fallback: true`, an `agent prompt` failure falls back to
 `herdr pane run`. This can type into a shell or other foreground program, so the
 default is false.
 
-Page Up, Page Down, Home, and End are sent with terminal escape sequences
-through `pane send-text`; other documented keys use `pane send-keys`.
+Arbitrary `!key` aliases and raw terminal escape-sequence injection are not
+supported.
 
 ## Mention command behavior
 
-All mention commands check the Discord location before reading Herdr state or
-resolving a bound pane.
+All mention commands check the Discord location before reading backend state or
+resolving a bound target.
 
-- `start` also checks `enable_send`, the write-user allowlist, message length,
-  and `dangerous_text_blocklist`.
-- `stop` checks `enable_stop` and the write-user allowlist.
+- `interrupt` checks `enable_interrupt`, the write-user allowlist, and a guarded
+  native backend capability. The legacy `stop` spelling is an interrupt alias;
+  it never closes a pane or terminal.
 - `list` and `help` do not require a write-user entry.
-- Unknown commands are rejected and audited without a Herdr call.
+- Unknown commands, including the retired `start` command, are rejected and
+  audited without a backend mutation.
 
-For `start` and `stop`, HerdRelay writes an `attempt` audit row before the Herdr
-mutation and an `ok` row after the CLI call succeeds. Failure to write the
-initial audit row prevents the mutation. A later Discord reply failure does not
-roll back a successful Herdr action; inspect the pane before retrying.
-
-`@herdr start <name>` creates a pane first and then calls:
-
-```text
-herdr agent start <name> --kind <lowercase-name> --pane <new-pane-id>
-```
-
-A redundant leading executable name after `--` is removed for compatibility
-with an older command form. The command waits two seconds, reads the new pane's
-visible output, and reports an immediate launch failure when the pane is gone.
+For `interrupt`, HerdRelay writes an `attempt` audit row before the backend
+mutation and an `ok` row after it succeeds. Failure to write the initial audit
+row prevents the mutation. A later Discord reply failure does not replay or
+roll back a successful interrupt.
 
 ## Status watcher
 
@@ -175,7 +168,7 @@ Operational behavior:
   topology-triggered refreshes still occur.
 - A blocked notification is delayed by
   `blocked_notification_delay_seconds` so a structured Claude question can be
-  stored before the generic card is built.
+  delivered before the generic blocked status notification.
 
 When `include_output` is true, the watcher reads the configured tail and uses a
 hash of that output for deduplication. When false, it uses Herdr's
@@ -492,6 +485,7 @@ the generated rotation plist does not set them.
 
 ### A control action may have happened despite an error
 
-A Discord API failure can occur after the Herdr CLI mutation. `start` and `stop`
-record `attempt` before the call and `ok` immediately after it. Inspect
-`audit_log` and current Herdr state before retrying.
+A Discord API failure can occur after a guarded backend interrupt. `interrupt`
+(and its legacy `stop` alias) records `attempt` before the call and `ok`
+immediately after it. Inspect `audit_log` and current backend state before
+retrying.

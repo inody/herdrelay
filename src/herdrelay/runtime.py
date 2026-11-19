@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from .domain import TargetKey
-from .models import HerdrTarget, PendingQuestion, StartedAgent
+from .models import HerdrTarget, PendingQuestion
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,49 +42,12 @@ class RuntimeClient(Protocol):
 
 
 @runtime_checkable
-class RawInputRuntime(Protocol):
-    """Legacy terminal input used only by the Herdr TUI compatibility path."""
-
-    def send_keys(
-        self, target: str, keys: Iterable[str], *, interval_seconds: float = 0
-    ) -> None: ...
-
-    def send_raw_text(self, target: str, text: str) -> None: ...
-
-    def send_text_enter(self, target: str, text: str) -> None: ...
-
-
-@runtime_checkable
 class QuestionAnswerRuntime(Protocol):
     """Answer one normalized structured question through a backend adapter."""
 
     def answer_question(
         self, question: PendingQuestion, selected: tuple[int, ...]
     ) -> None: ...
-
-
-@runtime_checkable
-class AgentStartRuntime(Protocol):
-    """Legacy ability to create an agent pane from chat."""
-
-    def agent_start(
-        self,
-        name: str,
-        *,
-        cwd: str | None = None,
-        argv: list[str] | None = None,
-        workspace: str | None = None,
-        tab: str | None = None,
-        split: str | None = None,
-        source_pane: str | None = None,
-    ) -> StartedAgent: ...
-
-
-@runtime_checkable
-class TargetCloseRuntime(Protocol):
-    """Legacy ability to close a terminal target from chat."""
-
-    def pane_close(self, pane_id: str) -> None: ...
 
 
 @runtime_checkable

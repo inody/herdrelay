@@ -10,7 +10,7 @@ from .hc_events import (
     HcStatusTransition,
     HcTerminalState,
 )
-from .discord_watcher import APPROVAL_VIEW_FACTORY, AgentStatusEvent, EventWatcher
+from .discord_watcher import AgentStatusEvent, EventWatcher
 
 
 class CoreEventWatcher(EventWatcher):
@@ -23,7 +23,6 @@ class CoreEventWatcher(EventWatcher):
         config: AppConfig,
         store,
         client: HcClient,
-        card_view_factory: APPROVAL_VIEW_FACTORY | None = None,
         stream_factory: Callable[[], HcEventStream] | None = None,
     ):
         super().__init__(
@@ -31,7 +30,6 @@ class CoreEventWatcher(EventWatcher):
             config=config,
             store=store,
             client=client,
-            card_view_factory=card_view_factory,
         )
         self.client = client
         self.stream_factory = stream_factory or (

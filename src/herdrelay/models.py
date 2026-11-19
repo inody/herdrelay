@@ -5,12 +5,6 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class StartedAgent:
-    pane_id: str
-    result: Any
-
-
-@dataclass(frozen=True)
 class HerdrTarget:
     target: str
     kind: str = "unknown"

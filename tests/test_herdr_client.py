@@ -88,26 +88,6 @@ def test_send_timeout_is_unknown_and_never_falls_back():
     fake_cli.pane_run.assert_not_called()
 
 
-def test_agent_start_splits_source_pane_then_uses_current_cli_shape():
-    client = HerdrClient(AppConfig(discord_token="token"))
-    fake_cli = StartFakeCli()
-    client.cli = fake_cli
-
-    started = client.agent_start(
-        "claude",
-        cwd="/tmp/project",
-        argv=["claude", "--model", "sonnet"],
-        split="down",
-        source_pane="w7:p1",
-    )
-
-    assert started.pane_id == "w7:p2"
-    assert fake_cli.calls == [
-        ("pane_split", "w7:p1", "down", "/tmp/project"),
-        ("agent_start", "claude", "claude", "w7:p2", ["--model", "sonnet"]),
-    ]
-
-
 def test_normalize_targets_resolves_workspace_label_from_map():
     targets = normalize_targets(
         {"result": {"agents": [
@@ -222,19 +202,6 @@ class FakeCli:
         self.calls.append(("pane_send_keys", target, keys))
 
 
-class StartFakeCli:
-    def __init__(self):
-        self.calls = []
-
-    def pane_split(self, pane_id, *, direction, cwd):
-        self.calls.append(("pane_split", pane_id, direction, cwd))
-        return {"result": {"pane": {"pane_id": "w7:p2"}}}
-
-    def agent_start(self, name, *, kind, pane_id, argv):
-        self.calls.append(("agent_start", name, kind, pane_id, argv))
-        return {"result": {"agent": {"pane_id": pane_id}}}
-
-
 class WorkspaceFakeCli:
     def workspace_list(self):
         return {
@@ -273,7 +240,7 @@ def test_legacy_client_preserves_raw_pane_route_identity():
 
 def test_answer_question_keeps_tui_key_sequence_inside_legacy_backend():
     client = HerdrClient.__new__(HerdrClient)
-    client.send_keys = Mock()
+    client._send_question_keys = Mock()
     question = PendingQuestion(
         pane_id="w1:p1",
         event_id="question-1",
@@ -283,12 +250,12 @@ def test_answer_question_keeps_tui_key_sequence_inside_legacy_backend():
 
     client.answer_question(question, (1,))
 
-    client.send_keys.assert_called_once_with(
+    client._send_question_keys.assert_called_once_with(
         "w1:p1", ("Down", "Enter"), interval_seconds=0.5
     )
 
 
-def test_send_keys_pauses_between_keys_when_asked(monkeypatch):
+def test_question_keys_pause_between_keys(monkeypatch):
     from herdrelay import herdr_client as module
 
     sent = []
@@ -297,7 +264,9 @@ def test_send_keys_pauses_between_keys_when_asked(monkeypatch):
     client.cli = type("Cli", (), {"pane_send_keys": lambda self, target, *keys: sent.append(keys)})()
     monkeypatch.setattr(module.time, "sleep", sleeps.append)
 
-    client.send_keys("w1:p1", ("Down", "Space", "Enter"), interval_seconds=0.5)
+    client._send_question_keys(
+        "w1:p1", ("Down", "Space", "Enter"), interval_seconds=0.5
+    )
 
     assert sent == [("Down",), ("Space",), ("Enter",)]
     assert sleeps == [0.5, 0.5]

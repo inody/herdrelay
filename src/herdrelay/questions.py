@@ -6,6 +6,10 @@ from collections.abc import Iterable
 from .models import PendingQuestion
 
 
+class QuestionAnswerError(ValueError):
+    pass
+
+
 def parse_question_answer(text: str, question: PendingQuestion) -> tuple[int, ...] | None:
     """Parse a 1-based Discord numeric answer for the pending question."""
     parts = [part for part in re.split(r"[\s,]+", text.strip()) if part]

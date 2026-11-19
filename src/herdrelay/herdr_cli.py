@@ -41,55 +41,12 @@ class HerdrCli:
     def agent_prompt(self, target: str, message: str) -> None:
         self._run(["agent", "prompt", target, message])
 
-    def pane_send_text(self, target: str, message: str) -> None:
-        self._run(["pane", "send-text", target, message])
-
     def pane_send_keys(self, target: str, *keys: str) -> None:
         for key in keys:
             self._run(["pane", "send-keys", target, key])
 
     def pane_run(self, target: str, message: str) -> None:
         self._run(["pane", "run", target, message])
-
-    def tab_create(self, *, workspace: str, cwd: str | None = None) -> Any:
-        args = ["tab", "create", "--workspace", workspace, "--no-focus"]
-        if cwd:
-            args += ["--cwd", cwd]
-        return self._json(args)
-
-    def pane_split(
-        self,
-        pane_id: str,
-        *,
-        direction: str = "right",
-        cwd: str | None = None,
-    ) -> Any:
-        args = ["pane", "split", pane_id, "--direction", direction, "--no-focus"]
-        if cwd:
-            args += ["--cwd", cwd]
-        return self._json(args)
-
-    def workspace_create(self, *, cwd: str | None = None) -> Any:
-        args = ["workspace", "create", "--no-focus"]
-        if cwd:
-            args += ["--cwd", cwd]
-        return self._json(args)
-
-    def agent_start(
-        self,
-        name: str,
-        *,
-        kind: str,
-        pane_id: str,
-        argv: list[str] | None = None,
-    ) -> Any:
-        args = ["agent", "start", name, "--kind", kind, "--pane", pane_id]
-        if argv:
-            args += ["--", *argv]
-        return self._json(args)
-
-    def pane_close(self, pane_id: str) -> None:
-        self._run(["pane", "close", pane_id])
 
     def _json(self, args: list[str]) -> Any:
         raw = self._run(args).stdout

@@ -19,8 +19,10 @@ management.
 | Orca | Experimental send/output; automated tests | Experimental; live-E2E send/output tested |
 
 Herdr Core with Telegram and/or Discord is the supported production path.
-Telegram interrupt is Core-only. Raw keys, approval buttons, agent start, and
-terminal close remain limited to the legacy Discord compatibility path.
+Guarded interrupt is Core-only. Raw terminal keys, generic approval/denial,
+remote agent start, and terminal close are not exposed through chat. Legacy TUI
+structured-question answers remain available through Discord when explicitly
+enabled.
 
 Verified development environment:
 
@@ -213,9 +215,9 @@ transports:
     allowed_user_ids: [345678901234567890]
     thread_parent_channel_id: 234567890123456789
     enable_send: true
-    enable_approve: false
+    enable_questions: false
     enable_watcher: true
-    enable_stop: true
+    enable_interrupt: true
     enable_auto_threads: true
     auto_threads:
       refresh_seconds: 30
@@ -241,9 +243,10 @@ Put the parent text-channel ID in both `thread_parent_channel_id` and
 channel; Discord permissions remain the visibility boundary.
 
 A normal message in a bound thread submits a prompt. Mentioning the Bot exposes
-Discord control commands such as `list`, `help`, and runtime-supported
-`start`/`stop` operations. Core does not permit raw keys, agent start, close,
-kill, or approval/denial through HerdRelay.
+`list`, `help`, and the guarded `interrupt` command when the selected backend
+supports it and configuration enables it. The legacy `stop` spelling remains a
+Core interrupt alias only; it never closes a target. Chat does not expose raw
+keys, agent start, terminal close/kill/remove, or generic approval/denial.
 
 ## Legacy Herdr TUI compatibility
 
@@ -420,8 +423,8 @@ socket. It never types into an existing terminal.
   have live acceptance. Question text and options are display-only because no
   safe public structured-answer operation has been accepted. Orca interrupt is
   disabled because `terminal send --interrupt` accepted input without stopping
-  the tested Pi turn. Discord stop/approval/raw input, watcher events, and
-  existing-response backfill remain disabled.
+  the tested Pi turn. Discord watcher events and existing-response backfill
+  remain disabled for Orca.
 - Legacy TUI with Telegram is best-effort and not live-acceptance tested.
 - Native Orca chat agents remain excluded until a documented safe prompt path
   is available; local Orca terminal agents are exposed automatically.

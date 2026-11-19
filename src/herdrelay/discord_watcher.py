@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,7 +20,6 @@ from .store import Store
 
 LOG = logging.getLogger(__name__)
 
-APPROVAL_VIEW_FACTORY = Callable[[str], discord.ui.View | None]
 TOPOLOGY_EVENTS = ("pane.created", "pane.closed", "pane.moved")
 # Lifecycle filters are dotted; Herdr 0.9.5 emits snake_case lifecycle frames.
 EVENT_NAME_ALIASES = {
@@ -47,13 +45,11 @@ class EventWatcher:
         config: AppConfig,
         store: Store,
         client: RuntimeClient,
-        card_view_factory: APPROVAL_VIEW_FACTORY | None = None,
     ):
         self.bot = bot
         self.config = config
         self.store = store
         self.client = client
-        self.card_view_factory = card_view_factory
         self._stopped = asyncio.Event()
         self._waiting_for_panes = False
 
@@ -143,9 +139,8 @@ class EventWatcher:
         await self._notify(event)
 
     async def _notify(self, event: AgentStatusEvent) -> None:
-        # Give agent hooks a brief head start to persist a structured question.
-        # Without this, the status card can race the question choice view and
-        # expose a generic Enter button that picks Claude's first option.
+        # Give agent hooks a brief head start so a structured question reaches
+        # the destination before the generic blocked status notification.
         if event.status == "blocked":
             await asyncio.sleep(self.config.watcher.blocked_notification_delay_seconds)
         output = ""
@@ -188,8 +183,7 @@ class EventWatcher:
         if output:
             body += "\n" + format_tail(output, max_chars=self.config.max_output_chars)
         mention_prefix = blocked_mention_prefix(self.config) if event.status == "blocked" else ""
-        view = self.card_view_factory(event.pane_id) if self.card_view_factory else None
-        await destination.send(mention_prefix + body, view=view)
+        await destination.send(mention_prefix + body)
         LOG.info("Posted %s notification for %s", event.status, event.pane_id)
 
     async def _destination_for(self, pane_id: str) -> discord.abc.Messageable | None:

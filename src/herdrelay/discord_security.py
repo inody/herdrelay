@@ -45,29 +45,21 @@ class SecurityPolicy:
             if blocked.casefold() in lowered:
                 raise SecurityError("Message contains blocked text.")
 
-    def ensure_approve_allowed(self, user_id: int, location: DiscordLocation) -> None:
-        self.ensure_read_allowed(location)
-        self.ensure_approve_user_allowed(user_id)
-
-    def ensure_approve_user_allowed(self, user_id: int) -> None:
-        if not self.config.enable_approve:
-            raise SecurityError("Approve is disabled in config.")
+    def ensure_question_answer_allowed(
+        self, user_id: int, location: DiscordLocation | None = None
+    ) -> None:
+        if location is not None:
+            self.ensure_read_allowed(location)
+        if not self.config.enable_questions:
+            raise SecurityError("Question answering is disabled in config.")
         self._ensure_write_user(user_id)
 
-    def ensure_deny_allowed(self, user_id: int, location: DiscordLocation) -> None:
-        # Deny is the inverse of approve and shares its guard.
-        self.ensure_approve_allowed(user_id, location)
-
-    def ensure_deny_user_allowed(self, user_id: int) -> None:
-        self.ensure_approve_user_allowed(user_id)
-
-    def ensure_stop_allowed(self, user_id: int, location: DiscordLocation) -> None:
+    def ensure_interrupt_allowed(
+        self, user_id: int, location: DiscordLocation
+    ) -> None:
         self.ensure_read_allowed(location)
-        self.ensure_stop_user_allowed(user_id)
-
-    def ensure_stop_user_allowed(self, user_id: int) -> None:
-        if not self.config.enable_stop:
-            raise SecurityError("Stop is disabled in config.")
+        if not self.config.enable_interrupt:
+            raise SecurityError("Interrupt is disabled in config.")
         self._ensure_write_user(user_id)
 
     def _ensure_write_user(self, user_id: int) -> None:

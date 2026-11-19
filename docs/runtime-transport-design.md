@@ -311,10 +311,11 @@ identity before entering the relay core.
 
 ### 9.2 Legacy Herdr TUI
 
-`HerdrTuiBackend` wraps the existing `herdr` CLI and socket watcher. Legacy raw
-input, approval, start, and close operations remain optional compatibility
-capabilities and are not added to the common interface. Hook inbox version 1 is
-owned by this provider during the compatibility period.
+`HerdrTuiBackend` wraps the existing `herdr` CLI and socket watcher. It shares
+the common discovery/read/send surface and implements normalized structured
+question answering through a backend-private key sequence. Generic raw input,
+approval/denial, remote start, and pane close are not exposed. Hook inbox
+version 1 is owned by this provider during the compatibility period.
 
 ### 9.3 Orca
 
@@ -333,15 +334,19 @@ private daemon socket.
 
 #### Identity
 
-The preferred durable identity is:
+The live target identity is:
 
 ```text
-instance_id = Orca runtime ID plus host identity
+instance_id = current Orca runtime ID plus host identity
 address     = Orca pane key or stable terminal ID
 ```
 
-`orcaSessionId` is generation data, not the sole durable route key. Repository,
-workspace, branch, title, and cwd are labels only.
+The runtime ID is required for exact live-target validation but may rotate when
+the Orca app runtime restarts. Transport bindings therefore preserve continuity
+by backend plus stable host/pane address and rebind the stored live identity on
+the next authoritative discovery. `orcaSessionId` is generation data, not the
+sole durable route key. Repository, workspace, branch, title, and cwd are labels
+only.
 
 #### Discovery and output
 
@@ -383,13 +388,12 @@ Discovery, bounded read, normal send, and target resolution form the required
 runtime protocol.
 
 Optional operations are not represented by false methods on every backend.
-Raw terminal input, normalized structured-question answering, agent start, and
-target close use separate interfaces. The legacy client currently implements
-all four; future Core or Orca adapters may implement question answering without
-exposing raw terminal input. Transports must check both configuration and the
-relevant interface before rendering or invoking a control. Core and Orca
-therefore cannot receive a legacy-only approval button or start/close command
-accidentally.
+Normalized structured-question answering uses a separate interface currently
+implemented only by the legacy client. Future Core or Orca adapters may
+implement it without exposing raw terminal input. Transports check both
+configuration and the relevant interface before rendering answer controls.
+Guarded interrupt remains an explicit capability and never falls back to pane
+close or key injection.
 
 Completed-response and native-event handling belong to backend services rather
 than the synchronous runtime client capability record. See
@@ -522,9 +526,11 @@ installation silently.
 - Chat actors and locations are checked before backend reads that could expose
   private metadata.
 - Backend drivers expose a narrow method set and never arbitrary CLI arguments.
-- Remote hosts, hidden workers, raw input, interrupt, approval, start, and close
-  remain independently capability-gated; exposing a target does not enable
-  unsupported mutations.
+- Remote hosts and hidden workers remain independently eligibility-gated.
+  Normal send, structured-question answering, and guarded interrupt each require
+  their own configuration and backend capability; exposing a target does not
+  enable a mutation. Raw input, generic approval, remote start, and target close
+  are absent from the chat surface.
 - Raw terminal content is bounded and never included unless a configured event
   requires it.
 - Output events and local connector files use private directories and atomic

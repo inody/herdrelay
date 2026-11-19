@@ -6,14 +6,6 @@ import logging
 import discord
 from discord.ext import commands
 
-from .approval import (
-    ApprovalError,
-    apply_action,
-    deny_strategy_for,
-    ensure_blocked_for_approval,
-    stop_strategy_for,
-    strategy_for,
-)
 from .config import AppConfig
 from .domain import MutationOutcomeUnknownError, TargetKey
 from .formatter import (
@@ -23,16 +15,9 @@ from .formatter import (
 from .hc_client import HcClient
 from .core_discord_watcher import CoreEventWatcher
 from .herdr_client import TargetResolutionError
-from .models import AuditEntry, HerdrTarget, PendingQuestion
-from .questions import parse_question_answer, selected_labels
-from .runtime import (
-    AgentStartRuntime,
-    InterruptRuntime,
-    QuestionAnswerRuntime,
-    RawInputRuntime,
-    RuntimeClient,
-    TargetCloseRuntime,
-)
+from .models import AuditEntry, PendingQuestion
+from .questions import QuestionAnswerError, parse_question_answer, selected_labels
+from .runtime import InterruptRuntime, QuestionAnswerRuntime, RuntimeClient
 from .discord_security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
 from .discord_output import StreamManager
@@ -45,7 +30,7 @@ LOG = logging.getLogger(__name__)
 class HerdrDiscordBot(commands.Bot):
     def __init__(self, *, config: AppConfig, store: Store, client: RuntimeClient):
         intents = discord.Intents.default()
-        if config.enable_send:
+        if config.enable_send or config.enable_questions:
             intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
         self.config = config
@@ -80,7 +65,6 @@ class HerdrDiscordBot(commands.Bot):
                 config=self.config,
                 store=self.store,
                 client=self.client,
-                card_view_factory=self._card_view_for_event,
             )
             self._watcher_task = asyncio.create_task(self._watcher.run_forever())
             LOG.info("Started Herdr event watcher")
@@ -93,11 +77,11 @@ class HerdrDiscordBot(commands.Bot):
             )
             self._thread_task = asyncio.create_task(self.thread_manager.run_forever())
             LOG.info("Started auto thread manager")
-        question_choices_enabled = self.config.enable_approve and isinstance(
+        question_choices_enabled = self.config.enable_questions and isinstance(
             self.client, QuestionAnswerRuntime
         )
         # Legacy TUI question choices wait indefinitely, so restore them after
-        # a restart only when raw input and approval are actually enabled.
+        # a restart only when structured question answering is enabled.
         if question_choices_enabled:
             for question in self.store.list_pending_questions():
                 self.add_view(QuestionChoiceView(bot=self, question=question))
@@ -151,26 +135,6 @@ class HerdrDiscordBot(commands.Bot):
                 pass
         await super().close()
 
-    def _card_view_for_event(self, target: str) -> discord.ui.View | None:
-        if not isinstance(self.client, RawInputRuntime):
-            return None
-        if self.store.get_pending_question(target) is not None:
-            # Claude question choices use their own view; a generic Enter button
-            # would silently choose the first option.
-            return None
-        try:
-            target_info = self.client.resolve_target(target)
-        except Exception:
-            LOG.exception("Cannot create card view for watcher event")
-            return None
-        return build_target_card_view(
-            bot=self,
-            user_id=None,
-            location=None,
-            target_str=target,
-            target_info=target_info,
-        )
-
     def _question_view_for_event(self, question: PendingQuestion) -> discord.ui.View:
         return QuestionChoiceView(bot=self, question=question)
 
@@ -212,10 +176,10 @@ class HerdrDiscordBot(commands.Bot):
             if pending_question is not None and content.isdecimal():
                 selected = parse_question_answer(content, pending_question)
                 if selected is None:
-                    raise ApprovalError(
+                    raise QuestionAnswerError(
                         f"Choose a number from 1 to {len(pending_question.options)}."
                     )
-                self.security.ensure_approve_allowed(message.author.id, location)
+                self.security.ensure_question_answer_allowed(message.author.id, location)
                 labels = await self._answer_pending_question(pending_question, selected)
                 audit_fields["action"] = "question_select"
                 audit_fields["payload_preview"] = labels
@@ -225,26 +189,7 @@ class HerdrDiscordBot(commands.Bot):
                     self.client.resolve_target_key,
                     TargetKey.from_route_value(binding.herdr_target),
                 )
-                target_address = target_info.target
-                key_name = _special_key_name(content)
-                if key_name is not None:
-                    if not isinstance(self.client, RawInputRuntime):
-                        raise ApprovalError(
-                            "Raw terminal input is unavailable for this backend."
-                        )
-                    if key_name in SPECIAL_KEYS:
-                        await asyncio.to_thread(
-                            self.client.send_keys, target_address, SPECIAL_KEYS[key_name]
-                        )
-                    else:
-                        await asyncio.to_thread(
-                            self.client.send_raw_text,
-                            target_address,
-                            SPECIAL_KEY_SEQUENCES[key_name],
-                        )
-                    audit_fields["action"] = "key_send"
-                else:
-                    await asyncio.to_thread(self.client.send, target_address, content)
+                await asyncio.to_thread(self.client.send, target_info.target, content)
             self.store.add_audit(AuditEntry(result="ok", **audit_fields))
             await _react(message, "✅")
         except MutationOutcomeUnknownError as exc:
@@ -266,12 +211,16 @@ class HerdrDiscordBot(commands.Bot):
         self, question: PendingQuestion, selected: tuple[int, ...]
     ) -> str:
         if not isinstance(self.client, QuestionAnswerRuntime):
-            raise ApprovalError("Question answering is unavailable for this backend.")
+            raise QuestionAnswerError("Question answering is unavailable for this backend.")
         current = self.store.get_pending_question(question.pane_id)
         if current is None or current.event_id != question.event_id:
-            raise ApprovalError("This question is no longer pending.")
+            raise QuestionAnswerError("This question is no longer pending.")
         target_info = await asyncio.to_thread(self.client.resolve_target, question.pane_id)
-        ensure_blocked_for_approval(target_info)
+        status = (target_info.status or "unknown").casefold()
+        if status != "blocked":
+            raise QuestionAnswerError(
+                f"Question answering requires blocked status; current status is {status}."
+            )
         # Claim the question before the backend operation so a second click
         # cannot submit a competing answer.
         self.store.clear_pending_question(question.pane_id, event_id=question.event_id)
@@ -300,30 +249,32 @@ class HerdrDiscordBot(commands.Bot):
             cmd = "help"
         args = parts[1:]
         location = _location_from_message(message)
+        action = "interrupt" if cmd == "stop" else cmd
         try:
             # Check before dispatch, including help/unknown commands. In
-            # particular, do not resolve a bound pane or read Herdr first.
+            # particular, do not resolve a bound target or read the backend first.
             self.security.ensure_read_allowed(location)
-            if cmd == "start":
-                self.security.ensure_send_allowed(message.author.id, location, content)
-                await self._control_start(message, args)
-            elif cmd == "stop":
-                self.security.ensure_stop_allowed(message.author.id, location)
-                await self._control_stop(message, args)
-            elif cmd == "list":
+            if action == "interrupt":
+                self.security.ensure_interrupt_allowed(message.author.id, location)
+                await self._control_interrupt(message, args)
+            elif action == "list":
                 await self._control_list(message)
-                self._audit_control_command(message, cmd, "ok")
-            elif cmd == "help":
+                self._audit_control_command(message, action, "ok")
+            elif action == "help":
                 await message.reply(self._control_help())
-                self._audit_control_command(message, cmd, "ok")
+                self._audit_control_command(message, action, "ok")
             else:
-                raise ValueError(f"Unknown command `{cmd}`. Try: start, stop, list, help")
+                raise ValueError(
+                    f"Unknown command `{cmd}`. Try: interrupt, list, help"
+                )
         except Exception as exc:
             result = "denied" if isinstance(exc, SecurityError) else "error"
             try:
                 self._audit_control_command(
-                    message, cmd, f"{result}: {exc}",
-                    target=args[0] if cmd == "stop" and args else None,
+                    message,
+                    action,
+                    f"{result}: {exc}",
+                    target=args[0] if action == "interrupt" and args else None,
                 )
             except Exception:
                 LOG.exception("Failed to audit rejected/failed mention command")
@@ -336,7 +287,7 @@ class HerdrDiscordBot(commands.Bot):
         self, message: discord.Message, command: str, result: str, *, target: str | None = None,
     ) -> None:
         location = _location_from_message(message)
-        action = command if command in {"start", "stop", "list", "help"} else "unknown"
+        action = command if command in {"interrupt", "list", "help"} else "unknown"
         self.store.add_audit(AuditEntry(
             discord_user_id=str(message.author.id),
             guild_id=str(location.guild_id) if location.guild_id is not None else None,
@@ -348,129 +299,11 @@ class HerdrDiscordBot(commands.Bot):
             result=truncate(result, max_chars=500),
         ))
 
-    async def _inherited_context(
-        self, message: discord.Message
-    ) -> tuple[str | None, str | None, str | None, str] | None:
-        """Return (workspace_id, tab_id, cwd, pane_id) for this thread."""
-        parent_id = getattr(message.channel, "parent_id", None)
-        if parent_id is None:
-            return None
-        location = _location_from_message(message)
-        binding = self.store.get_binding(
-            guild_id=location.guild_id or 0,
-            channel_id=location.channel_id,
-            thread_id=location.thread_id,
-        )
-        if binding is None:
-            return None
-        try:
-            target = await asyncio.to_thread(
-                self.client.resolve_target_key,
-                TargetKey.from_route_value(binding.herdr_target),
-            )
-        except Exception:
-            return None
-        raw = target.raw or {}
-        return raw.get("workspace_id"), raw.get("tab_id"), target.cwd, target.target
-
-    async def _control_start(self, message: discord.Message, args: list[str]) -> None:
-        if not isinstance(self.client, AgentStartRuntime):
-            raise ValueError("Starting agents from chat is unavailable for this backend.")
-        if not args:
-            raise ValueError(
-                "Usage: `@herdr start <name> [--cwd PATH] [--workspace ID] [--tab ID] [--split right|down] [-- <argv...>]`"
-            )
-        # Persist intent before any Herdr calls. If auditing is unavailable,
-        # fail closed rather than making an unrecorded mutation.
-        self._audit_control_command(message, "start", "attempt")
-        name = args[0]
-        rest = args[1:]
-        cwd: str | None = None
-        workspace: str | None = None
-        tab: str | None = None
-        split: str | None = None
-        argv: list[str] | None = None
-        source_pane: str | None = None
-        if "--" in rest:
-            idx = rest.index("--")
-            argv = rest[idx + 1 :]
-            rest = rest[:idx]
-        i = 0
-        while i < len(rest):
-            if rest[i] == "--cwd" and i + 1 < len(rest):
-                cwd = rest[i + 1]
-                i += 2
-            elif rest[i] == "--workspace" and i + 1 < len(rest):
-                workspace = rest[i + 1]
-                i += 2
-            elif rest[i] == "--tab" and i + 1 < len(rest):
-                tab = rest[i + 1]
-                i += 2
-            elif rest[i] == "--split" and i + 1 < len(rest):
-                split = rest[i + 1]
-                i += 2
-            else:
-                i += 1
-        # Inherit workspace/tab/cwd from the bound pane when called inside a pane thread.
-        # An explicitly selected workspace or tab must not be overridden by that pane.
-        use_inherited_pane = workspace is None and tab is None
-        if cwd is None or workspace is None or tab is None:
-            inherited = await self._inherited_context(message)
-            if inherited is not None:
-                inh_workspace, inh_tab, inh_cwd, inherited_pane = inherited
-                if cwd is None:
-                    cwd = inh_cwd
-                if workspace is None:
-                    workspace = inh_workspace
-                if tab is None:
-                    tab = inh_tab
-                if use_inherited_pane:
-                    source_pane = inherited_pane
-        started = await asyncio.to_thread(
-            self.client.agent_start,
-            name,
-            cwd=cwd,
-            argv=argv,
-            workspace=workspace,
-            tab=tab,
-            split=split,
-            source_pane=source_pane,
-        )
-        pane_id = started.pane_id
-        self._audit_control_command(message, "start", "ok", target=pane_id)
-        details = []
-        if cwd:
-            details.append(f"cwd `{cwd}`")
-        if workspace:
-            details.append(f"workspace `{workspace}`")
-        if tab:
-            details.append(f"tab `{tab}`")
-        if split:
-            details.append(f"split `{split}`")
-        if pane_id:
-            details.append(f"pane `{pane_id}`")
-        detail = f" ({', '.join(details)})" if details else ""
-        # Wait briefly for the agent to start, then check if the pane survived.
-        if pane_id:
-            await asyncio.sleep(2)
-            try:
-                output = self.client.read(pane_id, lines=20, fmt="text", source="visible").strip()
-            except Exception:
-                await message.reply(
-                    f"Started `{name}`{detail}, but the pane exited immediately — "
-                    "the agent likely failed to launch. Check herdr TUI for details."
-                )
-                return
-            if output:
-                preview = output[-1500:] if len(output) > 1500 else output
-                await message.reply(f"Started `{name}`{detail}.\n```text\n{preview}\n```")
-                return
-        await message.reply(f"Started `{name}`{detail}.")
-
-    async def _control_stop(self, message: discord.Message, args: list[str]) -> None:
-        pane_id = args[0] if args else None
-        if pane_id is None:
-            # Inside a pane thread, close that thread's pane
+    async def _control_interrupt(
+        self, message: discord.Message, args: list[str]
+    ) -> None:
+        target_address = args[0] if args else None
+        if target_address is None:
             parent_id = getattr(message.channel, "parent_id", None)
             if parent_id is not None:
                 location = _location_from_message(message)
@@ -484,23 +317,24 @@ class HerdrDiscordBot(commands.Bot):
                         self.client.resolve_target_key,
                         TargetKey.from_route_value(binding.herdr_target),
                     )
-                    pane_id = target.target
-        if pane_id is None:
-            raise ValueError("Usage: `@herdr stop <pane_id>` (or run inside a pane thread)")
-        self._audit_control_command(message, "stop", "attempt", target=pane_id)
-        if (
+                    target_address = target.target
+        if target_address is None:
+            raise ValueError(
+                "Usage: `@herdr interrupt <target>` (or run inside an agent thread)"
+            )
+        if not (
             self.client.capabilities.native_interrupt
             and isinstance(self.client, InterruptRuntime)
         ):
-            await asyncio.to_thread(self.client.interrupt, pane_id)
-            reply = f"Interrupted `{pane_id}`."
-        elif isinstance(self.client, TargetCloseRuntime):
-            await asyncio.to_thread(self.client.pane_close, pane_id)
-            reply = f"Stopped `{pane_id}`."
-        else:
-            raise ValueError("Stopping targets from chat is unavailable for this backend.")
-        self._audit_control_command(message, "stop", "ok", target=pane_id)
-        await message.reply(reply)
+            raise ValueError("Interrupt is unavailable for this backend.")
+        self._audit_control_command(
+            message, "interrupt", "attempt", target=target_address
+        )
+        await asyncio.to_thread(self.client.interrupt, target_address)
+        self._audit_control_command(
+            message, "interrupt", "ok", target=target_address
+        )
+        await message.reply(f"Interrupted `{target_address}`.")
 
     async def _control_list(self, message: discord.Message) -> None:
         targets = await asyncio.to_thread(self.client.list_targets)
@@ -516,88 +350,32 @@ class HerdrDiscordBot(commands.Bot):
         await message.reply("```text\n" + "\n".join(lines) + "\n```")
 
     def _control_help(self) -> str:
+        lines = [
+            "**Runtime control** (mention me)",
+            "```",
+        ]
         if (
-            self.client.capabilities.native_interrupt
+            self.config.enable_interrupt
+            and self.client.capabilities.native_interrupt
             and isinstance(self.client, InterruptRuntime)
         ):
-            return (
-                "**Herdr Core control** (mention me)\n"
-                "```\n"
-                "@herdr stop [<terminal>]                       Interrupt a working agent\n"
-                "  inside an agent thread: interrupts that terminal (no arg needed)\n"
-                "@herdr list                                    List available agents\n"
-                "@herdr help                                    Show this help\n"
-                "```\n"
-                "Inside an agent thread, normal text submits a prompt. "
-                "Raw keys, approval, start, close, kill, and remove are disabled."
+            lines.extend(
+                (
+                    "@herdr interrupt [<target>]                 Interrupt a working agent",
+                    "  inside an agent thread: interrupts that target (no arg needed)",
+                )
             )
-        if not isinstance(self.client, (AgentStartRuntime, TargetCloseRuntime)):
-            return (
-                "**Runtime control** (mention me)\n"
-                "```\n"
-                "@herdr list                                    List available agents\n"
-                "@herdr help                                    Show this help\n"
-                "```\n"
-                "Inside an agent thread, normal text submits a prompt. "
-                "Raw keys, approval, start, stop, and close are unavailable."
+        lines.extend(
+            (
+                "@herdr list                                    List available agents",
+                "@herdr help                                    Show this help",
+                "```",
+                "Inside an agent thread, normal text submits a prompt.",
             )
-        return (
-            "**Herdr TUI control** (mention me)\n"
-            "```\n"
-            "@herdr start <name> [options] [-- <argv...>]    Start a pane (agent)\n"
-            "  options: --cwd PATH --workspace ID --tab ID --split right|down\n"
-            "  inside a pane thread: inherits that pane's workspace/tab/cwd\n"
-            "  <name> selects the Herdr agent kind; -- passes its arguments\n"
-            "  elsewhere: splits the focused pane, or creates a workspace\n"
-            "@herdr stop [<pane_id>]                          Stop (close) a pane\n"
-            "  inside a pane thread: closes that thread's pane (no arg needed)\n"
-            "@herdr list                                      List detected agents\n"
-            "@herdr help                                      Show this help\n"
-            "```\n"
-            "Inside a pane thread, just type to send to the pane. "
-            "Use `!esc`/`!enter`/`!up`/`!down` etc. for special keys."
         )
+        return "\n".join(lines)
 
 
-SPECIAL_KEYS: dict[str, tuple[str, ...]] = {
-    "esc": ("Escape",),
-    "escape": ("Escape",),
-    "enter": ("Enter",),
-    "return": ("Enter",),
-    "tab": ("Tab",),
-    "space": ("Space",),
-    "up": ("Up",),
-    "down": ("Down",),
-    "left": ("Left",),
-    "right": ("Right",),
-    "ctrl-c": ("C-c",),
-    "ctrlc": ("C-c",),
-    "backspace": ("BS",),
-    "bs": ("BS",),
-}
-
-# Herdr 0.9 has no key names for these, so send the terminal's own escape
-# sequences as text. Herdr does not wrap send-text in bracketed paste, so TUIs
-# receive them as key presses.
-SPECIAL_KEY_SEQUENCES: dict[str, str] = {
-    "pgup": "\x1b[5~",
-    "pgdn": "\x1b[6~",
-    "home": "\x1b[H",
-    "end": "\x1b[F",
-}
-
-
-def _special_key_name(content: str) -> str | None:
-    """Return the special-key name if *content* is a command like ``!esc``."""
-    if not content.startswith("!"):
-        return None
-    name = content[1:].strip().lower()
-    if name in SPECIAL_KEYS or name in SPECIAL_KEY_SEQUENCES:
-        return name
-    return None
-
-
-CARD_TIMEOUT_SECONDS = 600
 QUESTION_COMPONENT_MAX_OPTIONS = 25
 
 
@@ -656,7 +434,7 @@ class QuestionChoiceView(discord.ui.View):
         self, interaction: discord.Interaction, selected: tuple[int, ...]
     ) -> None:
         try:
-            self.bot.security.ensure_approve_user_allowed(interaction.user.id)
+            self.bot.security.ensure_question_answer_allowed(interaction.user.id)
             # Typing the answer takes longer than Discord's 3-second reply window.
             await interaction.response.defer()
             labels = await self.bot._answer_pending_question(self.question, selected)
@@ -676,173 +454,6 @@ class QuestionChoiceView(discord.ui.View):
             await interaction.followup.send(f"Selected: {labels}", ephemeral=True)
         except Exception as exc:
             await _send_error(interaction, exc)
-
-
-class TargetCardView(discord.ui.View):
-    def __init__(
-        self,
-        *,
-        bot: HerdrDiscordBot,
-        user_id: int | None,
-        location: DiscordLocation | None,
-        target_str: str,
-    ):
-        super().__init__(timeout=CARD_TIMEOUT_SECONDS)
-        self.bot = bot
-        self.user_id = user_id
-        self.location = location
-        self.target_str = target_str
-
-    def _check_actor(self, interaction: discord.Interaction) -> bool:
-        return self.user_id is None or interaction.user.id == self.user_id
-
-    async def approve_callback(self, interaction: discord.Interaction) -> None:
-        if not self._check_actor(interaction):
-            await interaction.response.send_message(
-                "Only the requesting user can act here.", ephemeral=True
-            )
-            return
-        try:
-            if self.location is not None:
-                self.bot.security.ensure_approve_allowed(interaction.user.id, self.location)
-            else:
-                self.bot.security.ensure_approve_user_allowed(interaction.user.id)
-            if self.bot.store.get_pending_question(self.target_str) is not None:
-                raise ApprovalError("Use the Claude question choices instead of Approve.")
-            target_info = self.bot.client.resolve_target(self.target_str)
-            ensure_blocked_for_approval(target_info)
-            strategy = strategy_for(self.bot.config, target_info.agent_name)
-            apply_action(self.bot.client, self.target_str, strategy)
-            _audit_action(self.bot, interaction, self.location, "approve", self.target_str, "ok")
-            await interaction.response.send_message(
-                f"Approved `{self.target_str}`.", ephemeral=True
-            )
-        except Exception as exc:
-            await _send_error(interaction, exc)
-
-    async def deny_callback(self, interaction: discord.Interaction) -> None:
-        if not self._check_actor(interaction):
-            await interaction.response.send_message(
-                "Only the requesting user can act here.", ephemeral=True
-            )
-            return
-        try:
-            if self.location is not None:
-                self.bot.security.ensure_deny_allowed(interaction.user.id, self.location)
-            else:
-                self.bot.security.ensure_deny_user_allowed(interaction.user.id)
-            target_info = self.bot.client.resolve_target(self.target_str)
-            ensure_blocked_for_approval(target_info)
-            strategy = deny_strategy_for(self.bot.config, target_info.agent_name)
-            apply_action(self.bot.client, self.target_str, strategy)
-            _audit_action(self.bot, interaction, self.location, "deny", self.target_str, "ok")
-            await interaction.response.send_message(
-                f"Denied `{self.target_str}`.", ephemeral=True
-            )
-        except Exception as exc:
-            await _send_error(interaction, exc)
-
-    async def cancel_callback(self, interaction: discord.Interaction) -> None:
-        if not self._check_actor(interaction):
-            await interaction.response.send_message(
-                "Only the requesting user can act here.", ephemeral=True
-            )
-            return
-        try:
-            location = self.location if self.location is not None else _location(interaction)
-            self.bot.security.ensure_stop_allowed(interaction.user.id, location)
-            stop_strategy_for(self.bot.config)  # validate a strategy is configured
-            view = CancelConfirmView(
-                bot=self.bot,
-                user_id=interaction.user.id,
-                location=location,
-                target_str=self.target_str,
-            )
-            await interaction.response.send_message(
-                f"Cancel `{self.target_str}`? This sends the interrupt sequence.",
-                view=view,
-                ephemeral=True,
-            )
-        except Exception as exc:
-            await _send_error(interaction, exc)
-
-def build_target_card_view(
-    *,
-    bot: HerdrDiscordBot,
-    user_id: int | None,
-    location: DiscordLocation | None,
-    target_str: str,
-    target_info: HerdrTarget,
-) -> TargetCardView:
-    view = TargetCardView(bot=bot, user_id=user_id, location=location, target_str=target_str)
-    status = (target_info.status or "").casefold()
-    if status == "blocked" and bot.config.enable_approve:
-        approve_button = discord.ui.Button(label="Approve", style=discord.ButtonStyle.success)
-        approve_button.callback = view.approve_callback
-        view.add_item(approve_button)
-        if bot.config.deny:
-            deny_button = discord.ui.Button(label="Deny", style=discord.ButtonStyle.danger)
-            deny_button.callback = view.deny_callback
-            view.add_item(deny_button)
-    if status == "working" and bot.config.enable_stop:
-        cancel_button = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.danger)
-        cancel_button.callback = view.cancel_callback
-        view.add_item(cancel_button)
-    return view
-
-
-class CancelConfirmView(discord.ui.View):
-    def __init__(
-        self,
-        *,
-        bot: HerdrDiscordBot,
-        user_id: int,
-        location: DiscordLocation,
-        target_str: str,
-    ):
-        super().__init__(timeout=60)
-        self.bot = bot
-        self.user_id = user_id
-        self.location = location
-        self.target_str = target_str
-
-    @discord.ui.button(label="Yes, cancel", style=discord.ButtonStyle.danger)
-    async def confirm_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "Only the requesting user can confirm.", ephemeral=True
-            )
-            return
-        try:
-            self.bot.security.ensure_stop_allowed(interaction.user.id, self.location)
-            strategy = stop_strategy_for(self.bot.config)
-            apply_action(self.bot.client, self.target_str, strategy)
-            _audit_action(self.bot, interaction, self.location, "cancel", self.target_str, "ok")
-            self._disable()
-            await interaction.response.edit_message(
-                content=f"Cancelled `{self.target_str}`.", view=self
-            )
-        except Exception as exc:
-            await _send_error(interaction, exc)
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "Only the requesting user can cancel.", ephemeral=True
-            )
-            return
-        self._disable()
-        await interaction.response.edit_message(content="Cancelled stop.", view=self)
-
-    def _disable(self) -> None:
-        for child in self.children:
-            if hasattr(child, "disabled"):
-                child.disabled = True
 
 
 def _audit_action(
@@ -881,18 +492,6 @@ async def _react(message: discord.Message, emoji: str) -> None:
         pass
 
 
-def _location(interaction: discord.Interaction) -> DiscordLocation:
-    channel = interaction.channel
-    parent_id = getattr(channel, "parent_id", None)
-    channel_id = parent_id or interaction.channel_id
-    thread_id = interaction.channel_id if parent_id else None
-    return DiscordLocation(
-        guild_id=interaction.guild_id,
-        channel_id=int(channel_id),
-        thread_id=int(thread_id) if thread_id else None,
-    )
-
-
 def _location_from_message(message: discord.Message) -> DiscordLocation:
     channel = message.channel
     parent_id = getattr(channel, "parent_id", None)
@@ -910,7 +509,7 @@ def _question_button_label(index: int, label: str) -> str:
 
 
 async def _send_error(interaction: discord.Interaction, exc: Exception) -> None:
-    if isinstance(exc, (SecurityError, TargetResolutionError, ApprovalError)):
+    if isinstance(exc, (SecurityError, TargetResolutionError, QuestionAnswerError)):
         LOG.info("Discord command rejected: %s", exc)
         message = str(exc)
     else:
