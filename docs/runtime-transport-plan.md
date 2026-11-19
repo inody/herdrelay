@@ -296,6 +296,10 @@ send and interrupt.
 
 ## 10. Phase 8 — Orca send and interrupt
 
+**Status:** Implemented with automated coverage. Normal text is available to
+Telegram and Discord; confirmation-gated interrupt is available to Telegram.
+Live chat mutation acceptance remains pending.
+
 ### Scope
 
 Enable the minimum bidirectional Orca workflow.

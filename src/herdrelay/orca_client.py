@@ -29,7 +29,7 @@ class OrcaClient:
         normal_send=True,
         bounded_read=True,
         native_events=False,
-        native_interrupt=False,
+        native_interrupt=True,
         raw_input=False,
         guarded_approval=False,
         agent_start=False,
@@ -117,21 +117,27 @@ class OrcaClient:
         current = self._resolve_live_target(target)
         if current.status and current.status.casefold() == "blocked":
             raise OrcaCliError(f"Orca agent is blocked: {target}", kind="blocked")
-        raw_agent = current.raw.get("orca_agent") if current.raw else None
-        if not isinstance(raw_agent, dict):
-            raise OrcaCliError(f"Orca target metadata is unavailable: {target}")
-
-        runtime_id, terminals = self.cli.terminal_list()
-        if runtime_id != self._runtime_id:
-            raise OrcaCliError(
-                "Orca runtime identity changed before prompt submission"
-            )
-        terminal = self._resolve_terminal(raw_agent, terminals)
+        _, terminal = self._resolve_mutation_terminal(target, current=current)
         result = self.cli.terminal_send(
             handle=terminal.handle,
             text=message,
             wait_submit_seconds=self.orca.send_wait_seconds,
         )
+        return OrcaMutationReceipt(observed_turn=None, result=result)
+
+    def interrupt(self, target: str) -> dict[str, Any]:
+        return self.interrupt_with_receipt(target).result
+
+    def interrupt_with_receipt(self, target: str) -> OrcaMutationReceipt:
+        current = self._resolve_live_target(target)
+        state = current.status.casefold() if current.status else "unknown"
+        if state not in {"working", "blocked"}:
+            raise OrcaCliError(
+                f"Orca agent is not interruptible in state {state}: {target}",
+                kind="not_interruptible",
+            )
+        _, terminal = self._resolve_mutation_terminal(target, current=current)
+        result = self.cli.terminal_interrupt(handle=terminal.handle)
         return OrcaMutationReceipt(observed_turn=None, result=result)
 
     def send_keys(
@@ -200,6 +206,20 @@ class OrcaClient:
         if target is None:
             raise OrcaCliError(f"Orca target is not currently available: {address}")
         return target
+
+    def _resolve_mutation_terminal(
+        self, address: str, *, current: HerdrTarget | None = None
+    ) -> tuple[HerdrTarget, OrcaTerminal]:
+        current = current or self._resolve_live_target(address)
+        raw_agent = current.raw.get("orca_agent") if current.raw else None
+        if not isinstance(raw_agent, dict):
+            raise OrcaCliError(f"Orca target metadata is unavailable: {address}")
+        runtime_id, terminals = self.cli.terminal_list()
+        if runtime_id != self._runtime_id:
+            raise OrcaCliError(
+                "Orca runtime identity changed before mutation"
+            )
+        return current, self._resolve_terminal(raw_agent, terminals)
 
     def _resolve_terminal(
         self, raw_agent: dict[str, Any], terminals: list[OrcaTerminal]

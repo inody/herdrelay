@@ -20,6 +20,7 @@ from herdrelay.hc_protocol import (
     parse_subscribe_result,
 )
 from herdrelay.models import HerdrTarget
+from herdrelay.runtime import RuntimeCapabilities
 from herdrelay.store import Store
 from herdrelay.telegram_api import TelegramApiError
 from herdrelay.telegram_service import (
@@ -209,6 +210,12 @@ class FakeMutationClient(HcClient):
                 workspace_label="herdrelay",
             )
         ]
+
+    def resolve_target_key(self, key):
+        [target] = self.list_targets()
+        if key != self.target_key(target.target):
+            raise ValueError("target identity mismatch")
+        return target
 
     def send_with_receipt(self, target, message):
         self.sent.append((target, message))
@@ -708,6 +715,78 @@ async def test_prompt_requires_topic_route_matching_current_core(tmp_path):
     assert client.sent == []
     assert relay.store.list_transport_audits() == []
     assert "different Core" in api.sent[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_orca_interrupt_uses_generic_bound_target_confirmation(tmp_path):
+    target = HerdrTarget(
+        target="local/tab:pane",
+        agent_name="pi",
+        status="working",
+        workspace_label="project",
+    )
+
+    class FakeOrcaInterruptClient:
+        capabilities = RuntimeCapabilities(native_interrupt=True)
+
+        def __init__(self):
+            self.interrupted = []
+
+        def list_targets(self):
+            return [target]
+
+        def target_key(self, address):
+            return TargetKey.orca(
+                instance_id="runtime-1", address=address
+            )
+
+        def resolve_target_key(self, key):
+            assert key == self.target_key(target.target)
+            return target
+
+        def interrupt(self, address):
+            self.interrupted.append(address)
+            return {"submitted": True, "action": "interrupt"}
+
+    app_config = AppConfig(
+        discord_token="unused",
+        runtime=RuntimeConfig(provider="orca"),
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+            enable_interrupt=True,
+        ),
+    )
+    api = FakeApi([[update(text="/interrupt")]])
+    store = Store(tmp_path / "orca-interrupt.sqlite3")
+    key = TargetKey.orca(
+        instance_id="runtime-1", address=target.target
+    )
+    store.upsert_telegram_topic_for_target(
+        target=key,
+        chat_id=-1001,
+        thread_id=77,
+        name="project/pi",
+    )
+    client = FakeOrcaInterruptClient()
+    relay = TelegramService(
+        config=app_config, store=store, client=client, api=api
+    )
+
+    await relay.poll_once()
+    callback_data = api.sent[-1]["reply_markup"]["inline_keyboard"][0][0][
+        "callback_data"
+    ]
+    api.batches.append([callback_update(data=callback_data)])
+    await relay.poll_once()
+
+    assert client.interrupted == [target.target]
+    [audit] = store.list_transport_audits()
+    assert audit["target_key"] == key.to_storage_key()
+    assert audit["outcome"] == "succeeded"
 
 
 @pytest.mark.asyncio

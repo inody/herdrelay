@@ -529,13 +529,14 @@ HerdRelay or needs an independent release lifecycle.
   multi-backend support requires a separate design.
 - **Where do output hooks belong?** Inside the selected backend provider's event
   composition, not inside a chat transport.
+- **Can the public Orca CLI map an agent to an exact writable terminal?** Yes.
+  The implementation joins agent `paneKey` to terminal `tabId:leafId` and also
+  requires host, worktree, and agent identity to agree uniquely.
 
 ## 18. Open implementation questions
 
 These questions require characterization tests rather than assumptions:
 
-- Whether Orca's public CLI exposes an exact session-to-terminal handle mapping
-  sufficient for safe bidirectional input.
 - Whether `agent.status.changed` covers native chats and terminal agents with
   the same identity guarantees.
 - How Orca reports a completed response after restart or while a workspace is
@@ -545,5 +546,5 @@ These questions require characterization tests rather than assumptions:
 - Whether structured agent questions can be read through a documented Orca
   interface without scraping terminal output.
 
-Until answered, the Orca rollout begins read-only and fails closed on ambiguous
-identity.
+The Orca rollout remains experimental pending live chat mutation acceptance and
+continues to fail closed on ambiguous identity.

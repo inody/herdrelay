@@ -98,18 +98,20 @@ outbound HTTPS, as the Discord adapter communicates with the Discord gateway.
 ### 4.5 Telegram forum topics are the preferred conversation model
 
 The preferred deployment is a private forum-enabled supergroup with one topic
-per normalized runtime target: a legacy TUI pane or a Core-ID-pinned terminal.
+per normalized runtime target: a legacy TUI pane, Core-ID-pinned terminal, or
+Orca runtime-and-pane-pinned agent.
 A topic is the Telegram equivalent of a Discord pane thread. A direct-message
 mode may be added as a fallback if Apple Watch topic behavior is inadequate on
 supported devices.
 
 ### 4.6 Runtime mutations remain deliberately narrow
 
-Telegram permits normal prompt submission to either runtime after an atomic
-claim and audit write. Core additionally permits confirmation-gated
-`terminal.interrupt`; legacy TUI interrupt is not exposed through Telegram.
-Core does not expose raw keys or force-send behavior. Mutation timeouts produce
-an unknown outcome and are never retried automatically.
+Telegram permits normal prompt submission to supported runtimes after an
+atomic claim and audit write. Core and Orca additionally permit
+confirmation-gated native interrupt; legacy TUI interrupt is not exposed
+through Telegram. Telegram does not expose raw keys or force-send behavior.
+Mutation timeouts produce an unknown outcome and are never retried
+automatically.
 
 ### 4.7 Herdr Wear remains a separate client path
 

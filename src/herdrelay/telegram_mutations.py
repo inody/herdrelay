@@ -14,7 +14,7 @@ from .hc_rpc import HcRpcError
 from .herdr_cli import HerdrCliError
 from .models import TransportAuditEntry
 from .orca_cli import OrcaCliError
-from .runtime import RuntimeClient
+from .runtime import InterruptRuntime, RuntimeClient
 from .store import Store
 from .telegram_api import TelegramBotApi
 from .telegram_updates import TelegramUpdatePolicy
@@ -38,14 +38,22 @@ class TelegramMutationHandler:
         self.store = store
         self.client = client
         self.core_client = client if isinstance(client, HcClient) else None
+        capabilities = getattr(client, "capabilities", None)
+        self.interrupt_client = (
+            client
+            if capabilities is not None
+            and capabilities.native_interrupt
+            and isinstance(client, InterruptRuntime)
+            else None
+        )
         self.api = api
         self.policy = TelegramUpdatePolicy(self.telegram)
 
     async def request_interrupt(self, message) -> None:
-        if self.core_client is None or message.message_thread_id is None:
+        if self.interrupt_client is None or message.message_thread_id is None:
             await self._feedback(
                 message,
-                "Interrupt is available only for a bound Herdr Core agent topic.",
+                "Interrupt is unavailable for the configured runtime backend.",
             )
             return
         route = self.store.get_telegram_topic_by_destination(
@@ -54,16 +62,18 @@ class TelegramMutationHandler:
         if route is None or route.closed:
             await self._feedback(message, "This topic is not bound to a live agent.")
             return
-        targets = await asyncio.to_thread(self.core_client.list_targets)
-        if self.core_client.core_id != route.core_id:
-            await self._feedback(message, "This topic belongs to a different Core.")
+        try:
+            key = TargetKey.from_route_value(route.route_target)
+            target = await asyncio.to_thread(
+                self.client.resolve_target_key, key
+            )
+        except Exception:
+            await self._feedback(
+                message, "The bound runtime agent is not currently live."
+            )
             return
-        target = next(
-            (item for item in targets if item.target == route.terminal_address),
-            None,
-        )
-        state = target.status.casefold() if target and target.status else "unknown"
-        if target is None or not target.agent_name or state not in {"working", "blocked"}:
+        state = target.status.casefold() if target.status else "unknown"
+        if not target.agent_name or state not in {"working", "blocked"}:
             await self._feedback(
                 message, f"The bound agent is not interruptible in state {state}."
             )
@@ -75,8 +85,7 @@ class TelegramMutationHandler:
             actor_id=message.user_id,
             chat_id=message.chat_id,
             thread_id=message.message_thread_id,
-            core_id=route.core_id,
-            terminal_address=route.terminal_address,
+            target=key,
             action="interrupt",
             expires_at=time.time() + self.telegram.confirmation_ttl_seconds,
         )
@@ -122,13 +131,11 @@ class TelegramMutationHandler:
             )
             return False
         if action == "cancel":
+            key = _confirmation_target(confirmation)
             self._audit_interrupt_rejection(
                 callback,
                 detail="cancelled by actor",
-                target_key=TargetKey.core(
-                    controller_core_id=confirmation.core_id,
-                    address=confirmation.terminal_address,
-                ).to_storage_key(),
+                target_key=key.to_storage_key(),
             )
             await self._safe_answer_callback(callback, "Cancelled.")
             return False
@@ -139,26 +146,25 @@ class TelegramMutationHandler:
     async def _execute_interrupt(
         self, callback, *, confirmation, event_key: str
     ) -> bool:
-        if self.core_client is None or callback.message_thread_id is None:
-            self._audit_interrupt_rejection(callback, detail="Core runtime unavailable")
+        if self.interrupt_client is None or callback.message_thread_id is None:
+            self._audit_interrupt_rejection(
+                callback, detail="runtime interrupt unavailable"
+            )
             await self._safe_answer_callback(
-                callback, "Core runtime is unavailable.", show_alert=True
+                callback, "Runtime interrupt is unavailable.", show_alert=True
             )
             return False
+        key = _confirmation_target(confirmation)
         route = self.store.get_telegram_topic_by_destination(
             chat_id=callback.chat_id, thread_id=callback.message_thread_id
         )
-        expected = (confirmation.core_id, confirmation.terminal_address)
-        actual = (
-            (route.core_id, route.terminal_address)
+        target_key = key.to_storage_key()
+        actual_route = (
+            route.route_target
             if route is not None and not route.closed
             else None
         )
-        target_key = TargetKey.core(
-            controller_core_id=confirmation.core_id,
-            address=confirmation.terminal_address,
-        ).to_storage_key()
-        if actual != expected:
+        if actual_route != key.to_route_value():
             self._audit_interrupt_rejection(
                 callback, detail="topic route changed", target_key=target_key
             )
@@ -167,15 +173,15 @@ class TelegramMutationHandler:
             )
             return False
 
-        targets = await asyncio.to_thread(self.core_client.list_targets)
-        target = next(
-            (item for item in targets if item.target == confirmation.terminal_address),
-            None,
-        )
+        try:
+            target = await asyncio.to_thread(
+                self.client.resolve_target_key, key
+            )
+        except Exception:
+            target = None
         state = target.status.casefold() if target and target.status else "unknown"
         if (
-            self.core_client.core_id != confirmation.core_id
-            or target is None
+            target is None
             or not target.agent_name
             or state not in {"working", "blocked"}
         ):
@@ -221,10 +227,20 @@ class TelegramMutationHandler:
             return True
         await self._safe_answer_callback(callback, "Interrupting…")
         try:
-            receipt = await asyncio.to_thread(
-                self.core_client.interrupt_with_receipt,
-                confirmation.terminal_address,
+            interrupt_with_receipt = getattr(
+                self.interrupt_client, "interrupt_with_receipt", None
             )
+            if callable(interrupt_with_receipt):
+                receipt = await asyncio.to_thread(
+                    interrupt_with_receipt, key.address
+                )
+                result = receipt.result
+                observed_turn = receipt.observed_turn
+            else:
+                result = await asyncio.to_thread(
+                    self.interrupt_client.interrupt, key.address
+                )
+                observed_turn = None
         except MutationOutcomeUnknownError as exc:
             self.store.finish_transport_audit(
                 audit_id,
@@ -235,7 +251,7 @@ class TelegramMutationHandler:
                 callback,
                 "⚠️ Interrupt outcome is unknown. Inspect the agent before retrying.",
             )
-        except HcRpcError as exc:
+        except (HcRpcError, OrcaCliError) as exc:
             self.store.finish_transport_audit(
                 audit_id,
                 outcome="rejected" if exc.kind else "failed",
@@ -253,8 +269,8 @@ class TelegramMutationHandler:
             self.store.finish_transport_audit(
                 audit_id,
                 outcome="succeeded",
-                detail=truncate(str(receipt.result), max_chars=500),
-                observed_turn=receipt.observed_turn,
+                detail=truncate(str(result), max_chars=500),
+                observed_turn=observed_turn,
             )
             await self._safe_feedback(callback, "✅ Interrupt sent.")
         return True
@@ -508,4 +524,13 @@ class TelegramMutationHandler:
             if count >= limit:
                 return f"rate limit: {label} has {count} mutations in the last minute"
         return None
+
+
+def _confirmation_target(confirmation) -> TargetKey:
+    if confirmation.target_key:
+        return TargetKey.from_route_value(confirmation.target_key)
+    return TargetKey.core(
+        controller_core_id=confirmation.core_id,
+        address=confirmation.terminal_address,
+    )
 

@@ -99,6 +99,9 @@ def test_telegram_confirmation_is_actor_location_bound_expiring_and_one_time(tmp
     assert confirmation is not None
     assert confirmation.core_id == "core-1"
     assert confirmation.terminal_address == "t1"
+    assert confirmation.target_key == TargetKey.core(
+        controller_core_id="core-1", address="t1"
+    ).to_route_value()
     assert store.consume_telegram_confirmation(
         token="secret",
         actor_id=42,
@@ -126,6 +129,36 @@ def test_telegram_confirmation_is_actor_location_bound_expiring_and_one_time(tmp
         action="interrupt",
         now=100,
     ) is None
+
+
+def test_telegram_confirmation_preserves_generic_orca_target(tmp_path):
+    store = Store(tmp_path / "orca-confirmation.sqlite3")
+    target = TargetKey.orca(
+        instance_id="runtime-1", address="local/tab:pane"
+    )
+    store.create_telegram_confirmation(
+        token="orca-secret",
+        actor_id=42,
+        chat_id=-1001,
+        thread_id=77,
+        target=target,
+        action="interrupt",
+        expires_at=200,
+    )
+
+    confirmation = store.consume_telegram_confirmation(
+        token="orca-secret",
+        actor_id=42,
+        chat_id=-1001,
+        thread_id=77,
+        action="interrupt",
+        now=100,
+    )
+
+    assert confirmation is not None
+    assert confirmation.target_key == target.to_route_value()
+    assert confirmation.core_id == "runtime-1"
+    assert confirmation.terminal_address == "local/tab:pane"
 
 
 def test_transport_mutation_claim_is_atomic_and_single_use(tmp_path):
@@ -200,6 +233,50 @@ def test_existing_core_topic_schema_is_migrated_to_normalized_route(tmp_path):
     assert TargetKey.from_route_value(route.route_target) == TargetKey.core(
         controller_core_id="core-1", address="t1"
     )
+
+
+def test_existing_confirmation_schema_is_migrated_to_target_key(tmp_path):
+    path = tmp_path / "confirmation.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE telegram_confirmations (
+              token TEXT PRIMARY KEY,
+              actor_id TEXT NOT NULL,
+              chat_id TEXT NOT NULL,
+              thread_id TEXT NOT NULL,
+              core_id TEXT NOT NULL,
+              terminal_address TEXT NOT NULL,
+              action TEXT NOT NULL,
+              expires_at REAL NOT NULL,
+              consumed_at TEXT,
+              created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO telegram_confirmations VALUES (
+              'secret', '42', '-1001', '77', 'core-1', 't1',
+              'interrupt', 200, NULL, 'now'
+            )
+            """
+        )
+
+    store = Store(path)
+    confirmation = store.consume_telegram_confirmation(
+        token="secret",
+        actor_id=42,
+        chat_id=-1001,
+        thread_id=77,
+        action="interrupt",
+        now=100,
+    )
+
+    assert confirmation is not None
+    assert confirmation.target_key == TargetKey.core(
+        controller_core_id="core-1", address="t1"
+    ).to_route_value()
 
 
 def test_telegram_topic_route_upsert_and_close(tmp_path):

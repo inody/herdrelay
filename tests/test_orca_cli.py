@@ -175,6 +175,37 @@ def test_orca_terminal_list_and_send_use_exact_runtime_handle(monkeypatch):
     ]
 
 
+def test_orca_terminal_interrupt_uses_public_send_interrupt_flag(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return completed(
+            {
+                "ok": True,
+                "result": {"submitted": True, "action": "interrupt"},
+            }
+        )
+
+    monkeypatch.setattr("herdrelay.orca_cli.subprocess.run", fake_run)
+    result = OrcaCli(OrcaRuntimeConfig()).terminal_interrupt(handle="term-1")
+
+    assert result == {"submitted": True, "action": "interrupt"}
+    assert calls == [
+        [
+            "orca",
+            "terminal",
+            "send",
+            "--terminal",
+            "term-1",
+            "--interrupt",
+            "--environment",
+            "local",
+            "--json",
+        ]
+    ]
+
+
 def test_orca_terminal_send_timeout_is_outcome_unknown(monkeypatch):
     def timeout(command, **kwargs):
         raise subprocess.TimeoutExpired(command, timeout=10)

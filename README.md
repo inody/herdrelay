@@ -3,8 +3,8 @@
 HerdRelay connects local coding agents to authorized chat transports. It routes
 prompts, lifecycle notifications, and completed responses between Herdr Core or
 the legacy Herdr TUI and Discord or Telegram. An experimental Orca backend can
-relay allowlisted agent status and newly completed responses and submit normal
-prompts through Orca's public CLI.
+relay allowlisted agent status and newly completed responses, submit normal
+prompts, and confirm Telegram interrupts through Orca's public CLI.
 
 Herdr remains the runtime authority. HerdRelay does not start Core, expose its
 raw protocol, provide arbitrary shell access, or replace Herdr's own session
@@ -413,9 +413,10 @@ socket. It never types into an existing terminal.
   device acceptance testing; use
   [`docs/apple-watch-acceptance.md`](docs/apple-watch-acceptance.md).
 - Telegram interrupt is Core-only.
-- Orca prompt submission, status, and newly completed responses are
-  experimental and have automated coverage but no live chat acceptance;
-  interrupt, watcher events, and existing-response backfill remain disabled.
+- Orca prompt submission, Telegram interrupt, status, and newly completed
+  responses are experimental and have automated coverage but no live chat
+  mutation acceptance; Discord stop/approval/raw input, watcher events, and
+  existing-response backfill remain disabled.
 - Legacy TUI with Telegram is best-effort and not live-acceptance tested.
 - New Core terminals must be added to an exact allowlist before exposure.
 - Existing agent sessions must load the current adapter version before they can

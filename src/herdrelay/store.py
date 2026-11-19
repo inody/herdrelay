@@ -115,6 +115,7 @@ class Store:
                   thread_id TEXT NOT NULL,
                   core_id TEXT NOT NULL,
                   terminal_address TEXT NOT NULL,
+                  target_key TEXT,
                   action TEXT NOT NULL,
                   expires_at REAL NOT NULL,
                   consumed_at TEXT,
@@ -138,6 +139,32 @@ class Store:
                 """
             )
             self._migrate_telegram_topics(conn)
+            self._migrate_telegram_confirmations(conn)
+
+    def _migrate_telegram_confirmations(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(telegram_confirmations)")
+        }
+        if "target_key" not in columns:
+            conn.execute(
+                "ALTER TABLE telegram_confirmations ADD COLUMN target_key TEXT"
+            )
+        rows = conn.execute(
+            """
+            SELECT token, core_id, terminal_address FROM telegram_confirmations
+            WHERE target_key IS NULL OR target_key = ''
+            """
+        ).fetchall()
+        for row in rows:
+            target_key = TargetKey.core(
+                controller_core_id=str(row["core_id"]),
+                address=str(row["terminal_address"]),
+            ).to_route_value()
+            conn.execute(
+                "UPDATE telegram_confirmations SET target_key = ? WHERE token = ?",
+                (target_key, row["token"]),
+            )
 
     def _migrate_telegram_topics(self, conn: sqlite3.Connection) -> None:
         columns = {
@@ -491,26 +518,37 @@ class Store:
         actor_id: int | str,
         chat_id: int | str,
         thread_id: int | str,
-        core_id: str,
-        terminal_address: str,
         action: str,
         expires_at: float,
+        target: TargetKey | None = None,
+        core_id: str | None = None,
+        terminal_address: str | None = None,
     ) -> None:
+        if target is None:
+            if not core_id or not terminal_address:
+                raise ValueError("confirmation target identity is required")
+            target = TargetKey.core(
+                controller_core_id=core_id,
+                address=terminal_address,
+            )
+        legacy_instance = target.instance_id or ""
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO telegram_confirmations (
                   token, actor_id, chat_id, thread_id, core_id,
-                  terminal_address, action, expires_at, consumed_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                  terminal_address, target_key, action, expires_at,
+                  consumed_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
                 """,
                 (
                     token,
                     str(actor_id),
                     str(chat_id),
                     str(thread_id),
-                    core_id,
-                    terminal_address,
+                    legacy_instance,
+                    target.address,
+                    target.to_route_value(),
                     action,
                     expires_at,
                     _now(),
@@ -873,6 +911,11 @@ def _telegram_confirmation(row: sqlite3.Row) -> TelegramConfirmation:
         terminal_address=str(row["terminal_address"]),
         action=str(row["action"]),
         expires_at=float(row["expires_at"]),
+        target_key=(
+            str(row["target_key"])
+            if "target_key" in row.keys() and row["target_key"]
+            else None
+        ),
     )
 
 

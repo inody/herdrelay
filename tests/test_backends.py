@@ -175,3 +175,4 @@ def test_build_backend_provider_wraps_orca_runtime():
 
     assert provider.kind is BackendKind.ORCA
     assert provider.client.capabilities.normal_send is True
+    assert provider.client.capabilities.native_interrupt is True

@@ -33,6 +33,7 @@ class TelegramConfirmation:
     terminal_address: str
     action: str
     expires_at: float
+    target_key: str | None = None
 
 
 @dataclass(frozen=True)
