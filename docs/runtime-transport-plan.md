@@ -329,8 +329,45 @@ Enable the minimum bidirectional Orca workflow.
 
 ### Exit criteria
 
-- Authorized Telegram and Discord text reaches an allowlisted Orca target once.
+- Authorized Telegram and Discord text reaches an exposed Orca target once.
 - Every Orca mutation has a durable audit result.
+
+## 10.1 Target exposure policy correction
+
+### Scope
+
+Restore the original interactive product behavior—every eligible local agent
+is available by default—without conflating discovery with transport
+authorization.
+
+### Work
+
+- Define `all-eligible` and `selected` exposure modes for Core and Orca.
+- Make `all-eligible` the canonical default for new configurations.
+- Keep local/remote, visible/hidden, root/worker, and supported agent-kind checks
+  as backend eligibility rules.
+- Move exact selectors under provider `target_exposure` blocks.
+- Treat legacy flat `allowed_*` keys as migration aliases that infer `selected`
+  mode; reject conflicting old and new configuration.
+- Make Telegram topics and Discord auto-threads follow every exposed target's
+  lifecycle.
+- Update user-facing wording from “allowlisted agents” to “available agents.”
+
+### Tests
+
+- New default configurations expose all eligible local interactive agents.
+- `selected` mode exposes only exact selectors and rejects an empty selector
+  set.
+- Legacy explicit allowlists retain their restricted behavior after upgrade.
+- Opening and closing eligible Orca agents creates and closes Telegram topics.
+- Mutation-time identity and capability checks remain unchanged.
+
+### Exit criteria
+
+- Target exposure is explicit and consistent across backends.
+- A new local Orca terminal agent appears in Telegram without configuration
+  edits when `all-eligible` is selected.
+- Existing restricted deployments do not broaden during migration.
 
 ## 11. Phase 9 — Storage convergence and cleanup
 

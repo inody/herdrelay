@@ -454,16 +454,68 @@ last observed update, and last delivered response identity.
 - A backend outage does not prevent read-only transport commands such as help
   from responding.
 
-## 14. Security boundary
+## 14. Target exposure and security boundary
 
-Every enabled transport remains remote access to the selected backend.
+Every enabled transport remains remote access to the selected backend, but
+transport authorization and target discovery are separate concerns.
 
-- Target inclusion is deny-by-default for each backend.
-- Orca targets require explicit host/workspace/project or exact-target policy;
-  discovery of an agent does not automatically authorize it.
+### 14.1 Backend eligibility
+
+Each backend first identifies user-facing targets that are safe for its common
+interface:
+
+- Herdr TUI exposes live panes with detected agents.
+- Herdr Core exposes live, visible, root agent terminals on the selected Core;
+  hidden workers and connected-machine terminals remain separate opt-ins.
+- Orca exposes recognized terminal agents on configured hosts. Native chat
+  agents remain excluded until a documented mutation path is available.
+
+Eligibility is not based on repository names, titles, cwd similarity, or other
+labels. A mutation still revalidates the exact backend instance and target
+identity immediately before input.
+
+### 14.2 Exposure policy
+
+Eligible targets use one explicit exposure policy:
+
+- `all-eligible` is the normal interactive default. Every eligible target is
+  available, and transport topics or threads follow its open/close lifecycle.
+- `selected` is an optional operator restriction for installations that need a
+  smaller set. It requires at least one exact provider-specific selector.
+
+An empty selector list never silently changes meaning. In `all-eligible` mode,
+selectors are absent. In `selected` mode, an empty selector set is invalid.
+Transport chat/user/guild/channel allowlists continue to decide who may access
+the exposed targets; target selection is not a substitute for transport
+authorization.
+
+Canonical provider configuration nests selectors under `target_exposure`:
+
+```yaml
+runtime:
+  herdr_core:
+    target_exposure:
+      mode: all-eligible
+  orca:
+    host_ids: [local]
+    target_exposure:
+      mode: all-eligible
+```
+
+Herdr Core `selected` mode uses exact terminal addresses. Orca `selected` mode
+uses exact pane keys and/or worktree IDs, after host and agent-kind eligibility
+checks. Legacy flat `allowed_*` settings are migration aliases only: their
+presence infers `selected` mode so an upgrade cannot broaden an existing
+installation silently.
+
+### 14.3 Remaining security controls
+
 - Chat actors and locations are checked before backend reads that could expose
   private metadata.
 - Backend drivers expose a narrow method set and never arbitrary CLI arguments.
+- Remote hosts, hidden workers, raw input, interrupt, approval, start, and close
+  remain independently capability-gated; exposing a target does not enable
+  unsupported mutations.
 - Raw terminal content is bounded and never included unless a configured event
   requires it.
 - Output events and local connector files use private directories and atomic
