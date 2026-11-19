@@ -307,19 +307,35 @@ class TelegramMutationHandler:
         except Exception:
             LOG.exception("Failed to answer Telegram callback query")
 
-    async def send_prompt(self, message, *, event_key: str) -> bool:
-        if message.message_thread_id is None:
-            await self._feedback(
-                message, "Send prompts inside a bound agent forum topic."
+    async def send_prompt(
+        self,
+        message,
+        *,
+        event_key: str,
+        route=None,
+        text: str | None = None,
+    ) -> bool:
+        if route is None:
+            if message.message_thread_id is None:
+                await self._feedback(
+                    message, "Send prompts inside a bound agent forum topic."
+                )
+                return False
+            route = self.store.get_telegram_topic_by_destination(
+                chat_id=message.chat_id, thread_id=message.message_thread_id
             )
+            if route is None or route.closed:
+                await self._feedback(
+                    message, "This forum topic is not bound to a live agent."
+                )
+                return False
+        elif route.closed or int(route.chat_id) != message.chat_id:
+            await self._feedback(message, "The selected agent topic is unavailable.")
             return False
-        route = self.store.get_telegram_topic_by_destination(
-            chat_id=message.chat_id, thread_id=message.message_thread_id
-        )
-        if route is None or route.closed:
-            await self._feedback(message, "This forum topic is not bound to a live agent.")
+        text = message.prompt_text if text is None else text.strip()
+        if not text:
+            await self._feedback(message, "Prompt text is empty.")
             return False
-        text = message.prompt_text
         if len(text) > self.config.max_message_chars:
             await self._feedback(
                 message,
@@ -375,7 +391,11 @@ class TelegramMutationHandler:
                     transport="telegram",
                     actor_id=str(message.user_id),
                     container_id=str(message.chat_id),
-                    conversation_id=str(message.message_thread_id),
+                    conversation_id=(
+                        str(message.message_thread_id)
+                        if message.message_thread_id is not None
+                        else None
+                    ),
                     action="send_text",
                     target_key=target_key,
                     payload_preview=truncate(text, max_chars=200),
@@ -391,7 +411,11 @@ class TelegramMutationHandler:
                 transport="telegram",
                 actor_id=str(message.user_id),
                 container_id=str(message.chat_id),
-                conversation_id=str(message.message_thread_id),
+                conversation_id=(
+                    str(message.message_thread_id)
+                    if message.message_thread_id is not None
+                    else None
+                ),
                 action="send_text",
                 target_key=target_key,
                 payload_preview=truncate(text, max_chars=200),

@@ -11,6 +11,7 @@ from .store import Store
 from .telegram_api import TelegramBotApi
 from .telegram_mutations import TelegramMutationHandler
 from .telegram_output import TelegramOutputRelay
+from .telegram_router import IntentModel, TelegramGeneralRouter
 from .telegram_status import TelegramStatusRelay
 from .telegram_topics import TelegramTopicManager
 from .telegram_updates import (
@@ -33,6 +34,7 @@ class TelegramService:
         store: Store,
         client: RuntimeClient,
         api: TelegramBotApi | None = None,
+        router_model: IntentModel | None = None,
     ):
         self.config = config
         self.telegram = config.telegram
@@ -54,6 +56,18 @@ class TelegramService:
         self._stopped = asyncio.Event()
         self.mutations = TelegramMutationHandler(
             config=config, store=store, client=client, api=self.api
+        )
+        self.general_router = (
+            TelegramGeneralRouter(
+                config=config,
+                store=store,
+                client=client,
+                api=self.api,
+                mutations=self.mutations,
+                model=router_model,
+            )
+            if self.telegram.general_router.enabled
+            else None
         )
         self.status_relay = TelegramStatusRelay(
             config=config,
@@ -161,11 +175,15 @@ class TelegramService:
                     )
                 text = "Agents\n" + "\n".join(lines)
         elif command in {"help", "start"}:
-            prompt_help = (
-                "Plain text in a bound topic submits a prompt."
-                if self.telegram.enable_send
-                else "Prompt submission is disabled."
-            )
+            if self.telegram.general_router.enabled:
+                prompt_help = (
+                    "Plain text in General is routed by the configured model; "
+                    "bound topics submit directly."
+                )
+            elif self.telegram.enable_send:
+                prompt_help = "Plain text in a bound topic submits a prompt."
+            else:
+                prompt_help = "Prompt submission is disabled."
             interrupt_help = (
                 "/interrupt — request a one-time confirmation button"
                 if self.telegram.enable_interrupt
@@ -186,6 +204,8 @@ class TelegramService:
                 return False
         elif command is not None:
             text = "Unknown command. Use /agents, /interrupt, or /help."
+        elif self.general_router is not None and self.general_router.accepts(message):
+            return await self.general_router.handle(message, event_key=event_key)
         elif self.telegram.enable_send:
             return await self.mutations.send_prompt(
                 message, event_key=event_key

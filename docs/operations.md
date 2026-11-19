@@ -101,6 +101,36 @@ SQLite route is removed. `null` retains closed topics indefinitely. Do not
 delete a still-tracked topic manually: a missing Telegram topic with a retained
 SQLite route cannot be reopened.
 
+## Telegram General router
+
+When `transports.telegram.general_router.enabled` is true, authorized ordinary
+text in General is sent to the configured stateless intent model. General itself
+is the trigger; no wake word is required. Slash commands are handled locally
+before routing, and bound agent topics bypass the model entirely.
+
+The model receives opaque candidate IDs plus topic ID, workspace/title, agent,
+status, and display alias. It does not receive the runtime address or cwd. Its
+JSON decision must select a supplied candidate and extract the forwarded prompt
+as an exact substring of the original message. HerdRelay then refreshes the
+runtime, verifies the exact target identity, applies the normal blocklist and
+rate limits, audits both routing and mutation, and submits through the existing
+backend path. Any model error, timeout, ambiguity, unknown candidate, or changed
+target fails closed and is not retried automatically.
+
+Supported providers are `openai-compatible`, `pi-cli`, and `command`. `pi-cli`
+reuses Pi authentication but launches each classification with no session or
+tools and disables automatic extension discovery, MCP, skills, prompt
+templates, themes, and context files. Required trusted provider extensions can
+be named explicitly in `model.extensions`. For LaunchAgent environments, set
+`model.node_path` when the Pi launcher cannot find Node.js. Pi subprocesses use
+a minimal environment; add only required credential variable names through
+`model.pass_env`. The command provider runs a configured argv directly without
+a shell. Keep the
+router disabled until a provider and model have been selected explicitly. For
+Telegram installations that report General with a numeric thread ID, set
+`general_topic_id`; otherwise General is recognized by the absence of
+`message_thread_id`.
+
 ## Thread and binding lifecycle
 
 `enable_auto_threads` starts a reconciliation loop using `herdr pane list`.

@@ -522,6 +522,47 @@ transports:
     assert "telegram-secret" not in repr(config.telegram)
 
 
+def test_load_config_reads_general_router_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "discord-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-secret")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+runtime:
+  provider: herdr-core
+transports:
+  telegram:
+    enabled: true
+    allowed_chat_ids: [-1001]
+    allowed_user_ids: [42]
+    forum_chat_id: -1001
+    enable_send: true
+    general_router:
+      enabled: true
+      activation: all-text
+      execution_policy: auto-unique
+      model:
+        provider: openai-compatible
+        model: router-small
+        base_url: http://127.0.0.1:11434/v1
+        timeout_seconds: 4
+        max_output_bytes: 8192
+"""
+    )
+
+    config = load_config(config_path)
+
+    router = config.telegram.general_router
+    assert router.enabled is True
+    assert router.activation == "all-text"
+    assert router.execution_policy == "auto-unique"
+    assert router.model.provider == "openai-compatible"
+    assert router.model.model == "router-small"
+    assert router.model.base_url == "http://127.0.0.1:11434/v1"
+    assert router.model.timeout_seconds == 4
+    assert router.model.max_output_bytes == 8192
+
+
 def test_load_config_allows_telegram_with_legacy_tui(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
@@ -621,6 +662,39 @@ transports:
     with pytest.raises(ValueError, match=message):
         load_config(config_path)
 
+
+def test_general_router_requires_send_and_explicit_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+    config_path = tmp_path / "config.yaml"
+    base = """
+runtime:
+  provider: herdr-core
+transports:
+  telegram:
+    enabled: true
+    allowed_chat_ids: [-1]
+    allowed_user_ids: [2]
+    forum_chat_id: -1
+    general_router:
+      enabled: true
+      model:
+        provider: command
+        node_path: /opt/node/bin/node
+        pass_env: [ROUTER_TOKEN]
+        extensions: [/tmp/provider.ts]
+        argv: [router]
+"""
+    config_path.write_text(base)
+    with pytest.raises(ValueError, match="requires enable_send"):
+        load_config(config_path)
+
+    config_path.write_text(base.replace("enabled: true\n    allowed_chat", "enabled: true\n    enable_send: true\n    allowed_chat"))
+    config = load_config(config_path)
+    assert config.telegram.general_router.model.node_path == "/opt/node/bin/node"
+    assert config.telegram.general_router.model.pass_env == ("ROUTER_TOKEN",)
+    assert config.telegram.general_router.model.extensions == ("/tmp/provider.ts",)
+    assert config.telegram.general_router.model.argv == ("router",)
 
 
 def test_load_config_rejects_invalid_core_runtime_values(tmp_path, monkeypatch):

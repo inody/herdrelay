@@ -73,6 +73,30 @@ class DiscordTransportConfig:
 
 
 @dataclass(frozen=True)
+class RouterModelConfig:
+    provider: str = "none"
+    model: str | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
+    cli_path: str = "pi"
+    node_path: str | None = None
+    pass_env: tuple[str, ...] = ()
+    extensions: tuple[str, ...] = ()
+    argv: tuple[str, ...] = ()
+    timeout_seconds: float = 5
+    max_output_bytes: int = 16_384
+
+
+@dataclass(frozen=True)
+class TelegramGeneralRouterConfig:
+    enabled: bool = False
+    activation: str = "all-text"
+    execution_policy: str = "auto-unique"
+    general_topic_id: int | None = None
+    model: RouterModelConfig = field(default_factory=RouterModelConfig)
+
+
+@dataclass(frozen=True)
 class TelegramConfig:
     enabled: bool = False
     token: str = field(default="", repr=False)
@@ -93,6 +117,9 @@ class TelegramConfig:
     status_refresh_seconds: float = 5
     target_absence_grace_seconds: float = 60
     closed_topic_retention_days: int | None = None
+    general_router: TelegramGeneralRouterConfig = field(
+        default_factory=TelegramGeneralRouterConfig
+    )
 
 
 @dataclass(frozen=True)
@@ -199,6 +226,16 @@ def load_config(
     telegram_data = transports_data.get("telegram") or {}
     if not isinstance(telegram_data, dict):
         raise ValueError("transports.telegram must be a YAML mapping")
+    general_router_data = telegram_data.get("general_router") or {}
+    if not isinstance(general_router_data, dict):
+        raise ValueError(
+            "transports.telegram.general_router must be a YAML mapping"
+        )
+    router_model_data = general_router_data.get("model") or {}
+    if not isinstance(router_model_data, dict):
+        raise ValueError(
+            "transports.telegram.general_router.model must be a YAML mapping"
+        )
     storage_data = data.get("storage") or {}
     if not isinstance(storage_data, dict):
         raise ValueError("storage must be a YAML mapping")
@@ -445,6 +482,46 @@ def load_config(
             closed_topic_retention_days=_optional_int(
                 telegram_data.get("closed_topic_retention_days")
             ),
+            general_router=TelegramGeneralRouterConfig(
+                enabled=bool(general_router_data.get("enabled", False)),
+                activation=str(
+                    general_router_data.get("activation") or "all-text"
+                ).casefold(),
+                execution_policy=str(
+                    general_router_data.get("execution_policy") or "auto-unique"
+                ).casefold(),
+                general_topic_id=_optional_int(
+                    general_router_data.get("general_topic_id")
+                ),
+                model=RouterModelConfig(
+                    provider=str(
+                        router_model_data.get("provider") or "none"
+                    ).casefold(),
+                    model=_optional_str(router_model_data.get("model")),
+                    base_url=_optional_str(router_model_data.get("base_url")),
+                    api_key_env=_optional_str(
+                        router_model_data.get("api_key_env")
+                    ),
+                    cli_path=str(router_model_data.get("cli_path") or "pi"),
+                    node_path=_optional_str(router_model_data.get("node_path")),
+                    pass_env=tuple(
+                        str(item) for item in router_model_data.get("pass_env") or ()
+                    ),
+                    extensions=tuple(
+                        str(item)
+                        for item in router_model_data.get("extensions") or ()
+                    ),
+                    argv=tuple(
+                        str(item) for item in router_model_data.get("argv") or ()
+                    ),
+                    timeout_seconds=float(
+                        router_model_data.get("timeout_seconds", 5)
+                    ),
+                    max_output_bytes=int(
+                        router_model_data.get("max_output_bytes", 16_384)
+                    ),
+                ),
+            ),
         ),
     )
     _validate_runtime_features(config)
@@ -504,6 +581,45 @@ def _validate_telegram(config: AppConfig) -> None:
         raise ValueError(
             "Telegram closed_topic_retention_days must be at least 1 or null"
         )
+    router = telegram.general_router
+    if not router.enabled:
+        return
+    if not telegram.enable_send:
+        raise ValueError("Telegram general_router requires enable_send: true")
+    if router.activation != "all-text":
+        raise ValueError(
+            "Telegram general_router.activation currently supports only 'all-text'"
+        )
+    if router.execution_policy != "auto-unique":
+        raise ValueError(
+            "Telegram general_router.execution_policy currently supports only 'auto-unique'"
+        )
+    if router.general_topic_id is not None and router.general_topic_id <= 0:
+        raise ValueError("Telegram general_router.general_topic_id must be positive")
+    model = router.model
+    if model.provider not in {"openai-compatible", "pi-cli", "command"}:
+        raise ValueError(
+            "Telegram general_router.model.provider must be "
+            "'openai-compatible', 'pi-cli', or 'command'"
+        )
+    if model.timeout_seconds <= 0:
+        raise ValueError("Telegram general_router model timeout must be positive")
+    if model.max_output_bytes < 1024:
+        raise ValueError(
+            "Telegram general_router model max_output_bytes must be at least 1024"
+        )
+    if model.provider == "openai-compatible":
+        if not model.model or not model.base_url:
+            raise ValueError(
+                "Telegram openai-compatible router requires model and base_url"
+            )
+    elif model.provider == "pi-cli":
+        if not model.model or not model.cli_path.strip():
+            raise ValueError(
+                "Telegram pi-cli router requires model and cli_path"
+            )
+    elif not model.argv:
+        raise ValueError("Telegram command router requires a non-empty argv list")
 
 
 def _validate_runtime_features(config: AppConfig) -> None:
@@ -745,3 +861,9 @@ def _optional_int(value: Any) -> int | None:
     if value in (None, ""):
         return None
     return int(value)
+
+
+def _optional_str(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)

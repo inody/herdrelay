@@ -211,6 +211,46 @@ name. Closed topics are deleted after `closed_topic_retention_days`; set it to
 Prompt and interrupt attempts are claimed and audited before the Core call.
 Timeouts are recorded as `outcome_unknown` and are never retried automatically.
 
+### Optional General-topic LLM router
+
+`transports.telegram.general_router` can treat authorized ordinary text in
+General as a one-shot routing request. Bound agent topics still submit directly.
+The router model receives only opaque candidate IDs and display metadata, must
+return structured JSON, and cannot call runtime tools. HerdRelay verifies the
+selected live `TargetKey`, requires the forwarded prompt to be an exact substring
+of the original utterance, then uses the normal audited prompt path.
+
+The router is disabled by default and supports explicit providers:
+
+```yaml
+transports:
+  telegram:
+    enable_send: true
+    general_router:
+      enabled: true
+      activation: all-text
+      execution_policy: auto-unique
+      model:
+        provider: openai-compatible
+        model: router-small
+        base_url: http://127.0.0.1:11434/v1
+        timeout_seconds: 5
+```
+
+Use `api_key_env` for remote-provider credentials; never put a key in YAML. The
+`pi-cli` provider reuses an existing Pi login while forcing an ephemeral,
+no-session, no-tools invocation with automatic extension discovery, MCP, skills,
+prompt templates, themes, and context files disabled. Trusted provider
+extensions required for authentication can be loaded explicitly with the
+`extensions` list. `node_path` can supply a stable Node.js installation to a
+macOS LaunchAgent. The Pi subprocess receives a minimal environment by default;
+only names listed in `pass_env` are copied in addition to HOME/locale/XDG state.
+A `command` provider is also available for
+local integrations and receives one JSON request on stdin, returning one JSON
+decision on stdout. It is invoked as an argv array without a shell. Model
+timeout, invalid JSON, ambiguity, invented candidate IDs, or non-verbatim prompt
+text all fail closed without retry.
+
 ## Optional Discord transport
 
 Set `transports.discord.enabled: true`, provide `DISCORD_TOKEN` in `.env`, and

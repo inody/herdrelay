@@ -49,6 +49,19 @@ Topic browsing is an observation, not a release requirement unless the installed
 Telegram/watchOS combination actually exposes it. Notification delivery and a
 single short reply are the minimum acceptance criteria.
 
+## Optional General-router acceptance
+
+When `general_router.enabled` is configured with an approved model:
+
+1. Dictate one natural-language routing request into General.
+2. Confirm the model receives only opaque candidate IDs and display metadata.
+3. Confirm exactly one high-confidence candidate and a verbatim instruction are
+   selected, or that ambiguity fails closed without a runtime mutation.
+4. Confirm HerdRelay revalidates the exact live target and records one
+   `route_text` audit followed by one `send_text` mutation audit.
+5. Confirm the selected Agent receives only the extracted instruction, not the
+   routing words.
+
 ## Cleanup
 
 - Close the temporary Telegram topic.
