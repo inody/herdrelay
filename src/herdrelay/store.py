@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .domain import TargetKey
+from .domain import BackendKind, TargetKey
 from .models import (
     AuditEntry,
     Binding,
@@ -608,6 +608,20 @@ class Store:
                 "SELECT * FROM telegram_topics WHERE route_target = ?",
                 (route_target,),
             ).fetchone()
+            if (
+                row is None
+                and isinstance(target, TargetKey)
+                and target.backend is BackendKind.ORCA
+            ):
+                # Orca runtime IDs change when the app runtime restarts, while
+                # the local host/pane address remains the durable topic identity.
+                row = conn.execute(
+                    """
+                    SELECT * FROM telegram_topics
+                    WHERE core_id = '' AND terminal_address = ?
+                    """,
+                    (target.address,),
+                ).fetchone()
         return _telegram_topic(row) if row else None
 
     def get_telegram_topic(
@@ -655,9 +669,8 @@ class Store:
                   route_target, core_id, terminal_address, chat_id, thread_id,
                   name, closed, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(route_target) DO UPDATE SET
-                  core_id = excluded.core_id,
-                  terminal_address = excluded.terminal_address,
+                ON CONFLICT(core_id, terminal_address) DO UPDATE SET
+                  route_target = excluded.route_target,
                   chat_id = excluded.chat_id,
                   thread_id = excluded.thread_id,
                   name = excluded.name,

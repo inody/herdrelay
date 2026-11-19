@@ -27,6 +27,7 @@ from herdrelay.telegram_service import (
     OFFSET_STATE_KEY,
     TelegramService,
 )
+from herdrelay.telegram_topics import TelegramTopicManager
 
 ROOT = Path(__file__).parents[1]
 FIXTURES = ROOT / "tests/fixtures/hc"
@@ -157,6 +158,38 @@ class FakeApi:
 
     async def close(self):
         self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_topic_manager_reuses_topic_after_orca_runtime_rotation(tmp_path):
+    app_config = replace(
+        config(),
+        telegram=replace(config().telegram, forum_chat_id=-1001),
+    )
+    store = Store(tmp_path / "store.sqlite3")
+    api = FakeApi(batches=[])
+    manager = TelegramTopicManager(config=app_config, store=store, api=api)
+    old = TargetKey.orca(instance_id="runtime-old", address="local/tab:pane")
+    new = TargetKey.orca(instance_id="runtime-new", address="local/tab:pane")
+    target = HerdrTarget(
+        target=new.address,
+        agent_name="claude",
+        status="working",
+        workspace_label="project",
+    )
+    store.upsert_telegram_topic_for_target(
+        target=old,
+        chat_id=-1001,
+        thread_id=77,
+        name="project/claude · local/tab:pane",
+    )
+
+    route = await manager.ensure(new, target)
+
+    assert api.created_topics == []
+    assert route.thread_id == "77"
+    assert route.route_target == new.to_route_value()
+    assert len(store.list_telegram_topics()) == 1
 
 
 @dataclass

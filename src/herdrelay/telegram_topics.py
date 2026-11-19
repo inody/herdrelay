@@ -52,6 +52,16 @@ class TelegramTopicManager:
             topic = self.store.get_telegram_topic_for_target(key)
             assert topic is not None
             return topic
+        if topic.route_target != key.to_route_value():
+            self.store.upsert_telegram_topic_for_target(
+                target=key,
+                chat_id=chat_id,
+                thread_id=topic.thread_id,
+                name=topic.name,
+                closed=topic.closed,
+            )
+            topic = self.store.get_telegram_topic_for_target(key)
+            assert topic is not None
         if topic.closed:
             await self.api.reopen_forum_topic(
                 chat_id=chat_id, message_thread_id=int(topic.thread_id)

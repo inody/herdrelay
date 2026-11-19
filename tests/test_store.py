@@ -320,6 +320,34 @@ def test_telegram_topic_route_upsert_and_close(tmp_path):
     assert updated.closed is False
 
 
+def test_orca_runtime_rotation_reuses_stable_pane_topic(tmp_path):
+    store = Store(tmp_path / "store.sqlite3")
+    old = TargetKey.orca(instance_id="runtime-old", address="local/tab:pane")
+    new = TargetKey.orca(instance_id="runtime-new", address="local/tab:pane")
+    store.upsert_telegram_topic_for_target(
+        target=old,
+        chat_id=-1001,
+        thread_id=77,
+        name="project/claude",
+    )
+
+    fallback = store.get_telegram_topic_for_target(new)
+    assert fallback is not None
+    assert fallback.route_target == old.to_route_value()
+
+    store.upsert_telegram_topic_for_target(
+        target=new,
+        chat_id=fallback.chat_id,
+        thread_id=fallback.thread_id,
+        name=fallback.name,
+    )
+    migrated = store.get_telegram_topic_for_target(new)
+
+    assert migrated is not None
+    assert migrated.route_target == new.to_route_value()
+    assert migrated.thread_id == "77"
+    assert len(store.list_telegram_topics()) == 1
+
 
 def test_state_roundtrip(tmp_path):
     store = Store(tmp_path / "bridge.sqlite3")
