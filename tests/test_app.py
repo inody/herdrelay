@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,7 +39,10 @@ def test_application_builds_enabled_transports_with_shared_dependencies(monkeypa
     client = object()
     bot = object()
     monkeypatch.setattr("herdrelay.app.Store", make_store)
-    monkeypatch.setattr("herdrelay.app.build_runtime_client", lambda supplied: client)
+    monkeypatch.setattr(
+        "herdrelay.app.build_backend_provider",
+        lambda supplied: SimpleNamespace(client=client),
+    )
     monkeypatch.setattr(
         "herdrelay.app.build_bot",
         lambda supplied, store, supplied_client: bot,
@@ -94,7 +98,8 @@ async def test_application_runs_discord_and_telegram_as_peers(monkeypatch):
     telegram = FakeTelegram()
     monkeypatch.setattr("herdrelay.app.Store", lambda path: object())
     monkeypatch.setattr(
-        "herdrelay.app.build_runtime_client", lambda supplied: object()
+        "herdrelay.app.build_backend_provider",
+        lambda supplied: SimpleNamespace(client=object()),
     )
     monkeypatch.setattr(
         "herdrelay.app.build_bot",
@@ -152,7 +157,8 @@ async def test_application_stops_discord_when_telegram_fails(monkeypatch):
     bot = FakeBot()
     monkeypatch.setattr("herdrelay.app.Store", lambda path: object())
     monkeypatch.setattr(
-        "herdrelay.app.build_runtime_client", lambda supplied: object()
+        "herdrelay.app.build_backend_provider",
+        lambda supplied: SimpleNamespace(client=object()),
     )
     monkeypatch.setattr(
         "herdrelay.app.build_bot",

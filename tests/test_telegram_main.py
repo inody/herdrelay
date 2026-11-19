@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from herdrelay.config import (
@@ -78,8 +80,8 @@ async def test_run_telegram_wires_store_runtime_and_service(monkeypatch):
     runtime_client = object()
     monkeypatch.setattr("herdrelay.telegram_main.Store", FakeStore)
     monkeypatch.setattr(
-        "herdrelay.telegram_main.build_runtime_client",
-        lambda supplied: runtime_client,
+        "herdrelay.telegram_main.build_backend_provider",
+        lambda supplied: SimpleNamespace(client=runtime_client),
     )
     monkeypatch.setattr(
         "herdrelay.telegram_main.TelegramService", FakeService

@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from .backends import BackendProvider, build_backend_provider
 from .config import AppConfig
 from .discord_bot import HerdrDiscordBot, build_bot
 from .runtime import RuntimeClient
-from .runtime_client import build_runtime_client
 from .store import Store
 from .telegram_service import TelegramService
 
@@ -22,7 +22,8 @@ class HerdRelayApplication:
 
         self.config = config
         self.store = Store(config.database_path)
-        self.client: RuntimeClient = build_runtime_client(config)
+        self.backend_provider: BackendProvider = build_backend_provider(config)
+        self.client: RuntimeClient = self.backend_provider.client
         self.discord: HerdrDiscordBot | None = (
             build_bot(config, self.store, self.client)
             if config.discord.enabled

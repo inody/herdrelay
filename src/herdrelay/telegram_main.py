@@ -4,8 +4,8 @@ import argparse
 import asyncio
 import logging
 
+from .backends import build_backend_provider
 from .config import AppConfig, load_config
-from .runtime_client import build_runtime_client
 from .store import Store
 from .telegram_service import TelegramService
 
@@ -19,8 +19,8 @@ def _load_telegram_config(path: str) -> AppConfig:
 
 async def run_telegram(config: AppConfig) -> None:
     store = Store(config.database_path)
-    client = build_runtime_client(config)
-    service = TelegramService(config=config, store=store, client=client)
+    provider = build_backend_provider(config)
+    service = TelegramService(config=config, store=store, client=provider.client)
     await service.run_forever()
 
 
