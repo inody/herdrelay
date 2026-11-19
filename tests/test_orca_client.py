@@ -21,6 +21,8 @@ def agent(
     kind="terminal",
     state="done",
     message="completed response",
+    workspace="main",
+    repo="project",
 ):
     raw = {
         "orcaSessionId": "session-1",
@@ -28,8 +30,8 @@ def agent(
         "agent": "pi",
         "state": state,
         "worktreeId": worktree_id,
-        "workspace": "main",
-        "repo": "project",
+        "workspace": workspace,
+        "repo": repo,
         "hostId": host_id,
         "paneKey": pane_key,
         "title": "Pi - project",
@@ -44,8 +46,8 @@ def agent(
         host_id=host_id,
         worktree_id=worktree_id,
         pane_key=pane_key,
-        workspace="main",
-        repo="project",
+        workspace=workspace,
+        repo=repo,
         title="Pi - project",
         last_assistant_message=message,
         updated_at=123,
@@ -91,6 +93,25 @@ def test_orca_client_lists_all_eligible_targets_and_pins_runtime_identity():
     assert key.instance_id == "runtime-1"
     assert key.address == "local/tab:pane"
     assert client.resolve_target_key(key) == target
+
+
+def test_orca_client_uses_project_labels_and_worktree_paths():
+    client = make_client()
+    item = agent(
+        repo="herdr-chat-bridge",
+        workspace="main",
+        worktree_id="repo-id::/Users/example/herdr-chat-bridge",
+    )
+    client.cli = type(
+        "FakeCli",
+        (),
+        {"agent_list": lambda self: ("runtime-1", [item])},
+    )()
+
+    [target] = client.list_targets()
+
+    assert target.workspace_label == "herdr-chat-bridge"
+    assert target.cwd == "/Users/example/herdr-chat-bridge"
 
 
 def test_orca_client_filters_hosts_and_unsupported_kinds():

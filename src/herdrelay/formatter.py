@@ -15,6 +15,16 @@ def target_alias(target: HerdrTarget) -> str:
     return label
 
 
+def target_address_label(address: str) -> str:
+    """Shorten host-qualified pane identities for human-facing topic names."""
+    host, separator, endpoint = address.partition("/")
+    if separator and ":" in endpoint:
+        tab, pane = endpoint.split(":", 1)
+        if len(tab) > 8 or len(pane) > 8:
+            return f"{host}/{tab[:8]}:{pane[:8]}"
+    return address
+
+
 def _cwd_basename(cwd: str | None) -> str | None:
     if not cwd:
         return None

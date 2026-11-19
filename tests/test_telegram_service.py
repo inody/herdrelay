@@ -493,7 +493,9 @@ async def test_orca_topics_follow_exposed_agent_lifecycle(tmp_path):
         client.target_key(target.target)
     )
     assert route is not None
-    assert api.created_topics
+    assert api.created_topics == [
+        {"chat_id": -1001, "name": "project/pi · local/tab:pane"}
+    ]
 
     client.panes = []
     await relay.status_relay.legacy_once()

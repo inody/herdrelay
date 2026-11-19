@@ -4,9 +4,18 @@ from herdrelay.formatter import (
     format_tail,
     split_tail_chunks,
     split_text_chunks,
+    target_address_label,
     target_alias,
 )
 from herdrelay.models import HerdrTarget
+
+
+def test_target_address_label_shortens_host_qualified_pane_ids():
+    assert target_address_label(
+        "local/19682ffd-a330:2d0a593c-80db"
+    ) == "local/19682ffd:2d0a593c"
+    assert target_address_label("t12") == "t12"
+    assert target_address_label("w1:p1") == "w1:p1"
 
 
 def test_tail_escapes_code_fences():

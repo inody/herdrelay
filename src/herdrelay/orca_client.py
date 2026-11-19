@@ -264,6 +264,8 @@ class OrcaClient:
             return None
 
         address = f"{agent.host_id}/{endpoint}"
+        worktree_path = _worktree_path(agent.worktree_id)
+        project_label = _project_label(agent, worktree_path)
         raw: dict[str, Any] = {
             "orca_runtime_id": self._runtime_id,
             "orca_agent": agent.raw,
@@ -271,10 +273,29 @@ class OrcaClient:
         return HerdrTarget(
             target=address,
             kind=f"orca-{agent.kind}",
-            label=agent.workspace or agent.repo or agent.title or address,
+            label=project_label or agent.title or address,
             agent_name=agent.agent,
             status=agent.state,
-            workspace_label=agent.workspace or agent.repo,
+            workspace_label=project_label,
             tab_label=agent.title,
+            cwd=worktree_path,
             raw=raw,
         )
+
+
+def _worktree_path(worktree_id: str | None) -> str | None:
+    if not worktree_id or "::" not in worktree_id:
+        return None
+    path = worktree_id.split("::", 1)[1].strip()
+    return path or None
+
+
+def _project_label(agent: OrcaAgent, worktree_path: str | None) -> str | None:
+    for value in (agent.repo, agent.workspace):
+        if value and value not in {"~", "-", "main"}:
+            return value
+    if worktree_path:
+        name = worktree_path.rstrip("/").rsplit("/", 1)[-1]
+        if name:
+            return name
+    return agent.repo or agent.workspace
