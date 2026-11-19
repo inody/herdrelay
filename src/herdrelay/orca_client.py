@@ -44,15 +44,27 @@ class OrcaClient:
         self._targets: dict[str, HerdrTarget] = {}
 
     def list_targets(self) -> list[HerdrTarget]:
-        runtime_id, agents = self.cli.agent_list()
-        self._runtime_id = runtime_id
-        targets = [
-            target
-            for agent in agents
-            if (target := self._target_from_agent(agent)) is not None
-        ]
-        self._targets = {target.target: target for target in targets}
-        return targets
+        agent_runtime_id, agents = self.cli.agent_list()
+        terminal_runtime_id, terminals = self.cli.terminal_list()
+        if terminal_runtime_id != agent_runtime_id:
+            raise OrcaCliError(
+                "Orca agent and terminal snapshots came from different runtimes"
+            )
+        self._runtime_id = agent_runtime_id
+        targets = {
+            target.target: target
+            for terminal in terminals
+            if (target := self._target_from_terminal(terminal)) is not None
+        }
+        for agent in agents:
+            target = self._target_from_agent(agent)
+            if target is None:
+                continue
+            if agent.kind == "terminal" and target.target not in targets:
+                continue
+            targets[target.target] = target
+        self._targets = targets
+        return list(targets.values())
 
     def list_panes(self) -> list[HerdrTarget]:
         return self.list_targets()
@@ -238,6 +250,66 @@ class OrcaClient:
             )
         return matches[0]
 
+    def _target_from_terminal(
+        self, terminal: OrcaTerminal
+    ) -> HerdrTarget | None:
+        if (
+            terminal.host_id not in self.orca.host_ids
+            or not self.orca.include_terminal_agents
+            or not terminal.connected
+            or not terminal.writable
+            or not terminal.agent_identity
+            or not self._target_exposed(
+                terminal.pane_key, terminal.worktree_id
+            )
+        ):
+            return None
+        worktree_path = terminal.raw.get("worktreePath")
+        if not isinstance(worktree_path, str) or not worktree_path:
+            worktree_path = _worktree_path(terminal.worktree_id)
+        title = terminal.raw.get("title")
+        title = title if isinstance(title, str) and title else None
+        project_label = _path_label(worktree_path)
+        address = f"{terminal.host_id}/{terminal.pane_key}"
+        raw_agent = {
+            "kind": "terminal",
+            "agent": terminal.agent_identity,
+            "state": "starting",
+            "hostId": terminal.host_id,
+            "worktreeId": terminal.worktree_id,
+            "paneKey": terminal.pane_key,
+            "title": title,
+            "lastAssistantMessage": None,
+            "updatedAt": None,
+        }
+        return HerdrTarget(
+            target=address,
+            kind="orca-terminal",
+            label=project_label or title or address,
+            agent_name=terminal.agent_identity,
+            status="starting",
+            workspace_label=project_label,
+            tab_label=title,
+            cwd=worktree_path,
+            raw={
+                "orca_runtime_id": self._runtime_id,
+                "orca_agent": raw_agent,
+                "orca_terminal": terminal.raw,
+            },
+        )
+
+    def _target_exposed(
+        self, endpoint: str, worktree_id: str | None
+    ) -> bool:
+        exposure = self.orca.target_exposure
+        if exposure.mode == "all-eligible":
+            return True
+        if exposure.mode == "none":
+            return False
+        return endpoint in exposure.pane_keys or bool(
+            worktree_id and worktree_id in exposure.worktree_ids
+        )
+
     def _target_from_agent(self, agent: OrcaAgent) -> HerdrTarget | None:
         if agent.host_id not in self.orca.host_ids:
             return None
@@ -251,16 +323,7 @@ class OrcaClient:
             endpoint = f"session:{agent.session_id}"
         else:
             return None
-        exposure = self.orca.target_exposure
-        if exposure.mode == "none":
-            return None
-        if exposure.mode == "selected" and (
-            endpoint not in exposure.pane_keys
-            and (
-                not agent.worktree_id
-                or agent.worktree_id not in exposure.worktree_ids
-            )
-        ):
+        if not self._target_exposed(endpoint, agent.worktree_id):
             return None
 
         address = f"{agent.host_id}/{endpoint}"
@@ -290,12 +353,15 @@ def _worktree_path(worktree_id: str | None) -> str | None:
     return path or None
 
 
+def _path_label(path: str | None) -> str | None:
+    if not path:
+        return None
+    name = path.rstrip("/").rsplit("/", 1)[-1]
+    return name or None
+
+
 def _project_label(agent: OrcaAgent, worktree_path: str | None) -> str | None:
     for value in (agent.repo, agent.workspace):
         if value and value not in {"~", "-", "main"}:
             return value
-    if worktree_path:
-        name = worktree_path.rstrip("/").rsplit("/", 1)[-1]
-        if name:
-            return name
-    return agent.repo or agent.workspace
+    return _path_label(worktree_path) or agent.repo or agent.workspace

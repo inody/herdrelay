@@ -77,11 +77,7 @@ def make_client(
 
 def test_orca_client_lists_all_eligible_targets_and_pins_runtime_identity():
     client = make_client()
-    client.cli = type(
-        "FakeCli",
-        (),
-        {"agent_list": lambda self: ("runtime-1", [agent()])},
-    )()
+    client.cli = discovery_cli([agent()])
 
     [target] = client.list_targets()
     key = client.target_key(target.target)
@@ -102,11 +98,7 @@ def test_orca_client_uses_project_labels_and_worktree_paths():
         workspace="main",
         worktree_id="repo-id::/Users/example/herdr-chat-bridge",
     )
-    client.cli = type(
-        "FakeCli",
-        (),
-        {"agent_list": lambda self: ("runtime-1", [item])},
-    )()
+    client.cli = discovery_cli([item])
 
     [target] = client.list_targets()
 
@@ -116,20 +108,13 @@ def test_orca_client_uses_project_labels_and_worktree_paths():
 
 def test_orca_client_filters_hosts_and_unsupported_kinds():
     client = make_client()
-    client.cli = type(
-        "FakeCli",
-        (),
-        {
-            "agent_list": lambda self: (
-                "runtime-1",
-                [
-                    agent(),
-                    agent(host_id="remote"),
-                    agent(kind="chat", pane_key=None),
-                ],
-            )
-        },
-    )()
+    client.cli = discovery_cli(
+        [
+            agent(),
+            agent(host_id="remote"),
+            agent(kind="chat", pane_key=None),
+        ]
+    )
 
     assert [target.target for target in client.list_targets()] == [
         "local/tab:pane"
@@ -140,11 +125,7 @@ def test_orca_client_selected_and_none_exposure_modes():
     selected = make_client(
         mode="selected", worktree_ids=("repo::/worktree",)
     )
-    selected.cli = type(
-        "SelectedCli",
-        (),
-        {"agent_list": lambda self: ("runtime-1", [agent()])},
-    )()
+    selected.cli = discovery_cli([agent()])
     none = make_client(mode="none")
     none.cli = selected.cli
 
@@ -157,11 +138,7 @@ def test_orca_client_selected_and_none_exposure_modes():
 def test_orca_client_reads_bounded_last_assistant_message():
     client = make_client(mode="selected", pane_keys=("tab:pane",))
     item = agent(message="one\ntwo\nthree")
-    client.cli = type(
-        "FakeCli",
-        (),
-        {"agent_list": lambda self: ("runtime-1", [item])},
-    )()
+    client.cli = discovery_cli([item])
     [target] = client.list_targets()
 
     assert client.read(target.target, lines=2) == "two\nthree"
@@ -191,6 +168,32 @@ def terminal(*, connected=True, writable=True):
         agent_identity="pi",
         raw=raw,
     )
+
+
+def discovery_cli(
+    agents, *, terminals=None, runtime_id="runtime-1"
+):
+    terminal_items = [terminal()] if terminals is None else terminals
+
+    class DiscoveryCli:
+        def agent_list(self):
+            return runtime_id, agents
+
+        def terminal_list(self):
+            return runtime_id, terminal_items
+
+    return DiscoveryCli()
+
+
+def test_orca_client_discovers_starting_agent_from_terminal_topology():
+    client = make_client()
+    client.cli = discovery_cli([], terminals=[terminal()])
+
+    [target] = client.list_targets()
+
+    assert target.target == "local/tab:pane"
+    assert target.agent_name == "pi"
+    assert target.status == "starting"
 
 
 def test_orca_client_sends_to_exact_writable_terminal():
@@ -226,18 +229,10 @@ def test_orca_client_sends_to_exact_writable_terminal():
 
 def test_orca_client_rejects_changed_runtime_and_ambiguous_terminal():
     client = make_client()
-    client.cli = type(
-        "FakeCli",
-        (),
-        {"agent_list": lambda self: ("runtime-1", [agent()])},
-    )()
+    client.cli = discovery_cli([agent()])
     [target] = client.list_targets()
     key = client.target_key(target.target)
-    client.cli = type(
-        "ChangedCli",
-        (),
-        {"agent_list": lambda self: ("runtime-2", [agent()])},
-    )()
+    client.cli = discovery_cli([agent()], runtime_id="runtime-2")
 
     with pytest.raises(OrcaCliError, match="different Orca runtime"):
         client.resolve_target_key(key)
@@ -256,11 +251,7 @@ def test_orca_client_rejects_changed_runtime_and_ambiguous_terminal():
 
 def test_orca_client_rejects_send_while_agent_is_blocked():
     client = make_client()
-    client.cli = type(
-        "BlockedCli",
-        (),
-        {"agent_list": lambda self: ("runtime-1", [agent(state="blocked")])},
-    )()
+    client.cli = discovery_cli([agent(state="blocked")])
 
     with pytest.raises(OrcaCliError, match="blocked") as caught:
         client.send("local/tab:pane", "continue")

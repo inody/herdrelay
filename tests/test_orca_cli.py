@@ -219,5 +219,37 @@ def test_orca_cli_rejects_malformed_agent_payload(monkeypatch):
         ),
     )
 
-    with pytest.raises(OrcaCliError, match="session ID"):
+    with pytest.raises(OrcaCliError, match="agent state"):
         OrcaCli(OrcaRuntimeConfig()).agent_list()
+
+
+def test_orca_cli_accepts_starting_terminal_agent_without_session_id(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "herdrelay.orca_cli.subprocess.run",
+        lambda command, **kwargs: completed(
+            {
+                "ok": True,
+                "result": {
+                    "agents": [
+                        {
+                            "kind": "terminal",
+                            "agent": "pi",
+                            "state": "starting",
+                            "hostId": "local",
+                            "worktreeId": "repo::/worktree",
+                            "paneKey": "tab:pane",
+                        }
+                    ]
+                },
+                "_meta": {"runtimeId": "runtime-1"},
+            }
+        ),
+    )
+
+    runtime_id, agents = OrcaCli(OrcaRuntimeConfig()).agent_list()
+
+    assert runtime_id == "runtime-1"
+    assert agents[0].session_id is None
+    assert agents[0].pane_key == "tab:pane"

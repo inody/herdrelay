@@ -47,9 +47,12 @@ not follow the machine selected in another Herdr client.
 ## Orca backend exposure
 
 The experimental Orca backend uses only the documented `orca` CLI. New
-configurations use `target_exposure.mode: all-eligible`: every recognized
-terminal agent on configured `host_ids` is available, and Telegram topics
-follow agent open/close lifecycle automatically. `selected` mode can optionally
+configurations use `target_exposure.mode: all-eligible`: every connected,
+writable terminal with a recognized agent identity on configured `host_ids` is
+available, and Telegram topics follow agent open/close lifecycle automatically.
+Discovery joins terminal topology with agent session metadata, so a newly
+started agent receives a `starting` topic before its first Orca session ID is
+reported. `selected` mode can optionally
 restrict exposure by exact pane keys and/or worktree IDs; `none` disables target
 exposure without disabling the transport.
 

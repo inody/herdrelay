@@ -49,7 +49,7 @@ class OrcaTerminal:
 
 @dataclass(frozen=True, slots=True)
 class OrcaAgent:
-    session_id: str
+    session_id: str | None
     kind: str
     agent: str | None
     state: str
@@ -150,14 +150,18 @@ class OrcaCli:
 
     def _parse_agent(self, value: Any) -> OrcaAgent:
         item = _object(value, "Orca agent")
+        kind = _string(item, "kind", "Orca agent kind").casefold()
+        session_id = _optional_string(item, "orcaSessionId")
+        if kind == "chat" and not session_id:
+            raise OrcaCliError("Orca chat session ID must be a non-empty string")
         updated_at = item.get("updatedAt")
         if updated_at is not None and (
             not isinstance(updated_at, int) or isinstance(updated_at, bool)
         ):
             raise OrcaCliError("Orca agent updatedAt must be an integer or null")
         return OrcaAgent(
-            session_id=_string(item, "orcaSessionId", "Orca session ID"),
-            kind=_string(item, "kind", "Orca agent kind").casefold(),
+            session_id=session_id,
+            kind=kind,
             agent=_optional_string(item, "agent"),
             state=_string(item, "state", "Orca agent state").casefold(),
             host_id=_string(item, "hostId", "Orca host ID"),

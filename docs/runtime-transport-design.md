@@ -346,9 +346,15 @@ workspace, branch, title, and cwd are labels only.
 #### Discovery and output
 
 The first implementation may use bounded CLI polling if the public CLI does not
-provide a production event subscription. It records `updatedAt`, session ID,
-state transitions, and response identity so persistent `done` rows do not
-produce duplicate output.
+provide a production event subscription. Discovery joins `terminal list`
+topology with `agent list` session metadata. A connected, writable terminal
+with a recognized `agentIdentity` is eligible immediately, even before Orca
+assigns an `orcaSessionId`; it appears as `starting` and can receive a topic.
+Completed-response polling begins only after session metadata exists. One
+incomplete launching row must not invalidate the whole target snapshot.
+
+The backend records `updatedAt`, session ID, state transitions, and response
+identity so persistent `done` rows do not produce duplicate output.
 
 A later event-driven implementation may use an Orca plugin contribution for
 `agent.status.changed`. The plugin should only expose typed runtime facts and
