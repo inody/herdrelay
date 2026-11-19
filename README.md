@@ -415,8 +415,8 @@ socket. It never types into an existing terminal.
 - Telegram interrupt is Core-only.
 - Orca prompt submission has automated coverage, direct public-CLI acceptance,
   and live Telegram send/output acceptance; live Discord acceptance remains
-  pending. Orca-managed Claude question identity has automated coverage but no
-  live acceptance yet. Question text and options are display-only because no
+  pending. Orca-managed Claude question identity and Telegram question display
+  have live acceptance. Question text and options are display-only because no
   safe public structured-answer operation has been accepted. Orca interrupt is
   disabled because `terminal send --interrupt` accepted input without stopping
   the tested Pi turn. Discord stop/approval/raw input, watcher events, and

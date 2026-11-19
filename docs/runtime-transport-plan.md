@@ -297,8 +297,10 @@ send and interrupt.
 ## 10. Phase 8 — Orca send and interrupt
 
 **Status:** Normal text is implemented with automated coverage, direct
-public-CLI acceptance, and live Telegram send/output acceptance; live Discord
-acceptance remains pending. Orca interrupt failed live semantic acceptance and
+public-CLI acceptance, live Telegram send/output acceptance, and live
+Orca-Claude structured-question display acceptance in Telegram; live Discord
+acceptance remains pending. Question answering remains disabled until a safe
+public operation is accepted. Orca interrupt failed live semantic acceptance and
 remains disabled: the CLI accepted interrupt-style input but the tested Pi turn
 stayed working.
 
@@ -326,6 +328,15 @@ Enable the minimum bidirectional Orca workflow.
 - Telegram and Discord feedback failure does not replay input.
 - Interrupt targets the exact working agent and requires configured
   confirmation policy.
+
+### Live Claude question acceptance
+
+An Orca-managed Claude terminal invoked one single-choice `AskUserQuestion`.
+The hook resolved its inherited `ORCA_PANE_KEY` through public `orca agent list
+--json`, emitted a version 3 question event, and Telegram created the Claude
+topic and displayed the question, both options, and their descriptions. The
+inbox event was consumed and delivery dedupe recorded one question delivery.
+No answer controls were exposed.
 
 ### Exit criteria
 
