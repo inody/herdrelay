@@ -4,27 +4,14 @@ import argparse
 import asyncio
 import logging
 
+from .app import HerdRelayApplication
 from .config import AppConfig, load_config
-from .discord_bot import build_bot
-from .runtime_client import build_runtime_client
-from .store import Store
-from .telegram_main import run_telegram
 
 
 def run_configured(config: AppConfig) -> None:
-    if config.discord.enabled:
-        store = Store(config.database_path)
-        client = build_runtime_client(config)
-        bot = build_bot(config, store, client)
-        bot.run(config.discord_token)
-        return
-    if config.telegram.enabled:
-        try:
-            asyncio.run(run_telegram(config))
-        except KeyboardInterrupt:
-            pass
-        return
-    raise ValueError("at least one chat transport must be enabled")
+    if not config.discord.enabled and not config.telegram.enabled:
+        raise ValueError("at least one chat transport must be enabled")
+    asyncio.run(HerdRelayApplication(config).run())
 
 
 def main() -> None:
@@ -39,7 +26,10 @@ def main() -> None:
     )
 
     config = load_config(args.config)
-    run_configured(config)
+    try:
+        run_configured(config)
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

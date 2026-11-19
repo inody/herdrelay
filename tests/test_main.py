@@ -10,28 +10,22 @@ from herdrelay.config import (
 from herdrelay.main import run_configured
 
 
-def test_run_configured_prefers_enabled_discord(monkeypatch):
+def test_run_configured_runs_application(monkeypatch):
     config = AppConfig(discord_token="discord-token")
     seen = {}
 
-    class FakeBot:
-        def run(self, token):
-            seen["token"] = token
+    class FakeApplication:
+        def __init__(self, supplied):
+            seen["config"] = supplied
 
-    store = object()
-    client = object()
-    monkeypatch.setattr("herdrelay.main.Store", lambda path: store)
-    monkeypatch.setattr(
-        "herdrelay.main.build_runtime_client", lambda supplied: client
-    )
-    monkeypatch.setattr(
-        "herdrelay.main.build_bot",
-        lambda supplied, supplied_store, supplied_client: FakeBot(),
-    )
+        async def run(self):
+            seen["ran"] = True
+
+    monkeypatch.setattr("herdrelay.main.HerdRelayApplication", FakeApplication)
 
     run_configured(config)
 
-    assert seen["token"] == "discord-token"
+    assert seen == {"config": config, "ran": True}
 
 
 def test_run_configured_can_run_telegram_without_discord(monkeypatch):
@@ -42,14 +36,18 @@ def test_run_configured_can_run_telegram_without_discord(monkeypatch):
     )
     seen = {}
 
-    async def fake_run_telegram(supplied):
-        seen["config"] = supplied
+    class FakeApplication:
+        def __init__(self, supplied):
+            seen["config"] = supplied
 
-    monkeypatch.setattr("herdrelay.main.run_telegram", fake_run_telegram)
+        async def run(self):
+            seen["ran"] = True
+
+    monkeypatch.setattr("herdrelay.main.HerdRelayApplication", FakeApplication)
 
     run_configured(config)
 
-    assert seen["config"] is config
+    assert seen == {"config": config, "ran": True}
 
 
 def test_run_configured_rejects_no_enabled_transport():
