@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -206,6 +207,100 @@ async def test_topic_manager_reuses_topic_after_orca_runtime_rotation(tmp_path):
     assert route.thread_id == "77"
     assert route.route_target == new.to_route_value()
     assert len(store.list_telegram_topics()) == 1
+
+
+@pytest.mark.asyncio
+async def test_topic_creation_conflict_deletes_new_topic_and_reuses_existing(
+    tmp_path, monkeypatch
+):
+    app_config = replace(
+        config(),
+        telegram=replace(config().telegram, forum_chat_id=-1001),
+    )
+    store = Store(tmp_path / "store.sqlite3")
+    api = FakeApi(batches=[])
+    manager = TelegramTopicManager(config=app_config, store=store, api=api)
+    old = TargetKey.orca(instance_id="runtime-old", address="local/tab:pane")
+    new = TargetKey.orca(instance_id="runtime-new", address="local/tab:pane")
+    target = HerdrTarget(
+        target=new.address,
+        agent_name="claude",
+        status="working",
+        workspace_label="project",
+    )
+    store.upsert_telegram_topic_for_target(
+        target=old,
+        chat_id=-1001,
+        thread_id=77,
+        name="project/claude · local/tab:pane",
+    )
+    original_get = store.get_telegram_topic_for_target
+    calls = 0
+
+    def delayed_existing(key):
+        nonlocal calls
+        calls += 1
+        return None if calls <= 2 else original_get(key)
+
+    monkeypatch.setattr(store, "get_telegram_topic_for_target", delayed_existing)
+    original_upsert = store.upsert_telegram_topic_for_target
+    upsert_calls = 0
+
+    def fail_once(**kwargs):
+        nonlocal upsert_calls
+        upsert_calls += 1
+        if upsert_calls == 1:
+            raise sqlite3.IntegrityError("stable route conflict")
+        return original_upsert(**kwargs)
+
+    monkeypatch.setattr(store, "upsert_telegram_topic_for_target", fail_once)
+
+    route = await manager.ensure(new, target)
+
+    assert route.thread_id == "77"
+    assert api.created_topics == [
+        {"chat_id": -1001, "name": "project/claude · local/tab:pane"}
+    ]
+    assert api.deleted_topics == [
+        {"chat_id": -1001, "message_thread_id": 101}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_topic_persistence_failure_deletes_new_topic_and_enters_cooldown(
+    tmp_path, monkeypatch
+):
+    app_config = replace(
+        config(),
+        telegram=replace(config().telegram, forum_chat_id=-1001),
+    )
+    store = Store(tmp_path / "store.sqlite3")
+    api = FakeApi(batches=[])
+    manager = TelegramTopicManager(config=app_config, store=store, api=api)
+    key = TargetKey.orca(instance_id="runtime", address="local/tab:pane")
+    target = HerdrTarget(
+        target=key.address,
+        agent_name="claude",
+        status="working",
+        workspace_label="project",
+    )
+    monkeypatch.setattr(
+        store,
+        "upsert_telegram_topic_for_target",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            sqlite3.OperationalError("database unavailable")
+        ),
+    )
+
+    with pytest.raises(sqlite3.OperationalError, match="database unavailable"):
+        await manager.ensure(key, target)
+    with pytest.raises(RuntimeError, match="cooling down"):
+        await manager.ensure(key, target)
+
+    assert len(api.created_topics) == 1
+    assert api.deleted_topics == [
+        {"chat_id": -1001, "message_thread_id": 101}
+    ]
 
 
 @dataclass

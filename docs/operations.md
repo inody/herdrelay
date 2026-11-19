@@ -101,7 +101,10 @@ and its SQLite route is removed. `null` retains closed topics indefinitely. The
 legacy `closed_topic_retention_days` setting remains accepted for existing
 installations, but the two settings cannot be combined. The Bot needs **Manage
 Topics**. Deletion API failures are isolated per topic and retried later instead of
-stopping status reconciliation. Do not
+stopping status reconciliation. Topic creation is serialized per stable target;
+API or persistence failures enter a five-minute cooldown. If Telegram creates a
+topic but SQLite persistence fails, HerdRelay deletes the new topic immediately
+and reuses an existing stable route when one appeared concurrently. Do not
 delete a still-tracked topic manually: a missing Telegram topic with a retained
 SQLite route cannot be reopened.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime, timedelta
@@ -12,6 +13,7 @@ from .store import Store
 from .telegram_api import TelegramApiError, TelegramBotApi
 
 TOPIC_NAME_LIMIT = 128
+TOPIC_CREATION_COOLDOWN_SECONDS = 300
 LOG = logging.getLogger(__name__)
 
 
@@ -30,6 +32,8 @@ class TelegramTopicManager:
         self.store = store
         self.api = api
         self._cleanup_retry_after: dict[int, float] = {}
+        self._creation_retry_after: dict[str, float] = {}
+        self._creation_locks: dict[str, asyncio.Lock] = {}
 
     async def ensure(
         self, key: TargetKey, target: HerdrTarget
@@ -43,21 +47,11 @@ class TelegramTopicManager:
         )[:TOPIC_NAME_LIMIT]
         topic = self.store.get_telegram_topic_for_target(key)
         if topic is None or int(topic.chat_id) != chat_id:
-            result = await self.api.create_forum_topic(chat_id=chat_id, name=name)
-            thread_id = result.get("message_thread_id")
-            if not isinstance(thread_id, int) or isinstance(thread_id, bool):
-                raise TelegramApiError(
-                    "Telegram createForumTopic did not return message_thread_id"
-                )
-            self.store.upsert_telegram_topic_for_target(
-                target=key,
+            topic = await self._create_topic_safely(
+                key=key,
                 chat_id=chat_id,
-                thread_id=thread_id,
                 name=name,
             )
-            topic = self.store.get_telegram_topic_for_target(key)
-            assert topic is not None
-            return topic
         if topic.route_target != key.to_route_value():
             self.store.upsert_telegram_topic_for_target(
                 target=key,
@@ -98,6 +92,101 @@ class TelegramTopicManager:
         refreshed = self.store.get_telegram_topic_for_target(key)
         assert refreshed is not None
         return refreshed
+
+    async def _create_topic_safely(
+        self,
+        *,
+        key: TargetKey,
+        chat_id: int,
+        name: str,
+    ) -> TelegramTopicRoute:
+        identity = f"{key.backend.value}:{key.address}"
+        lock = self._creation_locks.setdefault(identity, asyncio.Lock())
+        async with lock:
+            existing = self.store.get_telegram_topic_for_target(key)
+            if existing is not None and int(existing.chat_id) == chat_id:
+                self._creation_retry_after.pop(identity, None)
+                return existing
+            retry_after = self._creation_retry_after.get(identity, 0)
+            if retry_after > time.monotonic():
+                raise RuntimeError(
+                    f"Telegram topic creation is cooling down for {key.address}"
+                )
+            try:
+                result = await self.api.create_forum_topic(
+                    chat_id=chat_id,
+                    name=name,
+                )
+            except Exception:
+                self._creation_retry_after[identity] = (
+                    time.monotonic() + TOPIC_CREATION_COOLDOWN_SECONDS
+                )
+                raise
+            thread_id = result.get("message_thread_id")
+            if not isinstance(thread_id, int) or isinstance(thread_id, bool):
+                self._creation_retry_after[identity] = (
+                    time.monotonic() + TOPIC_CREATION_COOLDOWN_SECONDS
+                )
+                raise TelegramApiError(
+                    "Telegram createForumTopic did not return message_thread_id"
+                )
+            try:
+                self.store.upsert_telegram_topic_for_target(
+                    target=key,
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                    name=name,
+                )
+            except Exception as persistence_error:
+                self._creation_retry_after[identity] = (
+                    time.monotonic() + TOPIC_CREATION_COOLDOWN_SECONDS
+                )
+                delete_error: Exception | None = None
+                try:
+                    await self.api.delete_forum_topic(
+                        chat_id=chat_id,
+                        message_thread_id=thread_id,
+                    )
+                except Exception as exc:
+                    delete_error = exc
+                    LOG.exception(
+                        "Could not delete Telegram topic %s after persistence failure",
+                        thread_id,
+                    )
+                existing = self.store.get_telegram_topic_for_target(key)
+                if existing is not None and int(existing.chat_id) == chat_id:
+                    LOG.warning(
+                        "Discarded newly created Telegram topic %s after route conflict; "
+                        "reusing topic %s",
+                        thread_id,
+                        existing.thread_id,
+                    )
+                    return existing
+                if delete_error is None:
+                    LOG.warning(
+                        "Deleted newly created Telegram topic %s after route "
+                        "persistence failed",
+                        thread_id,
+                    )
+                raise persistence_error
+            topic = self.store.get_telegram_topic_for_target(key)
+            if topic is None:
+                self._creation_retry_after[identity] = (
+                    time.monotonic() + TOPIC_CREATION_COOLDOWN_SECONDS
+                )
+                try:
+                    await self.api.delete_forum_topic(
+                        chat_id=chat_id,
+                        message_thread_id=thread_id,
+                    )
+                except Exception:
+                    LOG.exception(
+                        "Could not delete Telegram topic %s after missing persisted route",
+                        thread_id,
+                    )
+                raise RuntimeError("Telegram topic route was not persisted")
+            self._creation_retry_after.pop(identity, None)
+            return topic
 
     async def close(self, key: TargetKey) -> None:
         topic = self.store.get_telegram_topic_for_target(key)
