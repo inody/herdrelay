@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from time import monotonic
 
 from .config import AppConfig
 from .domain import TargetKey
@@ -40,6 +41,7 @@ class TelegramStatusRelay:
         self.topics = topics
         self._legacy_statuses: dict[str, str | None] = {}
         self._legacy_live_targets: dict[str, TargetKey] = {}
+        self._legacy_missing_since: dict[str, float] = {}
 
     async def run_forever(self) -> None:
         while not self.stopped.is_set():
@@ -139,11 +141,23 @@ class TelegramStatusRelay:
                         f"\n{current}"
                     ),
                 )
-        for address in self._legacy_live_targets.keys() - live_targets.keys():
-            stale_key = self._legacy_live_targets[address]
+        now = monotonic()
+        for address, key in live_targets.items():
+            self._legacy_live_targets[address] = key
+            self._legacy_missing_since.pop(address, None)
+        for address in tuple(
+            self._legacy_live_targets.keys() - live_targets.keys()
+        ):
+            missing_since = self._legacy_missing_since.setdefault(address, now)
+            if (
+                now - missing_since
+                < self.telegram.target_absence_grace_seconds
+            ):
+                continue
+            stale_key = self._legacy_live_targets.pop(address)
+            self._legacy_missing_since.pop(address, None)
             await self.topics.close(stale_key)
             self._legacy_statuses.pop(stale_key.to_route_value(), None)
-        self._legacy_live_targets = live_targets
         for route_target in tuple(self._legacy_statuses):
             if route_target not in detected:
                 self._legacy_statuses.pop(route_target, None)

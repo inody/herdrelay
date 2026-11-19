@@ -75,6 +75,11 @@ class TelegramTopicManager:
                 if not _topic_not_modified(exc):
                     raise
             self.store.set_telegram_topic_closed_for_target(key, closed=False)
+            LOG.info(
+                "Reopened Telegram topic %s for target %s",
+                topic.thread_id,
+                key.address,
+            )
         if topic.name != name:
             await self.api.edit_forum_topic(
                 chat_id=chat_id,
@@ -105,6 +110,11 @@ class TelegramTopicManager:
             if not _topic_not_modified(exc):
                 raise
         self.store.set_telegram_topic_closed_for_target(key, closed=True)
+        LOG.info(
+            "Closed Telegram topic %s for target %s",
+            topic.thread_id,
+            key.address,
+        )
 
     async def cleanup_expired_closed(
         self, *, now: datetime | None = None

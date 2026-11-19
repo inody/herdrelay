@@ -132,6 +132,7 @@ transports:
     statuses: [blocked, done]
     enable_send: false
     enable_interrupt: false
+    target_absence_grace_seconds: 60
     closed_topic_retention_days: 1
 ```
 
@@ -201,10 +202,11 @@ In Telegram:
   button.
 
 A target returning at the same stable address reopens its existing topic, and an
-Orca runtime-ID rotation does not create a new topic. A genuinely new pane gets
-a separate topic even when it has the same workspace and agent name. Closed
-topics are deleted after `closed_topic_retention_days`; set it to `null` to keep
-them indefinitely.
+Orca runtime-ID rotation does not create a new topic. Transient discovery gaps
+shorter than `target_absence_grace_seconds` do not close a topic. A genuinely
+new pane gets a separate topic even when it has the same workspace and agent
+name. Closed topics are deleted after `closed_topic_retention_days`; set it to
+`null` to keep them indefinitely.
 
 Prompt and interrupt attempts are claimed and audited before the Core call.
 Timeouts are recorded as `outcome_unknown` and are never retried automatically.

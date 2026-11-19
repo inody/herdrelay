@@ -94,4 +94,5 @@ transports:
     request_timeout_seconds: 35
     reconnect_delay_seconds: 5
     status_refresh_seconds: 5      # legacy TUI/Orca polling; Core uses native events
+    target_absence_grace_seconds: 60 # ignore transient discovery gaps
     closed_topic_retention_days: 1 # null keeps closed topics indefinitely

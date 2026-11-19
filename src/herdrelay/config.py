@@ -91,6 +91,7 @@ class TelegramConfig:
     request_timeout_seconds: float = 35
     reconnect_delay_seconds: float = 5
     status_refresh_seconds: float = 5
+    target_absence_grace_seconds: float = 60
     closed_topic_retention_days: int | None = None
 
 
@@ -438,6 +439,9 @@ def load_config(
             status_refresh_seconds=float(
                 telegram_data.get("status_refresh_seconds", 5)
             ),
+            target_absence_grace_seconds=float(
+                telegram_data.get("target_absence_grace_seconds", 60)
+            ),
             closed_topic_retention_days=_optional_int(
                 telegram_data.get("closed_topic_retention_days")
             ),
@@ -489,6 +493,10 @@ def _validate_telegram(config: AppConfig) -> None:
         raise ValueError("Telegram reconnect_delay_seconds must be positive")
     if telegram.status_refresh_seconds <= 0:
         raise ValueError("Telegram status_refresh_seconds must be positive")
+    if telegram.target_absence_grace_seconds < 0:
+        raise ValueError(
+            "Telegram target_absence_grace_seconds must not be negative"
+        )
     if (
         telegram.closed_topic_retention_days is not None
         and telegram.closed_topic_retention_days < 1

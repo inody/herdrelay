@@ -623,6 +623,7 @@ async def test_orca_topics_follow_exposed_agent_lifecycle(tmp_path):
             allowed_chat_ids=frozenset({-1001}),
             allowed_user_ids=frozenset({42}),
             forum_chat_id=-1001,
+            target_absence_grace_seconds=0,
         ),
     )
     api = FakeApi([])
@@ -645,6 +646,104 @@ async def test_orca_topics_follow_exposed_agent_lifecycle(tmp_path):
     client.panes = []
     await relay.status_relay.legacy_once()
 
+    assert api.closed_topics == [
+        {"chat_id": -1001, "message_thread_id": 101}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_orca_transient_missing_snapshot_keeps_topic_open(
+    tmp_path, monkeypatch
+):
+    target = HerdrTarget(
+        target="local/tab:pane",
+        agent_name="claude",
+        status="done",
+        workspace_label="project",
+    )
+
+    class FakeOrcaClient(FakeLegacyClient):
+        def target_key(self, address):
+            return TargetKey.orca(instance_id="runtime-1", address=address)
+
+    times = iter((100.0, 105.0, 110.0))
+    monkeypatch.setattr(
+        "herdrelay.telegram_status.monotonic", lambda: next(times)
+    )
+    client = FakeOrcaClient([target])
+    app_config = AppConfig(
+        discord_token="unused",
+        runtime=RuntimeConfig(provider="orca"),
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+            target_absence_grace_seconds=60,
+        ),
+    )
+    api = FakeApi([])
+    store = Store(tmp_path / "orca-gap.sqlite3")
+    relay = TelegramService(
+        config=app_config, store=store, client=client, api=api
+    )
+
+    await relay.status_relay.legacy_once()
+    client.panes = []
+    await relay.status_relay.legacy_once()
+    client.panes = [target]
+    await relay.status_relay.legacy_once()
+
+    route = store.get_telegram_topic_for_target(client.target_key(target.target))
+    assert route is not None and route.closed is False
+    assert api.closed_topics == []
+    assert api.reopened_topics == []
+
+
+@pytest.mark.asyncio
+async def test_orca_sustained_absence_closes_after_grace(tmp_path, monkeypatch):
+    target = HerdrTarget(
+        target="local/tab:pane",
+        agent_name="claude",
+        status="done",
+        workspace_label="project",
+    )
+
+    class FakeOrcaClient(FakeLegacyClient):
+        def target_key(self, address):
+            return TargetKey.orca(instance_id="runtime-1", address=address)
+
+    times = iter((100.0, 105.0, 166.0))
+    monkeypatch.setattr(
+        "herdrelay.telegram_status.monotonic", lambda: next(times)
+    )
+    client = FakeOrcaClient([target])
+    app_config = AppConfig(
+        discord_token="unused",
+        runtime=RuntimeConfig(provider="orca"),
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+            target_absence_grace_seconds=60,
+        ),
+    )
+    api = FakeApi([])
+    store = Store(tmp_path / "orca-absence.sqlite3")
+    relay = TelegramService(
+        config=app_config, store=store, client=client, api=api
+    )
+
+    await relay.status_relay.legacy_once()
+    client.panes = []
+    await relay.status_relay.legacy_once()
+    await relay.status_relay.legacy_once()
+
+    route = store.get_telegram_topic_for_target(client.target_key(target.target))
+    assert route is not None and route.closed is True
     assert api.closed_topics == [
         {"chat_id": -1001, "message_thread_id": 101}
     ]
@@ -719,6 +818,7 @@ async def test_legacy_tui_topics_status_and_lifecycle_are_reconciled(tmp_path):
             allowed_chat_ids=frozenset({-1001}),
             allowed_user_ids=frozenset({42}),
             forum_chat_id=-1001,
+            target_absence_grace_seconds=0,
         ),
     )
     relay = TelegramService(
