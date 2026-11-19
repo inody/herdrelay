@@ -549,6 +549,7 @@ These questions require characterization tests rather than assumptions:
 - Whether structured agent questions can be read through a documented Orca
   interface without scraping terminal output.
 
-The Orca rollout remains experimental pending live chat mutation acceptance and
+The Orca rollout remains experimental despite successful Telegram send/output
+acceptance; Discord acceptance and broader operational soak remain pending. It
 continues to fail closed on ambiguous identity or unverified interrupt
 semantics.

@@ -61,7 +61,12 @@ Orca reports input acceptance and, where the agent provider supports it,
 submission observation. A transport timeout after input may have been accepted
 is recorded as `outcome_unknown` and is not retried automatically. Direct
 public-CLI live acceptance confirmed that an allowlisted Pi agent received the
-prompt and entered `working`. It did not confirm Telegram or Discord delivery.
+prompt and entered `working`.
+
+Telegram live E2E acceptance also succeeded: one authorized topic message was
+claimed once, recorded as a `succeeded` `send_text` audit against the exact Orca
+target key, observed as the agent's completed response, and delivered once to
+the same topic. Discord live acceptance remains pending.
 
 Orca interrupt remains disabled. In live characterization,
 `orca terminal send --interrupt` returned `accepted: true` and wrote one byte,

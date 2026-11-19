@@ -16,7 +16,7 @@ management.
 |---|---:|---:|
 | Herdr Core | Supported and live-E2E tested | Supported and live-E2E tested |
 | Legacy Herdr TUI | Compatibility path | Best-effort; automated tests only |
-| Orca | Experimental send/output; automated tests | Experimental send/output; automated tests |
+| Orca | Experimental send/output; automated tests | Experimental; live-E2E send/output tested |
 
 Herdr Core with Telegram and/or Discord is the supported production path.
 Telegram interrupt is Core-only. Raw keys, approval buttons, agent start, and
@@ -413,10 +413,11 @@ socket. It never types into an existing terminal.
   device acceptance testing; use
   [`docs/apple-watch-acceptance.md`](docs/apple-watch-acceptance.md).
 - Telegram interrupt is Core-only.
-- Orca prompt submission has automated coverage and direct public-CLI live
-  acceptance, but no live Telegram or Discord acceptance. Orca interrupt is
-  disabled because `terminal send --interrupt` accepted input without stopping
-  the tested Pi turn. Discord stop/approval/raw input, watcher events, and
+- Orca prompt submission has automated coverage, direct public-CLI acceptance,
+  and live Telegram send/output acceptance; live Discord acceptance remains
+  pending. Orca interrupt is disabled because `terminal send --interrupt`
+  accepted input without stopping the tested Pi turn. Discord
+  stop/approval/raw input, watcher events, and
   existing-response backfill remain disabled.
 - Legacy TUI with Telegram is best-effort and not live-acceptance tested.
 - New Core terminals must be added to an exact allowlist before exposure.
