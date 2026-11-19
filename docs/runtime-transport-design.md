@@ -352,11 +352,14 @@ only.
 
 The first implementation may use bounded CLI polling if the public CLI does not
 provide a production event subscription. Discovery joins `terminal list`
-topology with `agent list` session metadata. A connected, writable terminal
-with a recognized `agentIdentity` is eligible immediately, even before Orca
-assigns an `orcaSessionId`; it appears as `starting` and can receive a topic.
-Completed-response polling begins only after session metadata exists. One
-incomplete launching row must not invalidate the whole target snapshot.
+topology with `agent list` session metadata. A listed terminal with a recognized
+`agentIdentity` is eligible immediately, even before Orca assigns an
+`orcaSessionId`; it appears as `starting` and can receive a topic. Temporary
+connection or writability changes do not remove it from topic discovery, and an
+active `working`, `blocked`, or `waiting` agent bridges a temporary topology
+gap. Input still requires one exact connected, writable terminal. Completed
+response polling begins only after session metadata exists. One incomplete
+launching row must not invalidate the whole target snapshot.
 
 The backend records `updatedAt`, session ID, state transitions, and response
 identity so persistent `done` rows do not produce duplicate output.

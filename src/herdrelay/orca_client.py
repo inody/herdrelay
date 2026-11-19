@@ -11,6 +11,9 @@ from .orca_cli import OrcaAgent, OrcaCli, OrcaCliError, OrcaTerminal
 from .runtime import RuntimeCapabilities
 
 
+_ACTIVE_TERMINAL_AGENT_STATES = frozenset({"working", "blocked", "waiting"})
+
+
 @dataclass(frozen=True, slots=True)
 class OrcaMutationReceipt:
     observed_turn: int | None
@@ -46,7 +49,11 @@ class OrcaClient:
             target = self._target_from_agent(agent)
             if target is None:
                 continue
-            if agent.kind == "terminal" and target.target not in targets:
+            if (
+                agent.kind == "terminal"
+                and target.target not in targets
+                and agent.state not in _ACTIVE_TERMINAL_AGENT_STATES
+            ):
                 continue
             targets[target.target] = target
         self._targets = targets
@@ -200,8 +207,6 @@ class OrcaClient:
         if (
             terminal.host_id not in self.orca.host_ids
             or not self.orca.include_terminal_agents
-            or not terminal.connected
-            or not terminal.writable
             or not terminal.agent_identity
             or not self._target_exposed(
                 terminal.pane_key, terminal.worktree_id

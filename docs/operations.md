@@ -47,20 +47,23 @@ not follow the machine selected in another Herdr client.
 ## Orca backend exposure
 
 The experimental Orca backend uses only the documented `orca` CLI. New
-configurations use `target_exposure.mode: all-eligible`: every connected,
-writable terminal with a recognized agent identity on configured `host_ids` is
-available, and Telegram topics follow agent open/close lifecycle automatically.
+configurations use `target_exposure.mode: all-eligible`: every listed terminal
+with a recognized agent identity on configured `host_ids` is available, and
+Telegram topics follow agent open/close lifecycle automatically. Temporary
+connection or writability changes do not close the topic, and an active
+`working`, `blocked`, or `waiting` agent bridges a temporary topology gap.
 Discovery joins terminal topology with agent session metadata, so a newly
 started agent receives a `starting` topic before its first Orca session ID is
-reported. `selected` mode can optionally
-restrict exposure by exact pane keys and/or worktree IDs; `none` disables target
-exposure without disabling the transport.
+reported. `selected` mode can optionally restrict exposure by exact pane keys
+and/or worktree IDs; `none` disables target exposure without disabling the
+transport.
 
 A live route includes the current Orca runtime ID and the host-qualified pane
 key. Topic continuity follows the stable pane address across runtime-ID
 rotation. Before normal prompt submission, HerdRelay refreshes the agent list
-and maps the agent's exact `paneKey` to a single connected, writable terminal whose
-`tabId:leafId`, host, worktree, and agent identity agree. It then calls
+and maps the agent's exact `paneKey` to a single connected, writable terminal
+whose `tabId:leafId`, host, worktree, and agent identity agree. Topic discovery
+does not require those mutation-time capabilities. It then calls
 `orca terminal send --enter --wait-submit`; it never selects a terminal by
 title, repository name, cwd, or display label.
 

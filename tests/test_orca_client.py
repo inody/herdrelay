@@ -196,6 +196,36 @@ def test_orca_client_discovers_starting_agent_from_terminal_topology():
     assert target.status == "starting"
 
 
+def test_orca_client_keeps_terminal_during_connection_capability_changes():
+    client = make_client()
+    client.cli = discovery_cli(
+        [], terminals=[terminal(connected=False, writable=False)]
+    )
+
+    [target] = client.list_targets()
+
+    assert target.target == "local/tab:pane"
+    assert target.status == "starting"
+
+
+@pytest.mark.parametrize("state", ["working", "blocked", "waiting"])
+def test_orca_client_keeps_active_agent_during_topology_gap(state):
+    client = make_client()
+    client.cli = discovery_cli([agent(state=state)], terminals=[])
+
+    [target] = client.list_targets()
+
+    assert target.target == "local/tab:pane"
+    assert target.status == state
+
+
+def test_orca_client_omits_done_agent_after_terminal_disappears():
+    client = make_client()
+    client.cli = discovery_cli([agent(state="done")], terminals=[])
+
+    assert client.list_targets() == []
+
+
 def test_orca_client_sends_to_exact_writable_terminal():
     client = make_client()
     calls = []
