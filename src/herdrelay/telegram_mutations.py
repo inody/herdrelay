@@ -13,6 +13,7 @@ from .hc_client import HcClient
 from .hc_rpc import HcRpcError
 from .herdr_cli import HerdrCliError
 from .models import TransportAuditEntry
+from .orca_cli import OrcaCliError
 from .runtime import RuntimeClient
 from .store import Store
 from .telegram_api import TelegramBotApi
@@ -405,6 +406,13 @@ class TelegramMutationHandler:
                 "⚠️ Prompt outcome is unknown. Inspect the agent before retrying.",
             )
         except HcRpcError as exc:
+            self.store.finish_transport_audit(
+                audit_id,
+                outcome="rejected" if exc.kind else "failed",
+                detail=truncate(str(exc), max_chars=500),
+            )
+            await self._safe_feedback(message, f"⚠️ Prompt rejected: {exc}")
+        except OrcaCliError as exc:
             self.store.finish_transport_audit(
                 audit_id,
                 outcome="rejected" if exc.kind else "failed",

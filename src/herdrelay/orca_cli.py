@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import OrcaRuntimeConfig
+from .domain import MutationOutcomeUnknownError
 
 
 class OrcaCliError(RuntimeError):
@@ -14,12 +15,36 @@ class OrcaCliError(RuntimeError):
         self.kind = kind
 
 
+class OrcaMutationOutcomeUnknown(
+    OrcaCliError, MutationOutcomeUnknownError
+):
+    """Orca may have accepted input, so callers must not retry automatically."""
+
+
 @dataclass(frozen=True, slots=True)
 class OrcaStatus:
     runtime_id: str
     reachable: bool
     state: str
     app_version: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OrcaTerminal:
+    handle: str
+    incarnation_id: str
+    host_id: str
+    tab_id: str
+    leaf_id: str
+    worktree_id: str | None
+    connected: bool
+    writable: bool
+    agent_identity: str | None
+    raw: dict[str, Any]
+
+    @property
+    def pane_key(self) -> str:
+        return f"{self.tab_id}:{self.leaf_id}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +93,61 @@ class OrcaCli:
         agents = [self._parse_agent(item) for item in items]
         return runtime_id, agents
 
+    def terminal_list(self) -> tuple[str, list[OrcaTerminal]]:
+        envelope = self._json(["terminal", "list"])
+        runtime_id = _runtime_id(envelope)
+        result = _object(envelope.get("result"), "Orca terminal list result")
+        items = result.get("terminals")
+        if not isinstance(items, list):
+            raise OrcaCliError("Orca terminal list must contain a terminals array")
+        return runtime_id, [self._parse_terminal(item) for item in items]
+
+    def terminal_send(
+        self,
+        *,
+        handle: str,
+        text: str,
+        wait_submit_seconds: float,
+    ) -> dict[str, Any]:
+        if not text:
+            raise ValueError("Orca prompt text must not be empty")
+        result = self._json(
+            [
+                "terminal",
+                "send",
+                "--terminal",
+                handle,
+                "--text",
+                text,
+                "--enter",
+                "--wait-submit",
+                str(wait_submit_seconds),
+            ],
+            mutation=True,
+        ).get("result")
+        return _object(result, "Orca terminal send result")
+
+    def _parse_terminal(self, value: Any) -> OrcaTerminal:
+        item = _object(value, "Orca terminal")
+        connected = item.get("connected")
+        writable = item.get("writable")
+        if not isinstance(connected, bool) or not isinstance(writable, bool):
+            raise OrcaCliError("Orca terminal connection flags must be booleans")
+        return OrcaTerminal(
+            handle=_string(item, "handle", "Orca terminal handle"),
+            incarnation_id=_string(
+                item, "incarnationId", "Orca terminal incarnation ID"
+            ),
+            host_id=_string(item, "executionHostId", "Orca execution host ID"),
+            tab_id=_string(item, "tabId", "Orca terminal tab ID"),
+            leaf_id=_string(item, "leafId", "Orca terminal leaf ID"),
+            worktree_id=_optional_string(item, "worktreeId"),
+            connected=connected,
+            writable=writable,
+            agent_identity=_optional_string(item, "agentIdentity"),
+            raw=item,
+        )
+
     def _parse_agent(self, value: Any) -> OrcaAgent:
         item = _object(value, "Orca agent")
         updated_at = item.get("updatedAt")
@@ -91,7 +171,9 @@ class OrcaCli:
             raw=item,
         )
 
-    def _json(self, args: list[str]) -> dict[str, Any]:
+    def _json(
+        self, args: list[str], *, mutation: bool = False
+    ) -> dict[str, Any]:
         command = [
             self.config.cli_path,
             *args,
@@ -110,7 +192,10 @@ class OrcaCli:
         except FileNotFoundError as exc:
             raise OrcaCliError(f"Orca CLI not found: {self.config.cli_path}") from exc
         except subprocess.TimeoutExpired as exc:
-            raise OrcaCliError(f"Orca command timed out: {' '.join(command)}") from exc
+            error_type = OrcaMutationOutcomeUnknown if mutation else OrcaCliError
+            raise error_type(
+                f"Orca command timed out: {' '.join(command)}"
+            ) from exc
 
         try:
             payload = json.loads(completed.stdout)
@@ -126,7 +211,13 @@ class OrcaCli:
             kind = error.get("code") if isinstance(error, dict) else None
             message = error.get("message") if isinstance(error, dict) else None
             detail = message or completed.stderr.strip() or "Orca command failed"
-            raise OrcaCliError(str(detail), kind=str(kind) if kind else None)
+            error_type = (
+                OrcaMutationOutcomeUnknown
+                if mutation
+                and kind in {"outcome_unknown", "request_outcome_unknown"}
+                else OrcaCliError
+            )
+            raise error_type(str(detail), kind=str(kind) if kind else None)
         return payload
 
 

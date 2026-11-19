@@ -35,6 +35,7 @@ class OrcaRuntimeConfig:
     environment: str = "local"
     command_timeout_seconds: float = 10
     refresh_seconds: float = 2
+    send_wait_seconds: float = 5
     include_terminal_agents: bool = True
     include_chats: bool = False
     allowed_host_ids: frozenset[str] = frozenset({"local"})
@@ -344,6 +345,7 @@ def load_config(
                     orca_data.get("command_timeout_seconds", 10)
                 ),
                 refresh_seconds=float(orca_data.get("refresh_seconds", 2)),
+                send_wait_seconds=float(orca_data.get("send_wait_seconds", 5)),
                 include_terminal_agents=bool(
                     orca_data.get("include_terminal_agents", True)
                 ),
@@ -516,6 +518,8 @@ def _validate_runtime_features(config: AppConfig) -> None:
         raise ValueError("runtime.orca.command_timeout_seconds must be positive")
     if orca.refresh_seconds <= 0:
         raise ValueError("runtime.orca.refresh_seconds must be positive")
+    if orca.send_wait_seconds < 0:
+        raise ValueError("runtime.orca.send_wait_seconds must not be negative")
     if not orca.environment.strip():
         raise ValueError("runtime.orca.environment must not be empty")
     if not orca.allowed_host_ids:
@@ -524,14 +528,16 @@ def _validate_runtime_features(config: AppConfig) -> None:
         raise ValueError(
             "Orca requires at least one allowed_pane_key or allowed_worktree_id"
         )
-    if config.enable_send or config.enable_approve or config.enable_stop:
-        raise ValueError("Discord mutations are not implemented for the Orca backend")
+    if config.enable_approve or config.enable_stop:
+        raise ValueError(
+            "Discord approval and stop are not implemented for the Orca backend"
+        )
     if config.enable_watcher:
         raise ValueError("Discord watcher is not implemented for the Orca backend")
     if config.enable_streaming and config.streaming.mode != "hooks":
         raise ValueError("Orca response streaming requires relay.streaming.mode: hooks")
-    if config.telegram.enable_send or config.telegram.enable_interrupt:
-        raise ValueError("Telegram mutations are not implemented for the Orca backend")
+    if config.telegram.enable_interrupt:
+        raise ValueError("Telegram interrupt is not implemented for the Orca backend")
 
 
 def _runtime_provider(value: Any) -> str:

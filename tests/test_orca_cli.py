@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
 
 from herdrelay.config import OrcaRuntimeConfig
-from herdrelay.orca_cli import OrcaCli, OrcaCliError
+from herdrelay.orca_cli import (
+    OrcaCli,
+    OrcaCliError,
+    OrcaMutationOutcomeUnknown,
+)
 
 
 def completed(payload, *, returncode=0, stderr=""):
@@ -99,6 +104,89 @@ def test_orca_agent_list_parses_stable_identity_and_output(monkeypatch):
     assert agent.pane_key == "tab:pane"
     assert agent.last_assistant_message == "finished"
     assert agent.updated_at == 123
+
+
+def test_orca_terminal_list_and_send_use_exact_runtime_handle(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[1:3] == ["terminal", "list"]:
+            return completed(
+                {
+                    "ok": True,
+                    "result": {
+                        "terminals": [
+                            {
+                                "handle": "term-1",
+                                "incarnationId": "incarnation-1",
+                                "executionHostId": "local",
+                                "tabId": "tab",
+                                "leafId": "pane",
+                                "worktreeId": "repo::/worktree",
+                                "connected": True,
+                                "writable": True,
+                                "agentIdentity": "pi",
+                            }
+                        ]
+                    },
+                    "_meta": {"runtimeId": "runtime-1"},
+                }
+            )
+        return completed(
+            {
+                "ok": True,
+                "result": {
+                    "accepted": True,
+                    "submitted": True,
+                    "requestId": "request-1",
+                },
+                "_meta": {"runtimeId": "runtime-1"},
+            }
+        )
+
+    monkeypatch.setattr("herdrelay.orca_cli.subprocess.run", fake_run)
+    cli = OrcaCli(OrcaRuntimeConfig(send_wait_seconds=4))
+
+    runtime_id, terminals = cli.terminal_list()
+    result = cli.terminal_send(
+        handle=terminals[0].handle,
+        text="continue",
+        wait_submit_seconds=4,
+    )
+
+    assert runtime_id == "runtime-1"
+    assert terminals[0].pane_key == "tab:pane"
+    assert result["requestId"] == "request-1"
+    assert calls[1] == [
+        "orca",
+        "terminal",
+        "send",
+        "--terminal",
+        "term-1",
+        "--text",
+        "continue",
+        "--enter",
+        "--wait-submit",
+        "4",
+        "--environment",
+        "local",
+        "--json",
+    ]
+
+
+def test_orca_terminal_send_timeout_is_outcome_unknown(monkeypatch):
+    def timeout(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, timeout=10)
+
+    monkeypatch.setattr("herdrelay.orca_cli.subprocess.run", timeout)
+
+    with pytest.raises(OrcaMutationOutcomeUnknown, match="timed out"):
+        OrcaCli(OrcaRuntimeConfig()).terminal_send(
+            handle="term-1",
+            text="continue",
+            wait_submit_seconds=5,
+        )
 
 
 def test_orca_cli_preserves_structured_error(monkeypatch):

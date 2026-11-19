@@ -93,6 +93,7 @@ def test_load_config_reads_deny_by_default_orca_runtime_settings(
     environment: local
     command_timeout_seconds: 6
     refresh_seconds: 3
+    send_wait_seconds: 4
     include_terminal_agents: true
     include_chats: false
     allowed_host_ids: [local]
@@ -107,6 +108,7 @@ def test_load_config_reads_deny_by_default_orca_runtime_settings(
     assert config.runtime.orca.cli_path.endswith("/bin/orca")
     assert config.runtime.orca.command_timeout_seconds == 6
     assert config.runtime.orca.refresh_seconds == 3
+    assert config.runtime.orca.send_wait_seconds == 4
     assert config.runtime.orca.allowed_host_ids == frozenset({"local"})
     assert config.runtime.orca.allowed_pane_keys == frozenset({"tab:pane"})
     assert config.runtime.orca.allowed_worktree_ids == frozenset(
@@ -126,7 +128,6 @@ def test_load_config_rejects_orca_without_target_allowlist(tmp_path, monkeypatch
 @pytest.mark.parametrize(
     "setting, message",
     [
-        ("enable_send: true", "mutations"),
         ("enable_watcher: true", "watcher"),
         ("enable_streaming: true\nstreaming:\n  mode: poll", "requires"),
     ],
@@ -146,6 +147,24 @@ def test_load_config_rejects_unimplemented_orca_features(
 
     with pytest.raises(ValueError, match=message):
         load_config(config_path)
+
+
+def test_load_config_allows_normal_send_for_orca(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "runtime:\n"
+        "  provider: orca\n"
+        "  orca:\n"
+        "    allowed_pane_keys: [tab:pane]\n"
+        "transports:\n"
+        "  discord:\n"
+        "    enable_send: true\n"
+    )
+
+    config = load_config(config_path)
+
+    assert config.enable_send is True
 
 
 def test_load_config_rejects_unknown_runtime_provider(tmp_path, monkeypatch):

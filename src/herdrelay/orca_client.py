@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from .config import AppConfig
 from .domain import BackendKind, TargetKey
 from .herdr_client import TargetResolutionError
 from .models import HerdrTarget, StartedAgent
-from .orca_cli import OrcaAgent, OrcaCli, OrcaCliError
+from .orca_cli import OrcaAgent, OrcaCli, OrcaCliError, OrcaTerminal
 from .runtime import RuntimeCapabilities
 
 
@@ -15,11 +16,17 @@ class OrcaUnsupportedOperation(OrcaCliError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class OrcaMutationReceipt:
+    observed_turn: int | None
+    result: dict[str, Any]
+
+
 class OrcaClient:
     """Read-only RuntimeClient compatibility layer over Orca's public CLI."""
 
     capabilities = RuntimeCapabilities(
-        normal_send=False,
+        normal_send=True,
         bounded_read=True,
         native_events=False,
         native_interrupt=False,
@@ -100,10 +107,32 @@ class OrcaClient:
         return "\n".join(text.splitlines()[-lines:])
 
     def send(self, target: str, message: str) -> None:
-        del target, message
-        raise OrcaUnsupportedOperation(
-            "sending prompts through the Orca backend is not implemented"
+        self.send_with_receipt(target, message)
+
+    def send_with_receipt(
+        self, target: str, message: str
+    ) -> OrcaMutationReceipt:
+        if not message:
+            raise ValueError("Orca prompt must not be empty")
+        current = self._resolve_live_target(target)
+        if current.status and current.status.casefold() == "blocked":
+            raise OrcaCliError(f"Orca agent is blocked: {target}", kind="blocked")
+        raw_agent = current.raw.get("orca_agent") if current.raw else None
+        if not isinstance(raw_agent, dict):
+            raise OrcaCliError(f"Orca target metadata is unavailable: {target}")
+
+        runtime_id, terminals = self.cli.terminal_list()
+        if runtime_id != self._runtime_id:
+            raise OrcaCliError(
+                "Orca runtime identity changed before prompt submission"
+            )
+        terminal = self._resolve_terminal(raw_agent, terminals)
+        result = self.cli.terminal_send(
+            handle=terminal.handle,
+            text=message,
+            wait_submit_seconds=self.orca.send_wait_seconds,
         )
+        return OrcaMutationReceipt(observed_turn=None, result=result)
 
     def send_keys(
         self, target: str, keys: Iterable[str], *, interval_seconds: float = 0
@@ -164,6 +193,45 @@ class OrcaClient:
         if not candidates:
             return HerdrTarget(target=query)
         raise TargetResolutionError(f"Target is ambiguous: {query}")
+
+    def _resolve_live_target(self, address: str) -> HerdrTarget:
+        self.list_targets()
+        target = self._targets.get(address)
+        if target is None:
+            raise OrcaCliError(f"Orca target is not currently available: {address}")
+        return target
+
+    def _resolve_terminal(
+        self, raw_agent: dict[str, Any], terminals: list[OrcaTerminal]
+    ) -> OrcaTerminal:
+        pane_key = raw_agent.get("paneKey")
+        host_id = raw_agent.get("hostId")
+        worktree_id = raw_agent.get("worktreeId")
+        agent_name = raw_agent.get("agent")
+        if not isinstance(pane_key, str) or not isinstance(host_id, str):
+            raise OrcaCliError("Orca agent lacks an exact terminal identity")
+        matches = [
+            terminal
+            for terminal in terminals
+            if terminal.host_id == host_id
+            and terminal.pane_key == pane_key
+            and terminal.connected
+            and terminal.writable
+            and (
+                not isinstance(worktree_id, str)
+                or terminal.worktree_id == worktree_id
+            )
+            and (
+                not isinstance(agent_name, str)
+                or not terminal.agent_identity
+                or terminal.agent_identity.casefold() == agent_name.casefold()
+            )
+        ]
+        if len(matches) != 1:
+            raise OrcaCliError(
+                "Orca agent did not resolve to exactly one writable terminal"
+            )
+        return matches[0]
 
     def _target_from_agent(self, agent: OrcaAgent) -> HerdrTarget | None:
         if agent.host_id not in self.orca.allowed_host_ids:

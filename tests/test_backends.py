@@ -162,7 +162,7 @@ def test_build_backend_provider_adds_orca_output_source_for_hook_streaming(
     assert len(provider.services) == 1
 
 
-def test_build_backend_provider_wraps_orca_read_only_runtime():
+def test_build_backend_provider_wraps_orca_runtime():
     config = AppConfig(
         discord_token="token",
         runtime=RuntimeConfig(
@@ -174,4 +174,4 @@ def test_build_backend_provider_wraps_orca_read_only_runtime():
     provider = build_backend_provider(config)
 
     assert provider.kind is BackendKind.ORCA
-    assert provider.client.capabilities.normal_send is False
+    assert provider.client.capabilities.normal_send is True

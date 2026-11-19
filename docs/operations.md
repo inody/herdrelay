@@ -44,6 +44,25 @@ Use `herdr status` in the same environment as the bot. HerdRelay does not add
 `--machine`, `--remote`, or `--session` flags to individual CLI calls and does
 not follow the machine selected in another Herdr client.
 
+## Orca backend selection
+
+The experimental Orca backend uses only the documented `orca` CLI. Discovery
+is deny-by-default: an agent must match `allowed_host_ids` and either an exact
+`allowed_pane_keys` entry or an exact `allowed_worktree_ids` entry.
+
+A durable route pins the Orca runtime ID and the host-qualified pane key. Before
+normal prompt submission, HerdRelay refreshes the agent list and maps the
+agent's exact `paneKey` to a single connected, writable terminal whose
+`tabId:leafId`, host, worktree, and agent identity agree. It then calls
+`orca terminal send --enter --wait-submit`; it never selects a terminal by
+title, repository name, cwd, or display label.
+
+Orca reports an accepted-input/submission receipt. A transport timeout after
+input may have been accepted is recorded as `outcome_unknown` and is not retried
+automatically. Orca interrupt, approval, raw keys, launch, and terminal close
+remain disabled. The Orca path currently has automated tests and local
+read-only discovery checks but no live Telegram or Discord mutation acceptance.
+
 ## Thread and binding lifecycle
 
 `enable_auto_threads` starts a reconciliation loop using `herdr pane list`.

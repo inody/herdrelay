@@ -529,6 +529,70 @@ async def test_legacy_tui_prompt_is_claimed_and_audited(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_orca_prompt_is_sent_through_exact_bound_target(tmp_path):
+    api = FakeApi([[update(text="continue")]])
+    target = HerdrTarget(
+        target="local/tab:pane",
+        agent_name="pi",
+        status="done",
+        workspace_label="project",
+    )
+
+    class FakeOrcaClient:
+        def __init__(self):
+            self.sent = []
+
+        def list_targets(self):
+            return [target]
+
+        def target_key(self, address):
+            assert address == target.target
+            return TargetKey.orca(
+                instance_id="runtime-1", address=target.target
+            )
+
+        def send(self, address, text):
+            self.sent.append((address, text))
+
+    app_config = AppConfig(
+        discord_token="unused",
+        runtime=RuntimeConfig(provider="orca"),
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+            enable_send=True,
+        ),
+    )
+    store = Store(tmp_path / "orca.sqlite3")
+    key = TargetKey.orca(
+        instance_id="runtime-1", address="local/tab:pane"
+    )
+    store.upsert_telegram_topic_for_target(
+        target=key,
+        chat_id=-1001,
+        thread_id=77,
+        name="project/pi",
+    )
+    client = FakeOrcaClient()
+    relay = TelegramService(
+        config=app_config, store=store, client=client, api=api
+    )
+
+    await relay.poll_once()
+
+    assert client.sent == [("local/tab:pane", "continue")]
+    [audit] = store.list_transport_audits()
+    assert audit["target_key"] == key.to_storage_key()
+    assert audit["outcome"] == "succeeded"
+    assert api.reactions == [
+        {"chat_id": -1001, "message_id": 5, "emoji": "👀"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_enabled_prompt_send_is_claimed_audited_and_not_repeated(tmp_path):
     item = update(text="continue")
     api = FakeApi([[item], [item]])

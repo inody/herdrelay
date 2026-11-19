@@ -14,11 +14,12 @@ runtime:
     include_connected_machines: false
     allowed_terminal_addresses: [] # inline exact addresses
     allowed_terminal_addresses_file: null # optional local 0600 file managed by herdrelay-targets
-  orca:                          # read-only status backend during initial rollout
+  orca:                          # experimental public-CLI backend
     cli_path: orca
     environment: local
     command_timeout_seconds: 10
     refresh_seconds: 2
+    send_wait_seconds: 5       # observe submission without retrying input
     include_terminal_agents: true
     include_chats: false
     allowed_host_ids: [local]

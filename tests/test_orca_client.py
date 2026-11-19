@@ -4,8 +4,8 @@ import pytest
 
 from herdrelay.config import AppConfig, OrcaRuntimeConfig, RuntimeConfig
 from herdrelay.domain import BackendKind
-from herdrelay.orca_cli import OrcaAgent, OrcaCliError
-from herdrelay.orca_client import OrcaClient, OrcaUnsupportedOperation
+from herdrelay.orca_cli import OrcaAgent, OrcaCliError, OrcaTerminal
+from herdrelay.orca_client import OrcaClient
 
 
 def agent(
@@ -116,14 +116,70 @@ def test_orca_client_reads_bounded_last_assistant_message():
     assert client.read(target.target, lines=2) == "two\nthree"
 
 
-def test_orca_client_rejects_changed_runtime_and_mutations():
+def terminal(*, connected=True, writable=True):
+    raw = {
+        "handle": "term-1",
+        "incarnationId": "incarnation-1",
+        "executionHostId": "local",
+        "tabId": "tab",
+        "leafId": "pane",
+        "worktreeId": "repo::/worktree",
+        "connected": connected,
+        "writable": writable,
+        "agentIdentity": "pi",
+    }
+    return OrcaTerminal(
+        handle="term-1",
+        incarnation_id="incarnation-1",
+        host_id="local",
+        tab_id="tab",
+        leaf_id="pane",
+        worktree_id="repo::/worktree",
+        connected=connected,
+        writable=writable,
+        agent_identity="pi",
+        raw=raw,
+    )
+
+
+def test_orca_client_sends_to_exact_writable_terminal():
     client = make_client()
-    fake = type(
+    calls = []
+
+    class FakeCli:
+        def agent_list(self):
+            return "runtime-1", [agent()]
+
+        def terminal_list(self):
+            return "runtime-1", [terminal()]
+
+        def terminal_send(self, **kwargs):
+            calls.append(kwargs)
+            return {"accepted": True, "submitted": True, "requestId": "request-1"}
+
+    client.cli = FakeCli()
+    [target] = client.list_targets()
+
+    receipt = client.send_with_receipt(target.target, "continue")
+
+    assert receipt.observed_turn is None
+    assert receipt.result["requestId"] == "request-1"
+    assert calls == [
+        {
+            "handle": "term-1",
+            "text": "continue",
+            "wait_submit_seconds": 5,
+        }
+    ]
+
+
+def test_orca_client_rejects_changed_runtime_and_ambiguous_terminal():
+    client = make_client()
+    client.cli = type(
         "FakeCli",
         (),
         {"agent_list": lambda self: ("runtime-1", [agent()])},
     )()
-    client.cli = fake
     [target] = client.list_targets()
     key = client.target_key(target.target)
     client.cli = type(
@@ -134,5 +190,28 @@ def test_orca_client_rejects_changed_runtime_and_mutations():
 
     with pytest.raises(OrcaCliError, match="different Orca runtime"):
         client.resolve_target_key(key)
-    with pytest.raises(OrcaUnsupportedOperation, match="not implemented"):
+
+    class AmbiguousCli:
+        def agent_list(self):
+            return "runtime-1", [agent()]
+
+        def terminal_list(self):
+            return "runtime-1", [terminal(), terminal()]
+
+    client.cli = AmbiguousCli()
+    with pytest.raises(OrcaCliError, match="exactly one"):
         client.send(target.target, "continue")
+
+
+def test_orca_client_rejects_send_while_agent_is_blocked():
+    client = make_client()
+    client.cli = type(
+        "BlockedCli",
+        (),
+        {"agent_list": lambda self: ("runtime-1", [agent(state="blocked")])},
+    )()
+
+    with pytest.raises(OrcaCliError, match="blocked") as caught:
+        client.send("local/tab:pane", "continue")
+
+    assert caught.value.kind == "blocked"
