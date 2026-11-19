@@ -40,17 +40,37 @@ class TelegramVoiceHandler:
         voice = message.voice
         if voice is None:
             return False
-        if not self.router.accepts(message):
-            self._audit(
-                message,
-                outcome="rejected",
-                detail="voice input is limited to General",
+        is_general = self.router.accepts(message)
+        route = None
+        if not is_general:
+            if self.voice_config.scope != "general-and-bound":
+                self._audit(
+                    message,
+                    outcome="rejected",
+                    detail="voice input is limited to General",
+                )
+                await self._feedback(
+                    message,
+                    "音声入力は現在Generalでのみ利用できます。何も送信していません。",
+                )
+                return False
+            if message.message_thread_id is None:
+                return False
+            route = self.store.get_telegram_topic_by_destination(
+                chat_id=message.chat_id,
+                thread_id=message.message_thread_id,
             )
-            await self._feedback(
-                message,
-                "音声入力は現在Generalでのみ利用できます。何も送信していません。",
-            )
-            return False
+            if route is None or route.closed:
+                self._audit(
+                    message,
+                    outcome="rejected",
+                    detail="bound topic route is unavailable",
+                )
+                await self._feedback(
+                    message,
+                    "このtopicは利用可能なAgentに接続されていません。",
+                )
+                return False
         if voice.duration_seconds > self.voice_config.max_duration_seconds:
             detail = (
                 f"duration {voice.duration_seconds}s exceeds "
@@ -127,7 +147,14 @@ class TelegramVoiceHandler:
             voice=None,
             source_kind="voice",
         )
-        return await self.router.handle(routed_message, event_key=event_key)
+        if is_general:
+            return await self.router.handle(routed_message, event_key=event_key)
+        return await self.router.mutations.send_prompt(
+            routed_message,
+            event_key=event_key,
+            route=route,
+            text=transcript.text,
+        )
 
     def _audit(
         self,

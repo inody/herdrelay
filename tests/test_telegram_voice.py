@@ -113,7 +113,14 @@ def voice_update(*, duration=3, file_size=1024, thread_id=None):
     return {"update_id": 10, "message": message}
 
 
-def build_service(tmp_path, api, model, transcriber):
+def build_service(
+    tmp_path,
+    api,
+    model,
+    transcriber,
+    *,
+    voice_scope="general",
+):
     config = AppConfig(
         discord_token="unused",
         runtime=RuntimeConfig(provider="orca"),
@@ -131,6 +138,7 @@ def build_service(tmp_path, api, model, transcriber):
             ),
             voice_input=TelegramVoiceInputConfig(
                 enabled=True,
+                scope=voice_scope,
                 max_duration_seconds=120,
                 max_file_bytes=10_000,
                 transcription=VoiceTranscriptionConfig(
@@ -211,7 +219,32 @@ async def test_voice_over_limit_is_rejected_without_download_or_mutation(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_voice_in_bound_topic_is_not_transcribed(tmp_path):
+async def test_voice_in_bound_topic_is_sent_directly_without_router(tmp_path):
+    api = FakeApi([[voice_update(thread_id=179)]])
+    model = FakeModel()
+    transcriber = FakeTranscriber(text="このまま続けてください")
+    service, client, store = build_service(
+        tmp_path,
+        api,
+        model,
+        transcriber,
+        voice_scope="general-and-bound",
+    )
+
+    await service.poll_once()
+
+    assert client.sent == [("local/tab:pane", "このまま続けてください")]
+    assert model.requests == []
+    assert api.sent[0]["message_thread_id"] == 179
+    assert api.sent[0]["text"].startswith("文字起こし:\n")
+    assert [entry["action"] for entry in store.list_transport_audits()] == [
+        "transcribe_voice",
+        "send_text",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_voice_in_bound_topic_is_not_transcribed_when_scope_is_general(tmp_path):
     api = FakeApi([[voice_update(thread_id=179)]])
     service, client, _store = build_service(
         tmp_path, api, FakeModel(), FakeTranscriber()

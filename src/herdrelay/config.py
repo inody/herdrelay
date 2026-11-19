@@ -660,9 +660,10 @@ def _validate_telegram(config: AppConfig) -> None:
             raise ValueError("Telegram voice_input requires enable_send: true")
         if not telegram.general_router.enabled:
             raise ValueError("Telegram voice_input requires general_router.enabled: true")
-        if voice.scope != "general":
+        if voice.scope not in {"general", "general-and-bound"}:
             raise ValueError(
-                "Telegram voice_input.scope currently supports only 'general'"
+                "Telegram voice_input.scope must be 'general' or "
+                "'general-and-bound'"
             )
         if not 1 <= voice.max_duration_seconds <= 3600:
             raise ValueError(

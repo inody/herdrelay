@@ -116,7 +116,7 @@ transports:
         max_output_bytes: 16384
     voice_input:
       enabled: false               # transcribe Telegram voice messages in General
-      scope: general               # bound topics remain text-only
+      scope: general               # or general-and-bound for direct topic voice
       max_duration_seconds: 120
       max_file_bytes: 10000000
       transcription:

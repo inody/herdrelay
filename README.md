@@ -260,9 +260,11 @@ clears it. The default value `0` keeps the router stateless.
 
 ### Optional Telegram voice input
 
-Authorized Telegram voice messages in General can be transcribed locally and
-then passed through the same General router. Bound topics remain text-only by
-default. Audio is downloaded to a private temporary directory, bounded by
+Authorized Telegram voice messages can be transcribed locally. General passes
+the transcript through the LLM router; with `scope: general-and-bound`, a bound
+topic submits the full transcript directly through its existing Agent route
+without an LLM call. The default `scope: general` keeps bound topics text-only.
+Audio is downloaded to a private temporary directory, bounded by
 duration and file size, and deleted after each attempt.
 
 ```yaml
@@ -270,7 +272,7 @@ transports:
   telegram:
     voice_input:
       enabled: true
-      scope: general
+      scope: general-and-bound
       max_duration_seconds: 120
       max_file_bytes: 10000000
       transcription:

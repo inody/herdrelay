@@ -83,6 +83,18 @@ When `voice_input.enabled` is configured with an approved local transcriber:
 8. Send an over-duration test file and confirm it is rejected before download
    and transcription.
 
+## Optional bound-topic voice acceptance
+
+When `voice_input.scope` is `general-and-bound`:
+
+1. Open one temporary Agent topic on Telegram and record a harmless voice
+   instruction inside that topic.
+2. Confirm the transcript is shown in the same topic and no General-router model
+   request is made.
+3. Confirm the audit sequence is `transcribe_voice`, then `send_text`, and the
+   exact live topic identity is revalidated before submission.
+4. Confirm the recent General destination is unchanged.
+
 ## Cleanup
 
 - Close the temporary Telegram topic.

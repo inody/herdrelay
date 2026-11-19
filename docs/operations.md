@@ -146,10 +146,13 @@ failed requests do not replace it.
 ## Telegram voice input
 
 `transports.telegram.voice_input.enabled` accepts authorized Telegram voice
-messages in General, downloads the Bot API file into a mode-0700 cache directory,
-transcribes it, deletes the temporary audio, and passes the transcript through
-the existing General router. Voice messages in bound topics are rejected; this
-prevents audio from silently bypassing destination classification.
+messages, downloads the Bot API file into a mode-0700 cache directory,
+transcribes it, and deletes the temporary audio. General passes the transcript
+through the existing LLM router. With `scope: general-and-bound`, a voice message
+inside a bound topic bypasses destination classification exactly like bound text
+and submits the full transcript through that topic's existing route. The normal
+live identity check, blocklist, mutation rate limits, dedupe, and audit still
+apply. Bound-topic voice does not change the recent General destination.
 
 The default limits are 120 seconds and 10 MB. Telegram's advertised size is
 checked before download and the actual streamed byte count is checked again.

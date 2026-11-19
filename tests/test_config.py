@@ -723,7 +723,7 @@ transports:
         argv: [router]
     voice_input:
       enabled: true
-      scope: general
+      scope: general-and-bound
       max_duration_seconds: 90
       max_file_bytes: 5000000
       transcription:
@@ -740,6 +740,7 @@ transports:
 
     voice = config.telegram.voice_input
     assert voice.enabled is True
+    assert voice.scope == "general-and-bound"
     assert voice.max_duration_seconds == 90
     assert voice.max_file_bytes == 5_000_000
     assert voice.transcription.provider == "mlx-whisper"
