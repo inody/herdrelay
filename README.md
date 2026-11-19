@@ -402,7 +402,8 @@ socket. It never types into an existing terminal.
   acceptance work;
 - `docs/runtime-transport-design.md` — generalized backend/transport architecture,
   including Orca; and
-- `docs/runtime-transport-plan.md` — staged refactor and Orca implementation plan.
+- `docs/runtime-transport-plan.md` — staged refactor and Orca implementation plan; and
+- `docs/feature-inventory.md` — common features, legacy TUI-only controls, and cleanup candidates.
 
 ## Current limitations
 

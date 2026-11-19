@@ -16,12 +16,7 @@ class TargetResolutionError(ValueError):
 
 
 class HerdrClient:
-    capabilities = RuntimeCapabilities(
-        raw_input=True,
-        guarded_approval=True,
-        agent_start=True,
-        target_close=True,
-    )
+    capabilities = RuntimeCapabilities()
 
     def __init__(self, config: AppConfig):
         self.config = config

@@ -198,7 +198,6 @@ async def test_core_stop_uses_native_interrupt_and_core_help(tmp_path):
     await core_bot.on_message(help_message)
 
     client.interrupt.assert_called_once_with("t1")
-    client.pane_close.assert_not_called()
     assert stop_message.reply.call_args.args[0] == "Interrupted `t1`."
     help_text = help_message.reply.call_args.args[0]
     assert "Herdr Core control" in help_text

@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from .config import AppConfig
 from .domain import BackendKind, TargetKey
 from .herdr_client import TargetResolutionError
-from .models import HerdrTarget, StartedAgent
+from .models import HerdrTarget
 from .orca_cli import OrcaAgent, OrcaCli, OrcaCliError, OrcaTerminal
 from .runtime import RuntimeCapabilities
-
-
-class OrcaUnsupportedOperation(OrcaCliError):
-    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,18 +18,9 @@ class OrcaMutationReceipt:
 
 
 class OrcaClient:
-    """Read-only RuntimeClient compatibility layer over Orca's public CLI."""
+    """RuntimeClient implementation over Orca's public CLI."""
 
-    capabilities = RuntimeCapabilities(
-        normal_send=True,
-        bounded_read=True,
-        native_events=False,
-        native_interrupt=False,
-        raw_input=False,
-        guarded_approval=False,
-        agent_start=False,
-        target_close=False,
-    )
+    capabilities = RuntimeCapabilities(normal_send=True, native_interrupt=False)
 
     def __init__(self, config: AppConfig):
         self.config = config
@@ -136,48 +122,6 @@ class OrcaClient:
             wait_submit_seconds=self.orca.send_wait_seconds,
         )
         return OrcaMutationReceipt(observed_turn=None, result=result)
-
-    def send_keys(
-        self, target: str, keys: Iterable[str], *, interval_seconds: float = 0
-    ) -> None:
-        del target, keys, interval_seconds
-        raise OrcaUnsupportedOperation(
-            "raw key input is disabled for the Orca backend"
-        )
-
-    def send_raw_text(self, target: str, text: str) -> None:
-        del target, text
-        raise OrcaUnsupportedOperation(
-            "raw text input is disabled for the Orca backend"
-        )
-
-    def send_text_enter(self, target: str, text: str) -> None:
-        del target, text
-        raise OrcaUnsupportedOperation(
-            "approval text input is disabled for the Orca backend"
-        )
-
-    def agent_start(
-        self,
-        name: str,
-        *,
-        cwd: str | None = None,
-        argv: list[str] | None = None,
-        workspace: str | None = None,
-        tab: str | None = None,
-        split: str | None = None,
-        source_pane: str | None = None,
-    ) -> StartedAgent:
-        del name, cwd, argv, workspace, tab, split, source_pane
-        raise OrcaUnsupportedOperation(
-            "starting Orca agents from chat is not implemented"
-        )
-
-    def pane_close(self, pane_id: str) -> None:
-        del pane_id
-        raise OrcaUnsupportedOperation(
-            "closing Orca terminals from chat is not implemented"
-        )
 
     def resolve_target(self, query: str) -> HerdrTarget:
         candidates = []

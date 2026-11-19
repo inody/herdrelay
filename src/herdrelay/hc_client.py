@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,7 +8,7 @@ from .domain import RuntimeKind, TargetKey
 from .hc_rpc import HcRpcClient, HcRpcError
 from .hc_protocol import HcTerminal, parse_terminal
 from .herdr_client import TargetResolutionError
-from .models import HerdrTarget, StartedAgent
+from .models import HerdrTarget
 from .runtime import RuntimeCapabilities
 
 KNOWN_AGENT_APPS = frozenset({"pi", "claude", "codex"})
@@ -21,10 +20,6 @@ class HcMutationReceipt:
     result: dict[str, Any]
 
 
-class HcUnsupportedOperation(HcRpcError):
-    pass
-
-
 class HcClient:
     """Present Herdr Core terminals through the bridge's current client API.
 
@@ -34,7 +29,7 @@ class HcClient:
     orchestration is introduced incrementally.
     """
 
-    capabilities = RuntimeCapabilities(native_events=True, native_interrupt=True)
+    capabilities = RuntimeCapabilities(native_interrupt=True)
 
     def __init__(self, config: AppConfig):
         self.config = config
@@ -175,48 +170,6 @@ class HcClient:
             )
         result = self._call("terminal.interrupt", {"terminal": target})
         return HcMutationReceipt(observed_turn=terminal.turn, result=result)
-
-    def send_keys(
-        self, target: str, keys: Iterable[str], *, interval_seconds: float = 0
-    ) -> None:
-        del target, keys, interval_seconds
-        raise HcUnsupportedOperation(
-            "raw key input is disabled for the Herdr Core backend"
-        )
-
-    def send_raw_text(self, target: str, text: str) -> None:
-        del target, text
-        raise HcUnsupportedOperation(
-            "raw text input is disabled for the Herdr Core backend"
-        )
-
-    def send_text_enter(self, target: str, text: str) -> None:
-        del target, text
-        raise HcUnsupportedOperation(
-            "approval text injection is disabled for the Herdr Core backend"
-        )
-
-    def agent_start(
-        self,
-        name: str,
-        *,
-        cwd: str | None = None,
-        argv: list[str] | None = None,
-        workspace: str | None = None,
-        tab: str | None = None,
-        split: str | None = None,
-        source_pane: str | None = None,
-    ) -> StartedAgent:
-        del name, cwd, argv, workspace, tab, split, source_pane
-        raise HcUnsupportedOperation(
-            "starting visible agents from chat is not implemented for Herdr Core"
-        )
-
-    def pane_close(self, pane_id: str) -> None:
-        del pane_id
-        raise HcUnsupportedOperation(
-            "closing Core terminals from chat is not implemented"
-        )
 
     def resolve_target(self, query: str) -> HerdrTarget:
         candidates = []

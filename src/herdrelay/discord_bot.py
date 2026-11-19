@@ -30,7 +30,13 @@ from .questions import (
     selected_labels,
     selection_keys,
 )
-from .runtime import InterruptRuntime, RuntimeClient
+from .runtime import (
+    AgentStartRuntime,
+    InterruptRuntime,
+    RawInputRuntime,
+    RuntimeClient,
+    TargetCloseRuntime,
+)
 from .discord_security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
 from .discord_output import StreamManager
@@ -91,17 +97,23 @@ class HerdrDiscordBot(commands.Bot):
             )
             self._thread_task = asyncio.create_task(self.thread_manager.run_forever())
             LOG.info("Started auto thread manager")
-        # Claude waits on a question indefinitely, so its choices must keep
-        # working after a restart.
-        for question in self.store.list_pending_questions():
-            self.add_view(QuestionChoiceView(bot=self, question=question))
+        question_choices_enabled = self.config.enable_approve and isinstance(
+            self.client, RawInputRuntime
+        )
+        # Legacy TUI question choices wait indefinitely, so restore them after
+        # a restart only when raw input and approval are actually enabled.
+        if question_choices_enabled:
+            for question in self.store.list_pending_questions():
+                self.add_view(QuestionChoiceView(bot=self, question=question))
         if self.config.enable_streaming:
             self.stream_manager = StreamManager(
                 bot=self,
                 config=self.config,
                 store=self.store,
                 client=self.client,
-                question_view_factory=self._question_view_for_event,
+                question_view_factory=(
+                    self._question_view_for_event if question_choices_enabled else None
+                ),
             )
             self._stream_task = asyncio.create_task(self.stream_manager.run_forever())
             LOG.info("Started output relay")
@@ -144,6 +156,8 @@ class HerdrDiscordBot(commands.Bot):
         await super().close()
 
     def _card_view_for_event(self, target: str) -> discord.ui.View | None:
+        if not isinstance(self.client, RawInputRuntime):
+            return None
         if self.store.get_pending_question(target) is not None:
             # Claude question choices use their own view; a generic Enter button
             # would silently choose the first option.
@@ -217,17 +231,21 @@ class HerdrDiscordBot(commands.Bot):
                 )
                 target_address = target_info.target
                 key_name = _special_key_name(content)
-                if key_name in SPECIAL_KEYS:
-                    await asyncio.to_thread(
-                        self.client.send_keys, target_address, SPECIAL_KEYS[key_name]
-                    )
-                    audit_fields["action"] = "key_send"
-                elif key_name in SPECIAL_KEY_SEQUENCES:
-                    await asyncio.to_thread(
-                        self.client.send_raw_text,
-                        target_address,
-                        SPECIAL_KEY_SEQUENCES[key_name],
-                    )
+                if key_name is not None:
+                    if not isinstance(self.client, RawInputRuntime):
+                        raise ApprovalError(
+                            "Raw terminal input is unavailable for this backend."
+                        )
+                    if key_name in SPECIAL_KEYS:
+                        await asyncio.to_thread(
+                            self.client.send_keys, target_address, SPECIAL_KEYS[key_name]
+                        )
+                    else:
+                        await asyncio.to_thread(
+                            self.client.send_raw_text,
+                            target_address,
+                            SPECIAL_KEY_SEQUENCES[key_name],
+                        )
                     audit_fields["action"] = "key_send"
                 else:
                     await asyncio.to_thread(self.client.send, target_address, content)
@@ -251,6 +269,8 @@ class HerdrDiscordBot(commands.Bot):
     async def _answer_pending_question(
         self, question: PendingQuestion, selected: tuple[int, ...]
     ) -> str:
+        if not isinstance(self.client, RawInputRuntime):
+            raise ApprovalError("Question choices require legacy TUI raw input.")
         current = self.store.get_pending_question(question.pane_id)
         if current is None or current.event_id != question.event_id:
             raise ApprovalError("This question is no longer pending.")
@@ -360,6 +380,8 @@ class HerdrDiscordBot(commands.Bot):
         return raw.get("workspace_id"), raw.get("tab_id"), target.cwd, target.target
 
     async def _control_start(self, message: discord.Message, args: list[str]) -> None:
+        if not isinstance(self.client, AgentStartRuntime):
+            raise ValueError("Starting agents from chat is unavailable for this backend.")
         if not args:
             raise ValueError(
                 "Usage: `@herdr start <name> [--cwd PATH] [--workspace ID] [--tab ID] [--split right|down] [-- <argv...>]`"
@@ -472,12 +494,17 @@ class HerdrDiscordBot(commands.Bot):
         if pane_id is None:
             raise ValueError("Usage: `@herdr stop <pane_id>` (or run inside a pane thread)")
         self._audit_control_command(message, "stop", "attempt", target=pane_id)
-        if isinstance(self.client, InterruptRuntime):
+        if (
+            self.client.capabilities.native_interrupt
+            and isinstance(self.client, InterruptRuntime)
+        ):
             await asyncio.to_thread(self.client.interrupt, pane_id)
             reply = f"Interrupted `{pane_id}`."
-        else:
+        elif isinstance(self.client, TargetCloseRuntime):
             await asyncio.to_thread(self.client.pane_close, pane_id)
             reply = f"Stopped `{pane_id}`."
+        else:
+            raise ValueError("Stopping targets from chat is unavailable for this backend.")
         self._audit_control_command(message, "stop", "ok", target=pane_id)
         await message.reply(reply)
 
@@ -495,7 +522,10 @@ class HerdrDiscordBot(commands.Bot):
         await message.reply("```text\n" + "\n".join(lines) + "\n```")
 
     def _control_help(self) -> str:
-        if isinstance(self.client, InterruptRuntime):
+        if (
+            self.client.capabilities.native_interrupt
+            and isinstance(self.client, InterruptRuntime)
+        ):
             return (
                 "**Herdr Core control** (mention me)\n"
                 "```\n"
@@ -507,8 +537,18 @@ class HerdrDiscordBot(commands.Bot):
                 "Inside an agent thread, normal text submits a prompt. "
                 "Raw keys, approval, start, close, kill, and remove are disabled."
             )
+        if not isinstance(self.client, (AgentStartRuntime, TargetCloseRuntime)):
+            return (
+                "**Runtime control** (mention me)\n"
+                "```\n"
+                "@herdr list                                    List available agents\n"
+                "@herdr help                                    Show this help\n"
+                "```\n"
+                "Inside an agent thread, normal text submits a prompt. "
+                "Raw keys, approval, start, stop, and close are unavailable."
+            )
         return (
-            "**Herdr control** (mention me)\n"
+            "**Herdr TUI control** (mention me)\n"
             "```\n"
             "@herdr start <name> [options] [-- <argv...>]    Start a pane (agent)\n"
             "  options: --cwd PATH --workspace ID --tab ID --split right|down\n"

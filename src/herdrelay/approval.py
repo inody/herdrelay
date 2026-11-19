@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .config import AppConfig, ApprovalStrategy
 from .models import HerdrTarget
-from .runtime import RuntimeClient
+from .runtime import RawInputRuntime
 
 
 class ApprovalError(ValueError):
@@ -37,7 +37,7 @@ def ensure_blocked_for_approval(target: HerdrTarget) -> None:
         raise ApprovalError(f"Approval requires blocked status; current status is {status}.")
 
 
-def apply_action(client: RuntimeClient, target: str, strategy: ApprovalStrategy) -> None:
+def apply_action(client: RawInputRuntime, target: str, strategy: ApprovalStrategy) -> None:
     if strategy.method == "send_keys":
         if not strategy.keys:
             raise ApprovalError("send_keys requires at least one key.")
@@ -48,8 +48,3 @@ def apply_action(client: RuntimeClient, target: str, strategy: ApprovalStrategy)
         client.send_text_enter(target, strategy.text)
     else:
         raise ApprovalError(f"Unsupported method: {strategy.method}")
-
-
-# Backwards-compatible alias for callers expecting the approval-specific name.
-def apply_approval(client: RuntimeClient, target: str, strategy: ApprovalStrategy) -> None:
-    apply_action(client, target, strategy)

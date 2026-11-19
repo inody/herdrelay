@@ -375,26 +375,24 @@ session to the exact terminal operation. It must:
 This keeps the product architecture one backend deep even if the backend has a
 small platform driver.
 
-## 10. Capabilities
+## 10. Capabilities and optional operations
 
-Backend capabilities are data, not type checks spread through transports.
-Candidate fields include:
+Capabilities used by backend-neutral mutation routing are explicit data. The
+current common flags are normal prompt submission and guarded native interrupt.
+Discovery, bounded read, normal send, and target resolution form the required
+runtime protocol.
 
-- `list_targets`;
-- `normal_send`;
-- `bounded_read`;
-- `native_events`;
-- `completed_response`;
-- `interrupt`;
-- `structured_questions`;
-- `raw_input`;
-- `guarded_approval`;
-- `agent_start`; and
-- `target_close`.
+Legacy TUI operations are not represented by false methods on every backend.
+Raw terminal input, agent start, and target close use separate optional
+interfaces implemented only by the legacy client. Discord must check both
+configuration and the relevant interface before rendering or invoking a legacy
+control. Core and Orca therefore cannot receive a legacy-only approval button
+or start/close command accidentally.
 
-The relay core rejects unsupported actions before calling a backend. Transports
-render controls from capabilities and configuration, so an Orca or Core target
-never receives a legacy-only approval button accidentally.
+Completed-response and native-event handling belong to backend services rather
+than the synchronous runtime client capability record. See
+[`feature-inventory.md`](feature-inventory.md) for the retained common surface
+and retirement candidates.
 
 ## 11. Configuration
 
