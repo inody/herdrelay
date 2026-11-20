@@ -144,28 +144,37 @@ def test_orca_client_reads_bounded_last_assistant_message():
     assert client.read(target.target, lines=2) == "two\nthree"
 
 
-def terminal(*, connected=True, writable=True):
+def terminal(
+    *,
+    connected=True,
+    writable=True,
+    handle="term-1",
+    tab_id="tab",
+    leaf_id="pane",
+    worktree_id="repo::/worktree",
+    agent_identity="pi",
+):
     raw = {
-        "handle": "term-1",
+        "handle": handle,
         "incarnationId": "incarnation-1",
         "executionHostId": "local",
-        "tabId": "tab",
-        "leafId": "pane",
-        "worktreeId": "repo::/worktree",
+        "tabId": tab_id,
+        "leafId": leaf_id,
+        "worktreeId": worktree_id,
         "connected": connected,
         "writable": writable,
-        "agentIdentity": "pi",
+        "agentIdentity": agent_identity,
     }
     return OrcaTerminal(
-        handle="term-1",
+        handle=handle,
         incarnation_id="incarnation-1",
         host_id="local",
-        tab_id="tab",
-        leaf_id="pane",
-        worktree_id="repo::/worktree",
+        tab_id=tab_id,
+        leaf_id=leaf_id,
+        worktree_id=worktree_id,
         connected=connected,
         writable=writable,
-        agent_identity="pi",
+        agent_identity=agent_identity,
         raw=raw,
     )
 
@@ -206,6 +215,20 @@ def test_orca_client_keeps_terminal_during_connection_capability_changes():
 
     assert target.target == "local/tab:pane"
     assert target.status == "starting"
+
+
+def test_orca_client_maps_temporary_pty_topology_to_stable_agent_identity():
+    client = make_client()
+    pty_key = "pty:repo::/worktree@@1234"
+    client.cli = discovery_cli(
+        [agent(state="done")],
+        terminals=[terminal(tab_id=pty_key, leaf_id=pty_key)],
+    )
+
+    [target] = client.list_targets()
+
+    assert target.target == "local/tab:pane"
+    assert target.status == "done"
 
 
 @pytest.mark.parametrize("state", ["working", "blocked", "waiting"])
@@ -255,6 +278,30 @@ def test_orca_client_sends_to_exact_writable_terminal():
             "wait_submit_seconds": 5,
         }
     ]
+
+
+def test_orca_client_sends_through_temporary_pty_topology_alias():
+    client = make_client()
+    calls = []
+    pty_key = "pty:repo::/worktree@@1234"
+
+    class FakeCli:
+        def agent_list(self):
+            return "runtime-1", [agent()]
+
+        def terminal_list(self):
+            return "runtime-1", [terminal(tab_id=pty_key, leaf_id=pty_key)]
+
+        def terminal_send(self, **kwargs):
+            calls.append(kwargs)
+            return {"accepted": True, "submitted": True, "requestId": "request-1"}
+
+    client.cli = FakeCli()
+
+    receipt = client.send_with_receipt("local/tab:pane", "continue")
+
+    assert receipt.result["requestId"] == "request-1"
+    assert calls[0]["handle"] == "term-1"
 
 
 def test_orca_client_retries_transient_discovery_gap_when_resolving_key():
@@ -327,6 +374,29 @@ def test_orca_client_rejects_changed_runtime_and_ambiguous_terminal():
     client.cli = AmbiguousCli()
     with pytest.raises(OrcaCliError, match="exactly one"):
         client.send(target.target, "continue")
+
+
+def test_orca_client_rejects_ambiguous_temporary_pty_alias():
+    client = make_client()
+    first = "pty:repo::/worktree@@1234"
+    second = "pty:repo::/worktree@@5678"
+    client.cli = discovery_cli(
+        [agent(state="working")],
+        terminals=[
+            terminal(handle="term-1", tab_id=first, leaf_id=first),
+            terminal(handle="term-2", tab_id=second, leaf_id=second),
+        ],
+    )
+
+    targets = client.list_targets()
+
+    assert {target.target for target in targets} == {
+        "local/tab:pane",
+        f"local/{first}:{first}",
+        f"local/{second}:{second}",
+    }
+    with pytest.raises(OrcaCliError, match="exactly one"):
+        client.send("local/tab:pane", "continue")
 
 
 def test_orca_client_rejects_send_while_agent_is_blocked():

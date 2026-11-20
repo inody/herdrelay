@@ -993,6 +993,44 @@ async def test_legacy_tui_topics_status_and_lifecycle_are_reconciled(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_legacy_status_restores_and_closes_stale_open_topics(tmp_path):
+    api = FakeApi([])
+    app_config = AppConfig(
+        discord_token="unused",
+        telegram=TelegramConfig(
+            enabled=True,
+            token="token",
+            allowed_chat_ids=frozenset({-1001}),
+            allowed_user_ids=frozenset({42}),
+            forum_chat_id=-1001,
+            target_absence_grace_seconds=0,
+        ),
+    )
+    store = Store(tmp_path / "store.sqlite3")
+    stale_key = TargetKey.legacy("w1:stale")
+    store.upsert_telegram_topic_for_target(
+        target=stale_key,
+        chat_id=-1001,
+        thread_id=77,
+        name="project/pi · w1:stale",
+    )
+    relay = TelegramService(
+        config=app_config,
+        store=store,
+        client=FakeLegacyClient([]),
+        api=api,
+    )
+
+    await relay.status_relay.legacy_once()
+
+    route = store.get_telegram_topic_for_target(stale_key)
+    assert route is not None and route.closed
+    assert api.closed_topics == [
+        {"chat_id": -1001, "message_thread_id": 77}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_legacy_tui_prompt_is_claimed_and_audited(tmp_path):
     api = FakeApi([[update(text="continue")]])
     target = HerdrTarget(

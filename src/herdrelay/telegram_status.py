@@ -5,7 +5,7 @@ import logging
 from time import monotonic
 
 from .config import AppConfig
-from .domain import TargetKey
+from .domain import BackendKind, TargetKey
 from .formatter import target_alias
 from .hc_client import HcClient
 from .hc_events import HcEventStream, HcStatusTransition, HcTerminalState
@@ -42,6 +42,7 @@ class TelegramStatusRelay:
         self._legacy_statuses: dict[str, str | None] = {}
         self._legacy_live_targets: dict[str, TargetKey] = {}
         self._legacy_missing_since: dict[str, float] = {}
+        self._legacy_topics_restored = False
 
     async def run_forever(self) -> None:
         while not self.stopped.is_set():
@@ -110,6 +111,7 @@ class TelegramStatusRelay:
 
     async def legacy_once(self) -> None:
         panes = await asyncio.to_thread(self.client.list_panes)
+        self._restore_open_legacy_topics()
         live_targets = {
             key.address: key
             for target in panes
@@ -162,6 +164,30 @@ class TelegramStatusRelay:
             if route_target not in detected:
                 self._legacy_statuses.pop(route_target, None)
         await self.topics.cleanup_expired_closed()
+
+    def _restore_open_legacy_topics(self) -> None:
+        if self._legacy_topics_restored:
+            return
+        try:
+            backend = BackendKind(self.config.runtime.provider)
+        except ValueError:
+            self._legacy_topics_restored = True
+            return
+        chat_id = self.telegram.forum_chat_id
+        for topic in self.store.list_telegram_topics():
+            if topic.closed or chat_id is None or int(topic.chat_id) != chat_id:
+                continue
+            try:
+                key = TargetKey.from_route_value(topic.route_target)
+            except ValueError:
+                LOG.warning(
+                    "Ignoring invalid persisted Telegram target route: %s",
+                    topic.route_target,
+                )
+                continue
+            if key.backend is backend:
+                self._legacy_live_targets[key.address] = key
+        self._legacy_topics_restored = True
 
     async def reconcile_core_topics(
         self, core_id: str, state: HcTerminalState

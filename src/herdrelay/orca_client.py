@@ -49,12 +49,18 @@ class OrcaClient:
             target = self._target_from_agent(agent)
             if target is None:
                 continue
-            if (
-                agent.kind == "terminal"
-                and target.target not in targets
-                and agent.state not in _ACTIVE_TERMINAL_AGENT_STATES
-            ):
-                continue
+            matching_terminal = _matching_terminal(agent, terminals)
+            if agent.kind == "terminal":
+                if matching_terminal is not None:
+                    targets.pop(
+                        f"{matching_terminal.host_id}/{matching_terminal.pane_key}",
+                        None,
+                    )
+                elif (
+                    target.target not in targets
+                    and agent.state not in _ACTIVE_TERMINAL_AGENT_STATES
+                ):
+                    continue
             targets[target.target] = target
         self._targets = targets
         return list(targets.values())
@@ -195,7 +201,7 @@ class OrcaClient:
         agent_name = raw_agent.get("agent")
         if not isinstance(pane_key, str) or not isinstance(host_id, str):
             raise OrcaCliError("Orca agent lacks an exact terminal identity")
-        matches = [
+        exact = [
             terminal
             for terminal in terminals
             if terminal.host_id == host_id
@@ -211,6 +217,26 @@ class OrcaClient:
                 or not terminal.agent_identity
                 or terminal.agent_identity.casefold() == agent_name.casefold()
             )
+        ]
+        if len(exact) == 1:
+            return exact[0]
+        if (
+            exact
+            or not isinstance(worktree_id, str)
+            or not isinstance(agent_name, str)
+        ):
+            raise OrcaCliError(
+                "Orca agent did not resolve to exactly one writable terminal"
+            )
+        matches = [
+            terminal
+            for terminal in terminals
+            if terminal.host_id == host_id
+            and terminal.connected
+            and terminal.writable
+            and terminal.worktree_id == worktree_id
+            and terminal.agent_identity is not None
+            and terminal.agent_identity.casefold() == agent_name.casefold()
         ]
         if len(matches) != 1:
             raise OrcaCliError(
@@ -310,6 +336,32 @@ class OrcaClient:
             cwd=worktree_path,
             raw=raw,
         )
+
+
+def _matching_terminal(
+    agent: OrcaAgent, terminals: list[OrcaTerminal]
+) -> OrcaTerminal | None:
+    if not agent.pane_key:
+        return None
+    exact = [
+        terminal
+        for terminal in terminals
+        if terminal.host_id == agent.host_id
+        and terminal.pane_key == agent.pane_key
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    if exact or not agent.worktree_id or not agent.agent:
+        return None
+    matches = [
+        terminal
+        for terminal in terminals
+        if terminal.host_id == agent.host_id
+        and terminal.worktree_id == agent.worktree_id
+        and terminal.agent_identity is not None
+        and terminal.agent_identity.casefold() == agent.agent.casefold()
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _worktree_path(worktree_id: str | None) -> str | None:
