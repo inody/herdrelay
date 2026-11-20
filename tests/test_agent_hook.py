@@ -93,7 +93,7 @@ def test_orca_v3_identity_comes_from_public_cli(monkeypatch):
     ]
 
 
-def test_orca_stop_event_is_left_to_public_cli_output_source(tmp_path, monkeypatch):
+def test_orca_stop_event_uses_public_cli_identity(tmp_path, monkeypatch):
     class Result:
         returncode = 0
         stdout = json.dumps(
@@ -116,9 +116,18 @@ def test_orca_stop_event_is_left_to_public_cli_output_source(tmp_path, monkeypat
 
     monkeypatch.setattr(agent_stop_hook.subprocess, "run", lambda *args, **kwargs: Result())
 
-    assert build_event(
+    event = build_event(
         stop_input(tmp_path), {"ORCA_PANE_KEY": "tab:pane"}
-    ) is None
+    )
+
+    assert event is not None
+    assert event["version"] == 3
+    assert event["backend"] == "orca"
+    assert event["instance_id"] == "runtime-1"
+    assert event["target"] == "local/tab:pane"
+    assert event["generation"] == "session-1"
+    assert event["agent"] == "claude"
+    assert event["text"] == "Finished response"
 
 
 def test_orca_identity_failure_does_not_fall_back_to_legacy(tmp_path, monkeypatch):

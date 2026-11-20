@@ -30,12 +30,14 @@ class FakeOrcaClient:
         return TargetKey.orca(instance_id="runtime-1", address=target)
 
 
-def orca_target(*, state: str, message: str, updated_at: int) -> HerdrTarget:
+def orca_target(
+    *, state: str, message: str, updated_at: int, agent: str = "pi"
+) -> HerdrTarget:
     return HerdrTarget(
         target="local/tab:pane",
         kind="orca-terminal",
         label="project",
-        agent_name="pi",
+        agent_name=agent,
         status=state,
         raw={
             "orca_agent": {
@@ -89,6 +91,42 @@ async def test_orca_output_source_emits_only_new_completed_responses(tmp_path):
 
     await source.poll_once()
     assert list(inbox.glob("*.json")) == [path]
+
+
+@pytest.mark.asyncio
+async def test_orca_output_source_skips_claude_completed_responses(tmp_path):
+    inbox = tmp_path / "inbox"
+    config = AppConfig(
+        discord_token="",
+        database_path=str(tmp_path / "store.sqlite3"),
+        enable_streaming=True,
+        runtime=RuntimeConfig(provider="orca"),
+        streaming=StreamConfig(hook_inbox_path=str(inbox)),
+    )
+    client = FakeOrcaClient(
+        orca_target(
+            state="working",
+            message="",
+            updated_at=1,
+            agent="claude",
+        )
+    )
+    source = OrcaOutputSource(
+        config=config,
+        store=Store(config.database_path),
+        client=client,
+    )
+
+    await source.poll_once()
+    client.target = orca_target(
+        state="done",
+        message="completed response",
+        updated_at=2,
+        agent="claude",
+    )
+    await source.poll_once()
+
+    assert list(inbox.glob("*.json")) == []
 
 
 @pytest.mark.asyncio

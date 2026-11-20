@@ -359,10 +359,13 @@ identity from the conversation generation:
 }
 ```
 
-The in-process Orca output source observes exposed agents through the public
-Orca CLI. Its first snapshot establishes a cursor without backfilling existing
-completed responses. A later changed `done` response is written atomically to
-the same private inbox and uses the normal per-destination delivery tracking.
+The in-process Orca output source observes exposed non-Claude agents through
+the public Orca CLI. Its first snapshot establishes a cursor without backfilling
+existing completed responses. A later changed `done` response is written
+atomically to the same private inbox and uses the normal per-destination delivery
+tracking. Orca-managed Claude responses instead come from Claude's Stop hook;
+Orca can keep its aggregate state at `working` for background tasks after Claude
+has already produced the user-facing response.
 
 The Pi adapter and Claude/Codex hook prefer `HC_TERMINAL_ID`. They read the
 stable Core ID from `HERDRELAY_CORE_ID` when explicitly supplied, otherwise
@@ -377,10 +380,10 @@ exact `ORCA_PANE_KEY` and resolve it to exactly one terminal agent with `orca
 agent list --json`. The public CLI supplies the runtime ID, host ID, and current
 Orca session generation for version 3 question lifecycle events. Missing,
 ambiguous, or failed CLI resolution emits nothing and never falls back to a
-legacy pane identity. Claude Stop events do not emit Orca responses because the
-in-process public-CLI output source is authoritative for completed responses;
-this prevents duplicate delivery. The hook does not use Orca's private database
-or daemon socket.
+legacy pane identity. Claude Stop events are the completion authority for
+Orca-managed Claude agents; the polling output source skips those agents to
+prevent duplicate delivery. The hook does not use Orca's private database or
+daemon socket.
 
 Supported `kind` values are:
 

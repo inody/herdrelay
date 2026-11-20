@@ -23,8 +23,9 @@ first-class:
   of the Core backend.
 - **Herdr Core interrupt** remains a guarded operation only where live semantic
   acceptance and transport confirmation are available.
-- **Orca completed-response polling** remains necessary until a public event API
-  provides equivalent data.
+- **Orca completed-response polling** remains necessary for agents without a
+  reliable completion hook. Orca-managed Claude uses its Stop hook instead,
+  because aggregate Orca state can remain `working` during background tasks.
 
 These differences should not require unsupported methods on every runtime
 client.

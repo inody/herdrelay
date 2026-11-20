@@ -172,8 +172,10 @@ Adapters write private versioned events to the local inbox. Core events require
 `HC_TERMINAL_ID` and a verifiable stable Core ID; HerdRelay does not guess Core
 identity from a working directory. Orca-managed Claude hooks use the exact
 `ORCA_PANE_KEY` and Orca's public `agent list` CLI to produce version 3
-structured-question lifecycle events. Completed Orca responses come only from
-the in-process public-CLI output source to avoid duplicate delivery.
+structured-question lifecycle events and completed Claude responses. Other
+Orca agents use the in-process public-CLI output source. Assigning one completion
+authority per agent avoids duplicate delivery while allowing Claude responses to
+arrive before aggregate background work finishes.
 
 ### 5. Run HerdRelay
 

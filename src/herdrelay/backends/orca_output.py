@@ -52,6 +52,11 @@ class OrcaOutputSource:
         await asyncio.to_thread(_prepare_inbox, destination)
         targets = await asyncio.to_thread(self.client.list_targets)
         for target in targets:
+            # Claude's Stop hook is the completion authority. Orca's aggregate
+            # state can remain working for background tasks and can publish the
+            # same completed response under multiple updatedAt values.
+            if (target.agent_name or "").casefold() == "claude":
+                continue
             raw_agent = target.raw.get("orca_agent") if target.raw else None
             if not isinstance(raw_agent, dict):
                 continue

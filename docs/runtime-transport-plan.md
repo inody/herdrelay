@@ -338,12 +338,13 @@ topic and displayed the question, both options, and their descriptions. The
 inbox event was consumed and delivery dedupe recorded one question delivery.
 No answer controls were exposed. Answering in Orca resolved the question and
 produced the expected final response. That first run exposed duplicate final
-response delivery from both Claude's Stop hook and Orca completion polling; the
-Stop hook is now suppressed for Orca so the public-CLI output source is the
-single completion authority. A follow-up Telegram prompt received the exact
-Claude response once; the harmless prompt-time question-resolution event was
-consumed without posting, and only the `orca-` completion event produced a
-visible delivery.
+response delivery from both Claude's Stop hook and Orca completion polling. The
+initial correction made polling the sole authority, but later production
+observation showed that Claude can produce its user-facing response while
+Orca's aggregate state remains `working` for background tasks; changes to
+`updatedAt` could also make polling emit the same response twice. Claude's Stop
+hook is therefore the completion authority for Orca-managed Claude agents, and
+the polling source skips Claude. Other Orca agents continue to use polling.
 
 ### Exit criteria
 
