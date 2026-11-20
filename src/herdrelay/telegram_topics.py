@@ -112,79 +112,57 @@ class TelegramTopicManager:
                 raise RuntimeError(
                     f"Telegram topic creation is cooling down for {key.address}"
                 )
+            thread_id: int | None = None
             try:
                 result = await self.api.create_forum_topic(
                     chat_id=chat_id,
                     name=name,
                 )
-            except Exception:
-                self._creation_retry_after[identity] = (
-                    time.monotonic() + TOPIC_CREATION_COOLDOWN_SECONDS
-                )
-                raise
-            thread_id = result.get("message_thread_id")
-            if not isinstance(thread_id, int) or isinstance(thread_id, bool):
-                self._creation_retry_after[identity] = (
-                    time.monotonic() + TOPIC_CREATION_COOLDOWN_SECONDS
-                )
-                raise TelegramApiError(
-                    "Telegram createForumTopic did not return message_thread_id"
-                )
-            try:
+                value = result.get("message_thread_id")
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise TelegramApiError(
+                        "Telegram createForumTopic did not return message_thread_id"
+                    )
+                thread_id = value
                 self.store.upsert_telegram_topic_for_target(
                     target=key,
                     chat_id=chat_id,
                     thread_id=thread_id,
                     name=name,
                 )
-            except Exception as persistence_error:
+                topic = self.store.get_telegram_topic_for_target(key)
+                if topic is None:
+                    raise RuntimeError("Telegram topic route was not persisted")
+            except Exception:
                 self._creation_retry_after[identity] = (
                     time.monotonic() + TOPIC_CREATION_COOLDOWN_SECONDS
                 )
-                delete_error: Exception | None = None
-                try:
-                    await self.api.delete_forum_topic(
-                        chat_id=chat_id,
-                        message_thread_id=thread_id,
-                    )
-                except Exception as exc:
-                    delete_error = exc
-                    LOG.exception(
-                        "Could not delete Telegram topic %s after persistence failure",
-                        thread_id,
-                    )
+                if thread_id is not None:
+                    try:
+                        await self.api.delete_forum_topic(
+                            chat_id=chat_id,
+                            message_thread_id=thread_id,
+                        )
+                    except Exception:
+                        LOG.exception(
+                            "Could not delete Telegram topic %s after route failure",
+                            thread_id,
+                        )
+                    else:
+                        LOG.warning(
+                            "Deleted newly created Telegram topic %s after route failure",
+                            thread_id,
+                        )
                 existing = self.store.get_telegram_topic_for_target(key)
                 if existing is not None and int(existing.chat_id) == chat_id:
+                    self._creation_retry_after.pop(identity, None)
                     LOG.warning(
-                        "Discarded newly created Telegram topic %s after route conflict; "
-                        "reusing topic %s",
+                        "Discarded newly created Telegram topic %s; reusing topic %s",
                         thread_id,
                         existing.thread_id,
                     )
                     return existing
-                if delete_error is None:
-                    LOG.warning(
-                        "Deleted newly created Telegram topic %s after route "
-                        "persistence failed",
-                        thread_id,
-                    )
-                raise persistence_error
-            topic = self.store.get_telegram_topic_for_target(key)
-            if topic is None:
-                self._creation_retry_after[identity] = (
-                    time.monotonic() + TOPIC_CREATION_COOLDOWN_SECONDS
-                )
-                try:
-                    await self.api.delete_forum_topic(
-                        chat_id=chat_id,
-                        message_thread_id=thread_id,
-                    )
-                except Exception:
-                    LOG.exception(
-                        "Could not delete Telegram topic %s after missing persisted route",
-                        thread_id,
-                    )
-                raise RuntimeError("Telegram topic route was not persisted")
+                raise
             self._creation_retry_after.pop(identity, None)
             return topic
 
