@@ -61,6 +61,11 @@ class FakeClient:
         assert address == self.target.target
         return TargetKey.orca(instance_id="runtime-1", address=address)
 
+    def resolve_target_key(self, key):
+        if key != self.target_key(self.target.target):
+            raise ValueError("target identity mismatch")
+        return self.target
+
     def send(self, address, text):
         self.sent.append((address, text))
 

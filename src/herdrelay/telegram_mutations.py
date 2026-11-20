@@ -358,12 +358,10 @@ class TelegramMutationHandler:
         key: TargetKey | None = None
         try:
             key = TargetKey.from_route_value(route.route_target)
-            targets = await asyncio.to_thread(self.client.list_targets)
-            target = next(
-                (item for item in targets if item.target == key.address), None
+            target = await asyncio.to_thread(
+                self.client.resolve_target_key,
+                key,
             )
-            if target is None or self.client.target_key(target.target) != key:
-                raise ValueError("topic target identity changed")
         except Exception:
             detail = (
                 "This topic belongs to a different Core instance; no prompt was sent."

@@ -75,14 +75,16 @@ class OrcaClient:
             raise OrcaCliError(
                 f"{key.backend.value} target identity cannot be used with Orca"
             )
-        targets = self.list_targets()
-        if self._runtime_id != key.instance_id:
-            raise OrcaCliError(
-                "bound target belongs to a different Orca runtime; no action was taken"
-            )
-        for target in targets:
-            if target.target == key.address:
-                return target
+        for _attempt in range(2):
+            targets = self.list_targets()
+            if self._runtime_id != key.instance_id:
+                raise OrcaCliError(
+                    "bound target belongs to a different Orca runtime; "
+                    "no action was taken"
+                )
+            for target in targets:
+                if target.target == key.address:
+                    return target
         raise OrcaCliError(f"Orca target is no longer available: {key.address}")
 
     def read(
@@ -119,10 +121,25 @@ class OrcaClient:
     ) -> OrcaMutationReceipt:
         if not message:
             raise ValueError("Orca prompt must not be empty")
-        current = self._resolve_live_target(target)
-        if current.status and current.status.casefold() == "blocked":
-            raise OrcaCliError(f"Orca agent is blocked: {target}", kind="blocked")
-        _, terminal = self._resolve_mutation_terminal(target, current=current)
+        resolution_error: OrcaCliError | None = None
+        for _attempt in range(2):
+            try:
+                current = self._resolve_live_target(target)
+                if current.status and current.status.casefold() == "blocked":
+                    raise OrcaCliError(
+                        f"Orca agent is blocked: {target}", kind="blocked"
+                    )
+                _, terminal = self._resolve_mutation_terminal(
+                    target, current=current
+                )
+                break
+            except OrcaCliError as exc:
+                if exc.kind:
+                    raise
+                resolution_error = exc
+        else:
+            assert resolution_error is not None
+            raise resolution_error
         result = self.cli.terminal_send(
             handle=terminal.handle,
             text=message,

@@ -63,9 +63,11 @@ key. Topic continuity follows the stable pane address across runtime-ID
 rotation. Before normal prompt submission, HerdRelay refreshes the agent list
 and maps the agent's exact `paneKey` to a single connected, writable terminal
 whose `tabId:leafId`, host, worktree, and agent identity agree. Topic discovery
-does not require those mutation-time capabilities. It then calls
-`orca terminal send --enter --wait-submit`; it never selects a terminal by
-title, repository name, cwd, or display label.
+does not require those mutation-time capabilities. If one pre-mutation snapshot
+briefly omits a terminal, HerdRelay refreshes the exact discovery snapshot once;
+this happens before any input is sent. It then calls `orca terminal send --enter
+--wait-submit`; it never selects a terminal by title, repository name, cwd, or
+display label, and it never retries after `terminal send` begins.
 
 Orca reports input acceptance and, where the agent provider supports it,
 submission observation. A transport timeout after input may have been accepted

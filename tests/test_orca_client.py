@@ -8,7 +8,7 @@ from herdrelay.config import (
     OrcaTargetExposureConfig,
     RuntimeConfig,
 )
-from herdrelay.domain import BackendKind
+from herdrelay.domain import BackendKind, TargetKey
 from herdrelay.orca_cli import OrcaAgent, OrcaCliError, OrcaTerminal
 from herdrelay.orca_client import OrcaClient
 
@@ -247,6 +247,56 @@ def test_orca_client_sends_to_exact_writable_terminal():
     receipt = client.send_with_receipt(target.target, "continue")
 
     assert receipt.observed_turn is None
+    assert receipt.result["requestId"] == "request-1"
+    assert calls == [
+        {
+            "handle": "term-1",
+            "text": "continue",
+            "wait_submit_seconds": 5,
+        }
+    ]
+
+
+def test_orca_client_retries_transient_discovery_gap_when_resolving_key():
+    client = make_client()
+    terminal_snapshots = [[], [terminal()]]
+
+    class FlakyDiscoveryCli:
+        def agent_list(self):
+            return "runtime-1", [agent(state="done")]
+
+        def terminal_list(self):
+            return "runtime-1", terminal_snapshots.pop(0)
+
+    client.cli = FlakyDiscoveryCli()
+    key = TargetKey.orca(instance_id="runtime-1", address="local/tab:pane")
+
+    target = client.resolve_target_key(key)
+
+    assert target.target == "local/tab:pane"
+    assert target.status == "done"
+
+
+def test_orca_client_retries_transient_discovery_gap_before_send():
+    client = make_client()
+    terminal_snapshots = [[], [terminal()], [terminal()]]
+    calls = []
+
+    class FlakyDiscoveryCli:
+        def agent_list(self):
+            return "runtime-1", [agent(state="done")]
+
+        def terminal_list(self):
+            return "runtime-1", terminal_snapshots.pop(0)
+
+        def terminal_send(self, **kwargs):
+            calls.append(kwargs)
+            return {"accepted": True, "submitted": True, "requestId": "request-1"}
+
+    client.cli = FlakyDiscoveryCli()
+
+    receipt = client.send_with_receipt("local/tab:pane", "continue")
+
     assert receipt.result["requestId"] == "request-1"
     assert calls == [
         {

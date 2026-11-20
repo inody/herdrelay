@@ -1055,6 +1055,11 @@ async def test_orca_prompt_is_sent_through_exact_bound_target(tmp_path):
                 instance_id="runtime-1", address=target.target
             )
 
+        def resolve_target_key(self, key):
+            if key != self.target_key(target.target):
+                raise ValueError("target identity mismatch")
+            return target
+
         def send(self, address, text):
             self.sent.append((address, text))
 
