@@ -1,41 +1,50 @@
 # HerdRelay
 
-HerdRelay connects local coding agents to authorized chat transports. It routes
-prompts, lifecycle notifications, and completed responses between Herdr Core or
-the legacy Herdr TUI and Discord or Telegram. An experimental Orca backend can
-relay eligible agent status and newly completed responses and submit normal
-prompts through Orca's public CLI.
+HerdRelay connects authorized Discord and Telegram users to local coding agents.
+One process selects one runtime backend—Herdr Core, Orca, or the legacy Herdr
+TUI—and can expose it through Discord, Telegram, or both transports at the same
+time.
 
-Herdr remains the runtime authority. HerdRelay does not start Core, expose its
-raw protocol, provide arbitrary shell access, or replace Herdr's own session
-management.
+The normal product surface is deliberately small:
+
+- discover eligible local agents and give each exact target a Discord thread or
+  Telegram forum topic;
+- submit ordinary prompts after authorization, rate limiting, audit, and a fresh
+  identity check;
+- relay lifecycle status, structured questions, and completed responses; and
+- optionally route natural-language Telegram General messages and locally
+  transcribed voice messages to one existing Agent.
+
+The selected runtime remains the authority. HerdRelay does not provide shell
+access, arbitrary terminal input, generic approval, remote Agent launch, or
+Agent/terminal close through chat. Its General router selects an existing Agent;
+it does not execute runtime-management commands.
 
 ## Support matrix
 
 | Runtime | Discord | Telegram |
 |---|---:|---:|
-| Herdr Core | Supported and live-E2E tested | Supported and live-E2E tested |
+| Herdr Core | Supported; live send/output acceptance | Supported; live send/output acceptance |
+| Orca terminal agents | Supported; automated coverage, live E2E pending | Supported; live Pi and Claude send/output acceptance |
 | Legacy Herdr TUI | Compatibility path | Best-effort; automated tests only |
-| Orca | Experimental send/output; automated tests | Experimental; live-E2E send/output tested |
 
-Herdr Core with Telegram and/or Discord is the supported production path.
-Guarded interrupt is Core-only. Raw terminal keys, generic approval/denial,
-remote agent start, and terminal close are not exposed through chat. Legacy TUI
-structured-question answers remain available through Discord when explicitly
-enabled.
+Guarded interrupt is Core-only. Core and Orca structured questions can be
+shown, but answering them from chat is disabled because neither backend has an
+accepted safe public answer operation. Legacy TUI question answers remain
+available through Discord when explicitly enabled.
 
-Verified development environment:
+Development requirements:
 
-| Component | Version or requirement |
+| Component | Requirement |
 |---|---|
 | Python | 3.12+ |
-| Herdr Core | 0.1.21 |
-| Herdr app | 0.1.16; optional presentation layer |
-| Legacy Herdr TUI | 0.9.5 compatibility |
-| Pi | 1.5.x adapter coverage |
-| Discord | `discord.py` 2.x |
 | Package manager | `uv` |
+| Discord | `discord.py` 2.x |
 | Pi adapter tests | Node.js 22.6+ |
+
+The current live contract has been exercised with Herdr Core 0.1.21 and local
+Orca public-CLI terminal agents. Runtime versions outside the tested contract
+should be validated before production use.
 
 ## Architecture
 
@@ -51,16 +60,17 @@ Telegram topic ─┴─> authorization + audit ─> runtime backend
                                              ├─> legacy Herdr CLI
                                              └─> Orca public CLI
 
-Herdr lifecycle events ─> status routing ─> enabled chat transports
-HerdRelay state/audit  <──────────────────> SQLite
+Runtime discovery/events ─> status routing ─> enabled chat transports
+HerdRelay state/audit    <──────────────────> SQLite
 ```
 
 Runtime identity and transport destination are independent. Core routes pin the
-stable Core ID together with the terminal address. Delivery dedupe is
-per-destination, so successful Discord delivery never suppresses Telegram, or
-vice versa.
+stable Core ID together with the terminal address; Orca routes pin the runtime
+identity while preserving topic continuity by stable host-qualified pane
+address. Delivery dedupe is per destination, so successful Discord delivery
+never suppresses Telegram, or vice versa.
 
-## Quick start: Herdr Core with Telegram
+## Quick start: Telegram with an existing runtime
 
 ### 1. Install HerdRelay
 
@@ -93,20 +103,21 @@ Use a dedicated Bot and a private forum-enabled supergroup.
 Never commit or paste Bot tokens into configuration, screenshots, logs, or
 issues.
 
-### 3. Configure Core and Telegram
+### 3. Select a runtime and configure Telegram
 
-A minimal supported configuration is:
+For local Orca terminal agents, a minimal send/output configuration is:
 
 ```yaml
 runtime:
-  provider: herdr-core
-  herdr_core:
-    socket_path: ~/.local/state/herdr-core/default/default.sock
+  provider: orca
+  orca:
+    cli_path: orca
+    environment: local
+    host_ids: [local]
+    include_terminal_agents: true
+    include_chats: false
     target_exposure:
       mode: all-eligible
-    require_app_visible: true
-    include_hidden_workers: false
-    include_connected_machines: false
 
 storage:
   database_path: herdrelay.sqlite3
@@ -130,29 +141,58 @@ transports:
     allowed_chat_ids: [-1001234567890]
     allowed_user_ids: [123456789]
     statuses: [blocked, done]
-    enable_send: false
+    enable_send: true
     enable_interrupt: false
     target_absence_grace_seconds: 60
     closed_topic_retention_minutes: 10
 ```
 
-`all-eligible` exposes every eligible local interactive agent while retaining
-visibility, hidden-worker, connected-machine, capability, and exact-identity
-checks. HerdRelay connects directly to the configured existing Unix socket and
-never uses a CLI command that could start Core.
+HerdRelay uses only Orca's public CLI. Before each prompt it resolves the exact
+runtime, host, pane, worktree, Agent identity, and writable terminal. A transient
+pre-send discovery gap may be refreshed once, but input is never retried after
+`terminal send` begins. Orca chats remain excluded because no accepted public
+prompt path is available; local terminal agents are supported.
 
-Installations that intentionally need a smaller set can use explicit
-`selected` mode with exact addresses and an optional private file. The
-`herdrelay-targets` CLI manages that file only in `selected` mode.
+For Herdr Core, select `provider: herdr-core` and configure an already-running
+socket:
 
-### 4. Install agent output adapters
+```yaml
+runtime:
+  provider: herdr-core
+  herdr_core:
+    socket_path: ~/.local/state/herdr-core/default/default.sock
+    require_app_visible: true
+    include_hidden_workers: false
+    include_connected_machines: false
+    target_exposure:
+      mode: all-eligible
+```
+
+HerdRelay connects to the configured existing socket and never starts Core.
+`all-eligible` exposes eligible local interactive agents while preserving
+backend-specific visibility and exact-identity checks. Installations that need a
+smaller set can use `selected` mode. The `herdrelay-targets` CLI manages the
+optional Core address file only in `selected` mode.
+
+### 4. Install the adapters required by your Agents
+
+Install the Claude hook for Core/TUI output and for Orca-managed Claude
+responses and structured questions:
 
 ```bash
 uv run python scripts/manage_claude_hook.py install
+```
+
+Install the Pi adapter when using Pi with Herdr Core or the legacy TUI:
+
+```bash
 uv run python scripts/manage_pi_adapter.py install
 ```
 
-For Codex, first enable hooks:
+Orca-managed non-Claude terminal Agents, including Pi, use public-CLI completion
+polling and do not require the Pi adapter for Orca delivery.
+
+For Codex hooks, first enable hooks:
 
 ```toml
 [features]
@@ -165,8 +205,8 @@ Then install its Stop hook:
 uv run python scripts/manage_codex_hook.py install
 ```
 
-Run `/reload` in existing Pi sessions. Restart existing Claude or Codex
-sessions after installing their hooks.
+Run `/reload` in existing Pi sessions after installing the Pi adapter. Restart
+existing Claude or Codex sessions after installing their hooks.
 
 Adapters write private versioned events to the local inbox. Core events require
 `HC_TERMINAL_ID` and a verifiable stable Core ID; HerdRelay does not guess Core
@@ -194,14 +234,16 @@ In Telegram:
 
 - `/agents` lists currently available agents;
 - `/help` shows enabled controls;
-- each eligible runtime target (terminal/pane), not each workspace or agent
+- `/forget` clears the recent General destination when conversational routing is
+  enabled;
+- each eligible runtime target (terminal/pane), not each workspace or Agent
   name, receives one forum topic;
 - ordinary topic text submits a prompt only when `enable_send: true` and a
   successful submission adds a 👀 reaction to that message;
 - `//reload` sends the agent command `/reload` without treating it as a Bot
   command; and
-- `/interrupt` requires `enable_interrupt: true` plus a one-time confirmation
-  button.
+- `/interrupt` requires `enable_interrupt: true`, backend capability, and a
+  one-time confirmation button.
 
 A target returning at the same stable address reopens its existing topic, and an
 Orca runtime-ID rotation does not create a new topic. Transient discovery gaps
@@ -211,17 +253,20 @@ name. Closed topics are deleted after `closed_topic_retention_minutes`; set it
 to `null` to keep them indefinitely. The legacy day-based setting remains
 accepted, but it cannot be combined with the minute-based setting.
 
-Prompt and interrupt attempts are claimed and audited before the Core call.
-Timeouts are recorded as `outcome_unknown` and are never retried automatically.
+Prompt and interrupt attempts are claimed and audited before the runtime call.
+Timeouts after mutation may be recorded as `outcome_unknown` and are never
+retried automatically.
 
 ### Optional General-topic LLM router
 
 `transports.telegram.general_router` can treat authorized ordinary text in
-General as a one-shot routing request. Bound agent topics still submit directly.
-The router model receives only opaque candidate IDs and display metadata, must
-return structured JSON, and cannot call runtime tools. HerdRelay verifies the
-selected live `TargetKey`, requires the forwarded prompt to be an exact substring
-of the original utterance, then uses the normal audited prompt path.
+General as a routing request to one existing Agent. Bound Agent topics still
+submit directly. The router model receives only opaque candidate IDs and display
+metadata, must return structured JSON, and cannot call runtime tools. HerdRelay
+verifies the selected live `TargetKey`, requires the forwarded prompt to be an
+exact substring of the original utterance, then uses the normal audited prompt
+path. The current router supports prompt routing only: requests to launch,
+close, interrupt, or otherwise manage Agents fail closed.
 
 The router is disabled by default and supports explicit providers:
 
@@ -263,12 +308,14 @@ clears it. The default value `0` keeps the router stateless.
 
 ### Optional Telegram voice input
 
-Authorized Telegram voice messages can be transcribed locally. General passes
-the transcript through the LLM router; with `scope: general-and-bound`, a bound
+Authorized Telegram voice messages can be transcribed locally. Voice input
+requires `enable_send: true` and an enabled General router. General passes the
+transcript through the LLM router; with `scope: general-and-bound`, a bound
 topic submits the full transcript directly through its existing Agent route
 without an LLM call. The default `scope: general` keeps bound topics text-only.
-Audio is downloaded to a private temporary directory, bounded by
-duration and file size, and deleted after each attempt.
+Audio is downloaded to a private temporary directory, bounded by duration and
+file size, and deleted after each attempt. Telegram photo, video, document, and
+other media messages are not forwarded to Agents.
 
 ```yaml
 transports:
@@ -426,9 +473,9 @@ Treat every enabled chat destination as remote terminal access.
 - Connected-machine Core targets remain disabled unless explicitly supported by
   policy and configuration.
 
-HerdRelay never exposes the raw Core socket, arbitrary Core methods, shell
-commands, force-send behavior, raw Core keys, approval/denial, or terminal
-start/close/kill/remove over Telegram.
+HerdRelay never exposes raw runtime protocols, arbitrary backend methods, shell
+commands, force-send behavior, raw terminal keys, generic approval/denial, or
+Agent/terminal start, close, kill, or remove operations over Telegram.
 
 ## Operations
 
@@ -503,25 +550,29 @@ socket. It never types into an existing terminal.
   acceptance work;
 - `docs/runtime-transport-design.md` — generalized backend/transport architecture,
   including Orca; and
-- `docs/runtime-transport-plan.md` — staged refactor and Orca implementation plan; and
+- `docs/runtime-transport-plan.md` — staged refactor and Orca implementation plan;
 - `docs/feature-inventory.md` — common features, legacy TUI-only controls, and cleanup candidates.
 
 ## Current limitations
 
-- Physical Apple Watch notification and short-reply behavior still require
-  device acceptance testing; use
-  [`docs/apple-watch-acceptance.md`](docs/apple-watch-acceptance.md).
+- Physical Apple Watch notification and short-reply behavior still require the
+  device checklist in
+  [`docs/apple-watch-acceptance.md`](docs/apple-watch-acceptance.md). Telegram
+  text and voice behavior verified on iPhone does not by itself establish Watch
+  notification acceptance.
 - Telegram interrupt is Core-only.
 - Orca prompt submission has automated coverage, direct public-CLI acceptance,
-  and live Telegram send/output acceptance; live Discord acceptance remains
-  pending. Orca-managed Claude question identity and Telegram question display
-  have live acceptance. Question text and options are display-only because no
-  safe public structured-answer operation has been accepted. Orca interrupt is
-  disabled because `terminal send --interrupt` accepted input without stopping
-  the tested Pi turn. Discord watcher events and existing-response backfill
-  remain disabled for Orca.
+  and live Telegram Pi/Claude send/output acceptance; live Discord acceptance
+  remains pending. Orca-managed Claude question identity and Telegram question
+  display have live acceptance. Question text and options are display-only
+  because no safe public structured-answer operation has been accepted. Claude
+  completed responses use its Stop hook; other Orca terminal Agents use polling,
+  which intentionally does not backfill responses that predate its first
+  snapshot. Orca interrupt is disabled because `terminal send --interrupt`
+  accepted input without stopping the tested Pi turn.
 - Legacy TUI with Telegram is best-effort and not live-acceptance tested.
 - Native Orca chat agents remain excluded until a documented safe prompt path
   is available; local Orca terminal agents are exposed automatically.
-- Existing agent sessions must load the current adapter version before they can
-  emit Core-aware output events.
+- Existing Pi sessions need `/reload` after the Pi adapter changes. Claude and
+  Codex must have their hooks installed; restart sessions after first installing
+  or changing hook registration.

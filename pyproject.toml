@@ -1,7 +1,7 @@
 [project]
 name = "herdrelay"
 version = "0.1.0"
-description = "HerdRelay — local chat transports for Herdr runtimes and agents."
+description = "HerdRelay — authorized chat transports for local coding-agent runtimes."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -17,7 +17,7 @@ runtime:
       # selected mode only:
       addresses: []               # exact terminal addresses
       addresses_file: null        # optional local 0600 file managed by herdrelay-targets
-  orca:                          # experimental public-CLI backend
+  orca:                          # public-CLI backend for local terminal agents
     cli_path: orca
     environment: local
     command_timeout_seconds: 10
