@@ -8,8 +8,20 @@ from herdrelay.config import (
     OrcaTargetExposureConfig,
     RuntimeConfig,
 )
-from herdrelay.domain import BackendKind, TargetKey
-from herdrelay.orca_cli import OrcaAgent, OrcaCliError, OrcaTerminal
+from herdrelay.domain import (
+    BackendKind,
+    BackendUnavailableError,
+    MutationFailedError,
+    MutationOutcomeUnknownError,
+    MutationRejectedError,
+    TargetKey,
+)
+from herdrelay.orca_cli import (
+    OrcaAgent,
+    OrcaCliError,
+    OrcaMutationOutcomeUnknown,
+    OrcaTerminal,
+)
 from herdrelay.orca_client import OrcaClient
 
 
@@ -372,8 +384,9 @@ def test_orca_client_rejects_changed_runtime_and_ambiguous_terminal():
             return "runtime-1", [terminal(), terminal()]
 
     client.cli = AmbiguousCli()
-    with pytest.raises(OrcaCliError, match="exactly one"):
+    with pytest.raises(BackendUnavailableError, match="exactly one") as caught:
         client.send(target.target, "continue")
+    assert isinstance(caught.value, OrcaCliError)
 
 
 def test_orca_client_rejects_ambiguous_temporary_pty_alias():
@@ -395,7 +408,34 @@ def test_orca_client_rejects_ambiguous_temporary_pty_alias():
         f"local/{first}:{first}",
         f"local/{second}:{second}",
     }
-    with pytest.raises(OrcaCliError, match="exactly one"):
+    with pytest.raises(BackendUnavailableError, match="exactly one") as caught:
+        client.send("local/tab:pane", "continue")
+    assert isinstance(caught.value, OrcaCliError)
+
+
+def test_orca_client_normalizes_definitive_and_unknown_send_failures():
+    client = make_client()
+
+    class FailingCli:
+        def agent_list(self):
+            return "runtime-1", [agent()]
+
+        def terminal_list(self):
+            return "runtime-1", [terminal()]
+
+        def terminal_send(self, **kwargs):
+            raise OrcaCliError("terminal send failed")
+
+    client.cli = FailingCli()
+    with pytest.raises(MutationFailedError, match="send failed") as failed:
+        client.send("local/tab:pane", "continue")
+    assert isinstance(failed.value, OrcaCliError)
+
+    def lose_response(**kwargs):
+        raise OrcaMutationOutcomeUnknown("response timed out")
+
+    client.cli.terminal_send = lose_response
+    with pytest.raises(MutationOutcomeUnknownError, match="timed out"):
         client.send("local/tab:pane", "continue")
 
 
@@ -403,7 +443,8 @@ def test_orca_client_rejects_send_while_agent_is_blocked():
     client = make_client()
     client.cli = discovery_cli([agent(state="blocked")])
 
-    with pytest.raises(OrcaCliError, match="blocked") as caught:
+    with pytest.raises(MutationRejectedError, match="blocked") as caught:
         client.send("local/tab:pane", "continue")
 
+    assert isinstance(caught.value, OrcaCliError)
     assert caught.value.kind == "blocked"

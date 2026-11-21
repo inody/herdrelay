@@ -11,6 +11,7 @@ from herdrelay.domain import (
     BackendKind,
     MutationOutcome,
     MutationOutcomeUnknownError,
+    MutationRejectedError,
     TargetKey,
 )
 from herdrelay.models import HerdrTarget
@@ -122,6 +123,26 @@ async def test_compatibility_backend_preserves_unknown_mutation_outcome():
 
     assert result.outcome is MutationOutcome.OUTCOME_UNKNOWN
     assert result.message == "connection closed"
+
+
+@pytest.mark.asyncio
+async def test_compatibility_backend_maps_normalized_rejection_without_backend_kind():
+    class RejectedClient(FakeClient):
+        def send_with_receipt(self, target, text):
+            raise MutationRejectedError("blocked")
+
+    backend = CompatibilityBackend(
+        kind=BackendKind.HERDR_CORE,
+        client=RejectedClient(),
+    )
+
+    result = await backend.send_text(
+        TargetKey.core(controller_core_id="core-1", address="t1"),
+        "continue",
+    )
+
+    assert result.outcome is MutationOutcome.REJECTED
+    assert result.message == "blocked"
 
 
 def test_build_backend_provider_wraps_selected_runtime(monkeypatch):

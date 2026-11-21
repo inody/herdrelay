@@ -9,6 +9,7 @@ from ..domain import (
     LifecycleState,
     MutationOutcome,
     MutationOutcomeUnknownError,
+    MutationRejectedError,
     MutationResult,
     TargetKey,
     TargetSnapshot,
@@ -167,7 +168,8 @@ def _generation_mismatch(
 def _failed_mutation(exc: Exception) -> MutationResult:
     outcome = (
         MutationOutcome.REJECTED
-        if getattr(exc, "kind", None)
+        if isinstance(exc, MutationRejectedError)
+        or getattr(exc, "kind", None)
         else MutationOutcome.FAILED
     )
     return MutationResult(outcome=outcome, message=str(exc))

@@ -1,23 +1,38 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from .config import AppConfig
-from .domain import BackendKind, TargetKey
+from .domain import (
+    BackendKind,
+    BackendUnavailableError,
+    MutationFailedError,
+    MutationOutcomeUnknownError,
+    MutationReceipt,
+    MutationRejectedError,
+    TargetKey,
+)
 from .herdr_client import TargetResolutionError
 from .models import HerdrTarget
 from .orca_cli import OrcaAgent, OrcaCli, OrcaCliError, OrcaTerminal
 from .runtime import RuntimeCapabilities
 
-
 _ACTIVE_TERMINAL_AGENT_STATES = frozenset({"working", "blocked", "waiting"})
 
 
-@dataclass(frozen=True, slots=True)
-class OrcaMutationReceipt:
-    observed_turn: int | None
-    result: dict[str, Any]
+OrcaMutationReceipt = MutationReceipt
+
+
+class OrcaMutationRejected(OrcaCliError, MutationRejectedError):
+    """Orca definitively rejected a prompt before applying it."""
+
+
+class OrcaMutationFailed(OrcaCliError, MutationFailedError):
+    """Orca definitively failed to apply a prompt."""
+
+
+class OrcaBackendUnavailable(OrcaCliError, BackendUnavailableError):
+    """Orca or the exact target was unavailable before prompt submission."""
 
 
 class OrcaClient:
@@ -119,39 +134,49 @@ class OrcaClient:
             return ""
         return "\n".join(text.splitlines()[-lines:])
 
-    def send(self, target: str, message: str) -> None:
-        self.send_with_receipt(target, message)
+    def send(self, target: str, message: str) -> MutationReceipt:
+        return self.send_with_receipt(target, message)
 
     def send_with_receipt(
         self, target: str, message: str
-    ) -> OrcaMutationReceipt:
+    ) -> MutationReceipt:
         if not message:
-            raise ValueError("Orca prompt must not be empty")
+            raise OrcaMutationRejected(
+                "Orca prompt must not be empty", kind="invalid"
+            )
         resolution_error: OrcaCliError | None = None
         for _attempt in range(2):
             try:
                 current = self._resolve_live_target(target)
                 if current.status and current.status.casefold() == "blocked":
-                    raise OrcaCliError(
+                    raise OrcaMutationRejected(
                         f"Orca agent is blocked: {target}", kind="blocked"
                     )
                 _, terminal = self._resolve_mutation_terminal(
                     target, current=current
                 )
                 break
+            except OrcaMutationRejected:
+                raise
             except OrcaCliError as exc:
-                if exc.kind:
-                    raise
                 resolution_error = exc
         else:
             assert resolution_error is not None
-            raise resolution_error
-        result = self.cli.terminal_send(
-            handle=terminal.handle,
-            text=message,
-            wait_submit_seconds=self.orca.send_wait_seconds,
-        )
-        return OrcaMutationReceipt(observed_turn=None, result=result)
+            raise OrcaBackendUnavailable(
+                str(resolution_error), kind=resolution_error.kind
+            ) from resolution_error
+        try:
+            result = self.cli.terminal_send(
+                handle=terminal.handle,
+                text=message,
+                wait_submit_seconds=self.orca.send_wait_seconds,
+            )
+        except MutationOutcomeUnknownError:
+            raise
+        except OrcaCliError as exc:
+            error_type = OrcaMutationRejected if exc.kind else OrcaMutationFailed
+            raise error_type(str(exc), kind=exc.kind) from exc
+        return MutationReceipt(observed_turn=None, result=result)
 
     def resolve_target(self, query: str) -> HerdrTarget:
         candidates = []

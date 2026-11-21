@@ -53,7 +53,7 @@ question controls.
   validation (`0b4e274`).
 - [x] Stage 1: add backend-neutral mutation receipt and error contracts without
   changing backend behavior.
-- [ ] Stage 2: normalize Core, Orca, and legacy TUI prompt results at the backend
+- [x] Stage 2: normalize Core, Orca, and legacy TUI prompt results at the backend
   boundary.
 - [ ] Stage 3: add `PromptSubmissionService` and parity tests while no transport
   uses it.
@@ -70,3 +70,10 @@ Shared rate-limit configuration is intentionally not part of the mechanical
 refactor. The service may accept a policy supplied by each transport so current
 behavior remains stable. A later change can move limits to `relay` after the
 cross-transport policy is approved.
+
+## Verification log
+
+- Stage 1: `483 passed, 1 skipped`; domain contract only.
+- Stage 2: `489 passed, 1 skipped`; Core, Orca, and legacy TUI prompt clients
+  return `MutationReceipt` and expose normalized mutation errors while retaining
+  transitional backend exception ancestry for unchanged transport behavior.

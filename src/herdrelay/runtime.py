@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from .domain import TargetKey
+from .domain import MutationReceipt, TargetKey
 from .models import HerdrTarget, PendingQuestion
 
 
@@ -36,7 +36,7 @@ class RuntimeClient(Protocol):
         source: str | None = None,
     ) -> str: ...
 
-    def send(self, target: str, message: str) -> None: ...
+    def send(self, target: str, message: str) -> MutationReceipt: ...
 
     def resolve_target(self, query: str) -> HerdrTarget: ...
 

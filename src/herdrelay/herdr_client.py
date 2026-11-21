@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 import time
+from collections.abc import Iterable
 from typing import Any
 
 from .config import AppConfig
-from .domain import MutationOutcomeUnknownError, RuntimeKind, TargetKey
+from .domain import (
+    BackendUnavailableError,
+    MutationFailedError,
+    MutationOutcomeUnknownError,
+    MutationReceipt,
+    MutationRejectedError,
+    RuntimeKind,
+    TargetKey,
+)
 from .herdr_cli import HerdrCli, HerdrCliError
 from .models import HerdrTarget, PendingQuestion
 from .questions import QUESTION_KEY_INTERVAL_SECONDS, selection_keys
@@ -14,6 +22,18 @@ from .runtime import RuntimeCapabilities
 
 class TargetResolutionError(ValueError):
     pass
+
+
+class HerdrMutationRejected(HerdrCliError, MutationRejectedError):
+    """Legacy Herdr definitively rejected a prompt before applying it."""
+
+
+class HerdrMutationFailed(HerdrCliError, MutationFailedError):
+    """Legacy Herdr definitively failed to apply a prompt."""
+
+
+class HerdrBackendUnavailable(HerdrCliError, BackendUnavailableError):
+    """Legacy Herdr or its CLI was unavailable before prompt submission."""
 
 
 class HerdrClient:
@@ -105,16 +125,25 @@ class HerdrClient:
         # server and logs.
         return self.cli.pane_read(target, lines=lines, fmt=fmt, source=source)
 
-    def send(self, target: str, message: str) -> None:
+    def send(self, target: str, message: str) -> MutationReceipt:
+        if not message:
+            raise HerdrMutationRejected("Herdr prompt must not be empty")
         try:
             self.cli.agent_prompt(target, message)
-            return
         except HerdrCliError as exc:
             if "timed out" in str(exc).casefold():
                 raise MutationOutcomeUnknownError(str(exc)) from exc
             if not self.config.allow_pane_send_fallback:
-                raise
-        self.cli.pane_run(target, message)
+                raise _normalize_herdr_send_error(exc) from exc
+        else:
+            return MutationReceipt(observed_turn=None, result={})
+        try:
+            self.cli.pane_run(target, message)
+        except HerdrCliError as exc:
+            if "timed out" in str(exc).casefold():
+                raise MutationOutcomeUnknownError(str(exc)) from exc
+            raise _normalize_herdr_send_error(exc) from exc
+        return MutationReceipt(observed_turn=None, result={"fallback": "pane_run"})
 
     def _send_question_keys(
         self, target: str, keys: Iterable[str], *, interval_seconds: float = 0
@@ -153,6 +182,15 @@ class HerdrClient:
         if not candidates:
             return HerdrTarget(target=query)
         raise TargetResolutionError(f"Target is ambiguous: {query}")
+
+
+def _normalize_herdr_send_error(exc: HerdrCliError) -> HerdrCliError:
+    error_type = (
+        HerdrBackendUnavailable
+        if "cli not found" in str(exc).casefold()
+        else HerdrMutationFailed
+    )
+    return error_type(str(exc))
 
 
 def normalize_targets(

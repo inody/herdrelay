@@ -9,7 +9,13 @@ from herdrelay.config import (
     RuntimeConfig,
     TuiTargetExposureConfig,
 )
-from herdrelay.domain import MutationOutcomeUnknownError, TargetKey
+from herdrelay.domain import (
+    BackendUnavailableError,
+    MutationFailedError,
+    MutationOutcomeUnknownError,
+    MutationReceipt,
+    TargetKey,
+)
 from herdrelay.herdr_cli import HerdrCliError
 from herdrelay.herdr_client import HerdrClient, normalize_targets
 from herdrelay.models import HerdrTarget, PendingQuestion, QuestionOption
@@ -94,8 +100,9 @@ def test_send_uses_agent_prompt_without_extra_enter():
     fake_cli = FakeCli()
     client.cli = fake_cli
 
-    client.send("w7:p2", "hello")
+    receipt = client.send("w7:p2", "hello")
 
+    assert receipt == MutationReceipt(observed_turn=None, result={})
     assert fake_cli.calls == [("agent_prompt", "w7:p2", "hello")]
 
 
@@ -113,6 +120,53 @@ def test_send_timeout_is_unknown_and_never_falls_back():
         client.send("w7:p2", "hello")
 
     fake_cli.pane_run.assert_not_called()
+
+
+def test_send_definitive_cli_failure_uses_normalized_contract():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    fake_cli = Mock()
+    fake_cli.agent_prompt.side_effect = HerdrCliError(
+        "Herdr command failed: herdr agent prompt"
+    )
+    client.cli = fake_cli
+
+    with pytest.raises(MutationFailedError, match="command failed") as caught:
+        client.send("w7:p2", "hello")
+
+    assert isinstance(caught.value, HerdrCliError)
+    fake_cli.pane_run.assert_not_called()
+
+
+def test_send_missing_cli_uses_backend_unavailable_contract():
+    client = HerdrClient(AppConfig(discord_token="token"))
+    fake_cli = Mock()
+    fake_cli.agent_prompt.side_effect = HerdrCliError(
+        "Herdr CLI not found: herdr"
+    )
+    client.cli = fake_cli
+
+    with pytest.raises(BackendUnavailableError, match="CLI not found") as caught:
+        client.send("w7:p2", "hello")
+
+    assert isinstance(caught.value, HerdrCliError)
+
+
+def test_send_fallback_returns_receipt_after_definitive_agent_prompt_failure():
+    client = HerdrClient(
+        AppConfig(discord_token="token", allow_pane_send_fallback=True)
+    )
+    fake_cli = Mock()
+    fake_cli.agent_prompt.side_effect = HerdrCliError(
+        "Herdr command failed: herdr agent prompt"
+    )
+    client.cli = fake_cli
+
+    receipt = client.send("w7:p2", "hello")
+
+    assert receipt == MutationReceipt(
+        observed_turn=None, result={"fallback": "pane_run"}
+    )
+    fake_cli.pane_run.assert_called_once_with("w7:p2", "hello")
 
 
 def test_normalize_targets_resolves_workspace_label_from_map():

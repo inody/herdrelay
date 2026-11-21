@@ -11,13 +11,22 @@ from herdrelay.config import (
     HcTargetExposureConfig,
     RuntimeConfig,
 )
-from herdrelay.domain import TargetKey
+from herdrelay.domain import (
+    MutationFailedError,
+    MutationOutcomeUnknownError,
+    MutationRejectedError,
+    TargetKey,
+)
 from herdrelay.hc_client import HcClient
 from herdrelay.hc_protocol import parse_hello_result
-from herdrelay.hc_rpc import HcCallResult, HcRpcError
+from herdrelay.hc_rpc import (
+    HcCallResult,
+    HcMutationOutcomeUnknown,
+    HcRpcError,
+)
+from herdrelay.herdr_client import HerdrClient
 from herdrelay.runtime import QuestionAnswerRuntime, RuntimeClient
 from herdrelay.runtime_client import build_runtime_client
-from herdrelay.herdr_client import HerdrClient
 
 ROOT = Path(__file__).parents[1]
 HELLO = parse_hello_result(
@@ -249,8 +258,9 @@ def test_core_client_refuses_send_to_blocked_stale_or_unlisted_target():
     rpc.terminals["shell"] = terminal("shell", app=None, reported=False)
     rpc.terminals["t1"] = terminal("t1", state="idle")
 
-    with pytest.raises(HcRpcError, match="blocked"):
+    with pytest.raises(MutationRejectedError, match="blocked") as blocked:
         client.send("blocked", "yes")
+    assert isinstance(blocked.value, HcRpcError)
     with pytest.raises(HcRpcError, match="not an eligible live agent"):
         client.send("shell", "continue")
     with pytest.raises(HcRpcError, match="connected-machine target is disabled"):
@@ -260,6 +270,31 @@ def test_core_client_refuses_send_to_blocked_stale_or_unlisted_target():
     with pytest.raises(HcRpcError, match="not exposed by target policy"):
         client.send("t99", "continue")
     assert rpc.sent == []
+
+
+def test_core_client_normalizes_definitive_and_unknown_send_failures():
+    client, rpc = make_client()
+    rpc.terminals["t1"] = terminal("t1")
+    original_call = rpc.call
+
+    def fail_send(method, params):
+        if method == "terminal.send":
+            raise HcRpcError("Core rejected terminal.send")
+        return original_call(method, params)
+
+    rpc.call = fail_send
+    with pytest.raises(MutationFailedError, match="rejected") as failed:
+        client.send("t1", "continue")
+    assert isinstance(failed.value, HcRpcError)
+
+    def lose_send_response(method, params):
+        if method == "terminal.send":
+            raise HcMutationOutcomeUnknown("connection closed")
+        return original_call(method, params)
+
+    rpc.call = lose_send_response
+    with pytest.raises(MutationOutcomeUnknownError, match="connection closed"):
+        client.send("t1", "continue")
 
 
 def test_runtime_client_factory_keeps_legacy_default():
