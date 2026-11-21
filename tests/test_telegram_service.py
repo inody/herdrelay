@@ -259,7 +259,7 @@ async def test_topic_creation_conflict_deletes_new_topic_and_reuses_existing(
 
     assert route.thread_id == "77"
     assert api.created_topics == [
-        {"chat_id": -1001, "name": "project/claude · local/tab:pane"}
+        {"chat_id": -1001, "name": "[orca] project/claude · local/tab:pane"}
     ]
     assert api.deleted_topics == [
         {"chat_id": -1001, "message_thread_id": 101}
@@ -494,7 +494,7 @@ async def test_status_delivery_reconciles_topic_dedupes_and_closes(tmp_path):
 
     await relay.status_relay.reconcile_core_topics("core-1", state)
     assert api.created_topics == [
-        {"chat_id": -1001, "name": "herdrelay/pi · t12"}
+        {"chat_id": -1001, "name": "[hc] herdrelay/pi · t12"}
     ]
     topic = relay.store.get_telegram_topic(
         core_id="core-1", terminal_address="t12"
@@ -553,11 +553,11 @@ async def test_existing_closed_topic_is_reopened_and_renamed(tmp_path):
         {
             "chat_id": -1001,
             "message_thread_id": 77,
-            "name": "herdrelay/pi · t12",
+            "name": "[hc] herdrelay/pi · t12",
         }
     ]
     assert topic.closed is False
-    assert topic.name == "herdrelay/pi · t12"
+    assert topic.name == "[hc] herdrelay/pi · t12"
 
 
 @pytest.mark.asyncio
@@ -785,7 +785,7 @@ async def test_orca_topics_follow_exposed_agent_lifecycle(tmp_path):
     )
     assert route is not None
     assert api.created_topics == [
-        {"chat_id": -1001, "name": "project/pi · local/tab:pane"}
+        {"chat_id": -1001, "name": "[orca] project/pi · local/tab:pane"}
     ]
 
     client.panes = []
@@ -939,7 +939,7 @@ async def test_orca_runtime_rotation_keeps_live_topic_open(tmp_path):
     assert route is not None and route.thread_id == "101"
     assert route.route_target == current_key.to_route_value()
     assert api.created_topics == [
-        {"chat_id": -1001, "name": "project/pi · local/tab:pane"}
+        {"chat_id": -1001, "name": "[orca] project/pi · local/tab:pane"}
     ]
     assert api.closed_topics == []
     assert api.reopened_topics == []

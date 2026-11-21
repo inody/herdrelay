@@ -12,8 +12,10 @@ The normal product surface is deliberately small:
 - submit ordinary prompts after authorization, rate limiting, audit, and a fresh
   identity check;
 - relay lifecycle status, structured questions, and completed responses; and
-- optionally route natural-language Telegram General messages and locally
-  transcribed voice messages either to one existing Agent or to an Orca Bot.
+- route Telegram General and the Discord parent channel through the same
+  backend-aware General provider; and
+- transcribe bounded Telegram voice messages locally before routing or direct
+  delivery.
 
 The selected runtime remains the authority. HerdRelay's direct mutation path
 does not provide shell access, arbitrary terminal input, generic approval,
@@ -27,7 +29,7 @@ permissions define its capabilities and confirmation policy.
 | Runtime | Discord | Telegram |
 |---|---:|---:|
 | Herdr Core | Supported; live send/output acceptance | Supported; live send/output acceptance |
-| Orca terminal agents | Supported; automated coverage, live E2E pending | Supported; live Pi and Claude send/output acceptance |
+| Orca terminal agents | Supported; live send/output acceptance | Supported; live Pi and Claude send/output acceptance |
 | Legacy Herdr TUI | Compatibility path | Best-effort; automated tests only |
 
 Guarded interrupt is Core-only. Core and Orca structured questions can be
@@ -236,8 +238,8 @@ In Telegram:
 
 - `/agents` lists currently available agents;
 - `/help` shows enabled controls;
-- `/forget` clears the recent General destination with `provider: router`, or
-  starts a new Telegram-only Orca Bot chat with `provider: orca-bot`;
+- `/forget` clears the recent Telegram General destination with the router, or
+  starts a new Telegram-specific Orca Bot chat with the Orca Bot provider;
 - each eligible runtime target (terminal/pane), not each workspace or Agent
   name, receives one forum topic;
 - ordinary topic text submits a prompt only when `enable_send: true` and a
@@ -259,34 +261,36 @@ Prompt and interrupt attempts are claimed and audited before the runtime call.
 Timeouts after mutation may be recorded as `outcome_unknown` and are never
 retried automatically.
 
-### Optional General providers
+### General providers
 
-`transports.telegram.general_router` is disabled by default. When enabled,
-`provider` selects one of two General behaviors. Bound Agent topics remain on the
-normal direct prompt path regardless of this selection.
+`relay.general` is transport-neutral. It handles ordinary text in Telegram
+General and in the configured Discord `thread_parent_channel_id`. Bound Telegram
+topics and Discord child threads always use the direct Agent path.
 
-With `provider: router`, ordinary General text is classified as a routing
-request to one existing Agent. The model receives only opaque candidate IDs and
-display metadata, must return structured JSON, and cannot call runtime tools.
-HerdRelay verifies the selected live `TargetKey`, requires the forwarded prompt
-to be an exact substring of the original utterance, then uses the normal audited
-prompt path. Requests to launch, close, interrupt, or otherwise manage Agents
-fail closed.
+`provider: auto` is recommended: Orca selects `orca-bot`, while Herdr Core and
+the legacy TUI select `router`. Explicit `router`, `orca-bot`, and disabled
+configurations remain available. Provider failures never trigger automatic
+fallback.
+
+With the router provider, ordinary General text is classified as a request to
+one existing Agent. The model receives only opaque candidate IDs and display
+metadata, must return structured JSON, and cannot call runtime tools. HerdRelay
+verifies the selected live `TargetKey`, requires the forwarded prompt to be an
+exact substring of the original utterance, then uses the audited prompt path.
+Requests to launch, close, interrupt, or otherwise manage Agents fail closed.
 
 ```yaml
-transports:
-  telegram:
-    enable_send: true
-    general_router:
-      enabled: true
-      provider: router
-      activation: all-text
-      execution_policy: auto-unique
-      model:
-        provider: openai-compatible
-        model: router-small
-        base_url: http://127.0.0.1:11434/v1
-        timeout_seconds: 5
+relay:
+  general:
+    enabled: true
+    provider: auto
+    activation: all-text
+    execution_policy: auto-unique
+    model:
+      provider: openai-compatible
+      model: router-small
+      base_url: http://127.0.0.1:11434/v1
+      timeout_seconds: 5
 ```
 
 Use `api_key_env` for remote-provider credentials; never put a key in YAML. The
@@ -310,39 +314,40 @@ explicit destination takes priority. HerdRelay verifies that a
 `recent_context` decision selects the exact stored live candidate; `/forget`
 clears it. The default value `0` keeps the router stateless.
 
-With `provider: orca-bot`, General text is sent to one configured Orca Bot. This
-mode requires `runtime.provider: orca` and fails at startup for other runtimes.
+With the Orca Bot provider, General text is sent to one configured Orca Bot.
+This mode requires `runtime.provider: orca` and fails at startup for other
+runtimes.
 HerdRelay creates and supervises a dedicated non-Agent Orca terminal because the
 public orchestration CLI requires a live sender-terminal identity. The terminal
-runs a local file-queue worker, is not published as a Telegram Agent topic, and
-does not take UI focus. Requests, pending reply correlation, heartbeat, and the
-Telegram-only Bot chat ID are stored under a private mode-`0700` queue directory.
+runs a local file-queue worker, is not published as an Agent conversation, and
+does not take UI focus. Requests, pending reply correlation, heartbeat, and
+transport-specific Bot chat IDs are stored under a private mode-`0700` queue
+directory.
 A mutation timeout is reported as `outcome_unknown` and is never resent
 automatically. There is no automatic fallback to the model router.
 
 ```yaml
 runtime:
   provider: orca
-transports:
-  telegram:
-    enable_send: true
-    general_router:
-      enabled: true
-      provider: orca-bot
-      orca_bot:
-        bot_id: 00000000-0000-0000-0000-000000000000
-        queue_path: ~/.cache/herdrelay/orca-bot-gateway
-        gateway_worktree: folder:00000000-0000-0000-0000-000000000000
-        gateway_title: HerdRelay Gateway
-        gateway_command: >-
-          cd /path/to/herdrelay &&
-          exec /path/to/uv run python -m herdrelay.orca_bot_gateway
-          --config /path/to/herdrelay/config.yaml
+relay:
+  general:
+    enabled: true
+    provider: auto
+    orca_bot:
+      bot_id: 00000000-0000-0000-0000-000000000000
+      queue_path: ~/.cache/herdrelay/orca-bot-gateway
+      gateway_worktree: folder:00000000-0000-0000-0000-000000000000
+      gateway_title: HerdRelay Gateway
+      gateway_command: >-
+        cd /path/to/herdrelay &&
+        exec /path/to/uv run python -m herdrelay.orca_bot_gateway
+        --config /path/to/herdrelay/config.yaml
 ```
 
 The Bot receives the original General text verbatim. HerdRelay correlates replies
 by the public CLI's outbound message ID and sends only matching replies back to
-General. Use a dedicated Bot chat for Telegram rather than reusing Home Chat.
+the originating transport. Telegram and Discord use separate Bot chats so their
+conversation contexts cannot mix accidentally.
 Configure side-effect confirmations and allowed behavior in the Bot's
 `SOUL.md`; HerdRelay does not grant tools or silently reinterpret Bot failures.
 `/forget` atomically moves future messages to a newly created Bot chat while
@@ -426,16 +431,22 @@ Create the Bot in the
 Put the parent text-channel ID in both `thread_parent_channel_id` and
 `allowed_channel_ids`. Automatic threads are public threads within that parent
 channel. HerdRelay adds configured allowed users as thread members and names
-managed threads `[core] alias/agent`, `[tui] alias/agent`, or
-`[orca] alias/agent`, so historical threads from another backend are not
-mistaken for the current route. Discord permissions remain the visibility
-boundary.
+managed topics and threads `[hc] alias/agent · address`,
+`[herdr] alias/agent · address`, or `[orca] alias/agent · address`, so
+historical routes from another backend are not mistaken for the current route.
+Discord permissions remain the visibility boundary.
 
-A normal message in a bound thread submits a prompt. Mentioning the Bot exposes
-`list`, `help`, and the guarded `interrupt` command when the selected backend
+A normal message in the parent channel uses General. A normal message in a bound
+child thread submits directly to that Agent. Missing targets wait for
+`target_absence_grace_seconds`, then their threads are archived. Archived managed
+threads are deleted after `closed_thread_retention_minutes`; set it to `null` to
+retain them. Mentioning the Bot exposes `list`, `help`, `forget`, and the guarded
+`interrupt` command when the selected backend
 supports it and configuration enables it. The legacy `stop` spelling remains a
 Core interrupt alias only; it never closes a target. Chat does not expose raw
-keys, agent start, terminal close/kill/remove, or generic approval/denial.
+keys, agent start, terminal close/kill/remove, or generic approval/denial. All
+HerdRelay-generated chat UI messages are English; user prompts and Agent replies
+are forwarded without translation.
 
 ## Legacy Herdr TUI compatibility
 
@@ -448,9 +459,13 @@ runtime:
     cli_path: herdr
     default_source: recent-unwrapped
     command_timeout_seconds: 20
+    target_exposure:
+      mode: selected
+      addresses: [w1:p1]
 ```
 
-Legacy Discord behavior remains available. TUI-to-Telegram routing has contract
+Use `selected` during backend tests to prevent unrelated panes from creating
+topics and threads. Legacy Discord behavior remains available. TUI-to-Telegram routing has contract
 tests but no live acceptance guarantee and is outside the supported production
 matrix.
 

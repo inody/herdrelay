@@ -43,6 +43,7 @@ class TelegramStatusRelay:
         self._legacy_live_targets: dict[str, TargetKey] = {}
         self._legacy_missing_since: dict[str, float] = {}
         self._legacy_topics_restored = False
+        self._startup_reconciled = False
 
     async def run_forever(self) -> None:
         while not self.stopped.is_set():
@@ -55,6 +56,7 @@ class TelegramStatusRelay:
                 await self._sleep_reconnect()
 
     async def run_once(self) -> None:
+        await self._close_noncurrent_topics()
         if self.core_client is not None:
             await self._core_once()
             return
@@ -66,6 +68,22 @@ class TelegramStatusRelay:
             )
         except TimeoutError:
             pass
+
+    async def _close_noncurrent_topics(self) -> None:
+        if self._startup_reconciled:
+            return
+        current = BackendKind(self.config.runtime.provider)
+        chat_id = self.telegram.forum_chat_id
+        for topic in self.store.list_telegram_topics():
+            if topic.closed or chat_id is None or int(topic.chat_id) != chat_id:
+                continue
+            try:
+                key = TargetKey.from_route_value(topic.route_target)
+            except ValueError:
+                continue
+            if key.backend is not current:
+                await self.topics.close(key)
+        self._startup_reconciled = True
 
     async def _core_once(self) -> None:
         assert self.core_client is not None

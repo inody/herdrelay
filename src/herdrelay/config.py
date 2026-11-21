@@ -10,10 +10,19 @@ from dotenv import load_dotenv
 
 
 @dataclass(frozen=True)
+class TuiTargetExposureConfig:
+    mode: str = "all-eligible"
+    addresses: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class HerdrCliConfig:
     cli_path: str = "herdr"
     default_source: str = "recent-unwrapped"
     command_timeout_seconds: int = 20
+    target_exposure: TuiTargetExposureConfig = field(
+        default_factory=TuiTargetExposureConfig
+    )
 
 
 @dataclass(frozen=True)
@@ -203,6 +212,8 @@ class AppConfig:
     allowed_channel_ids: frozenset[int] = frozenset()
     allowed_user_ids: frozenset[int] = frozenset()
     thread_parent_channel_id: int | None = None
+    discord_target_absence_grace_seconds: float = 60
+    closed_thread_retention_minutes: int | None = 10
     database_path: str = "herdrelay.sqlite3"
     max_output_chars: int = 1800
     max_message_chars: int = 2000
@@ -270,11 +281,16 @@ def load_config(
     telegram_data = transports_data.get("telegram") or {}
     if not isinstance(telegram_data, dict):
         raise ValueError("transports.telegram must be a YAML mapping")
-    general_router_data = telegram_data.get("general_router") or {}
+    relay_data = data.get("relay") or {}
+    if not isinstance(relay_data, dict):
+        raise ValueError("relay must be a YAML mapping")
+    general_router_data = (
+        relay_data.get("general")
+        if "general" in relay_data
+        else telegram_data.get("general_router")
+    ) or {}
     if not isinstance(general_router_data, dict):
-        raise ValueError(
-            "transports.telegram.general_router must be a YAML mapping"
-        )
+        raise ValueError("relay.general must be a YAML mapping")
     router_model_data = general_router_data.get("model") or {}
     if not isinstance(router_model_data, dict):
         raise ValueError(
@@ -296,9 +312,6 @@ def load_config(
     storage_data = data.get("storage") or {}
     if not isinstance(storage_data, dict):
         raise ValueError("storage must be a YAML mapping")
-    relay_data = data.get("relay") or {}
-    if not isinstance(relay_data, dict):
-        raise ValueError("relay must be a YAML mapping")
     discord = DiscordTransportConfig(
         enabled=bool(discord_data.get("enabled", True))
     )
@@ -319,6 +332,7 @@ def load_config(
         if "streaming" in relay_data
         else data.get("streaming")
     ) or {}
+    tui_target_exposure = _tui_target_exposure(tui_data)
     core_target_exposure = _core_target_exposure(
         core_data, base=config_path.parent
     )
@@ -342,6 +356,12 @@ def load_config(
             discord_data.get(
                 "thread_parent_channel_id", data.get("thread_parent_channel_id")
             )
+        ),
+        discord_target_absence_grace_seconds=float(
+            discord_data.get("target_absence_grace_seconds", 60)
+        ),
+        closed_thread_retention_minutes=_optional_int(
+            discord_data.get("closed_thread_retention_minutes", 10)
         ),
         database_path=_database_path(
             storage_data.get("database_path") or data.get("database_path")
@@ -411,6 +431,7 @@ def load_config(
                 command_timeout_seconds=int(
                     tui_data.get("command_timeout_seconds", 20)
                 ),
+                target_exposure=tui_target_exposure,
             ),
             core=HcRuntimeConfig(
                 socket_path=(
@@ -652,7 +673,9 @@ def load_config(
         ),
     )
     _validate_runtime_features(config)
+    _validate_discord_lifecycle(config)
     _validate_telegram(config)
+    _validate_general(config)
     return config
 
 
@@ -762,35 +785,62 @@ def _validate_telegram(config: AppConfig) -> None:
                 "Telegram command transcription requires a non-empty argv list"
             )
 
-    router = telegram.general_router
+
+
+def effective_general_provider(config: AppConfig) -> str:
+    provider = config.telegram.general_router.provider
+    if provider == "auto":
+        return "orca-bot" if config.runtime.provider == "orca" else "router"
+    return provider
+
+
+def _validate_discord_lifecycle(config: AppConfig) -> None:
+    if config.discord_target_absence_grace_seconds < 0:
+        raise ValueError("Discord target_absence_grace_seconds must not be negative")
+    if (
+        config.closed_thread_retention_minutes is not None
+        and config.closed_thread_retention_minutes < 1
+    ):
+        raise ValueError(
+            "Discord closed_thread_retention_minutes must be at least 1 or null"
+        )
+
+
+def _validate_general(config: AppConfig) -> None:
+    router = config.telegram.general_router
     if not router.enabled:
         return
-    if not telegram.enable_send:
-        raise ValueError("Telegram general_router requires enable_send: true")
-    if router.provider not in {"router", "orca-bot"}:
+    if not (
+        (config.telegram.enabled and config.telegram.enable_send)
+        or (config.discord.enabled and config.enable_send)
+    ):
         raise ValueError(
-            "Telegram general_router.provider must be 'router' or 'orca-bot'"
+            "General routing requires enable_send: true on an enabled transport"
+        )
+    if router.provider not in {"auto", "router", "orca-bot"}:
+        raise ValueError(
+            "relay.general.provider must be 'auto', 'router', or 'orca-bot'"
         )
     if router.activation != "all-text":
         raise ValueError(
-            "Telegram general_router.activation currently supports only 'all-text'"
+            "relay.general.activation currently supports only 'all-text'"
         )
     if router.general_topic_id is not None and router.general_topic_id <= 0:
-        raise ValueError("Telegram general_router.general_topic_id must be positive")
-    if router.provider == "orca-bot":
+        raise ValueError("relay.general.general_topic_id must be positive")
+    if effective_general_provider(config) == "orca-bot":
         if config.runtime.provider != "orca":
             raise ValueError(
-                "Telegram orca-bot General provider requires runtime.provider=orca"
+                "orca-bot General provider requires runtime.provider=orca"
             )
         bot = router.orca_bot
         if not bot.bot_id or not bot.gateway_worktree or not bot.gateway_command:
             raise ValueError(
-                "Telegram orca-bot General provider requires bot_id, "
-                "gateway_worktree, and gateway_command"
+                "orca-bot General provider requires bot_id, gateway_worktree, "
+                "and gateway_command"
             )
         if not bot.queue_path.strip() or not bot.gateway_title.strip():
             raise ValueError(
-                "Telegram orca-bot queue_path and gateway_title must not be empty"
+                "orca-bot queue_path and gateway_title must not be empty"
             )
         if (
             bot.refresh_seconds <= 0
@@ -798,43 +848,41 @@ def _validate_telegram(config: AppConfig) -> None:
             or bot.command_timeout_seconds <= 0
         ):
             raise ValueError(
-                "Telegram orca-bot timing values must be positive and the "
-                "heartbeat stale interval must exceed the refresh interval"
+                "orca-bot timing values must be positive and the heartbeat "
+                "stale interval must exceed the refresh interval"
             )
         return
 
     if router.execution_policy != "auto-unique":
         raise ValueError(
-            "Telegram general_router.execution_policy currently supports only 'auto-unique'"
+            "relay.general.execution_policy currently supports only 'auto-unique'"
         )
     if not 0 <= router.context_ttl_seconds <= 86_400:
         raise ValueError(
-            "Telegram general_router.context_ttl_seconds must be between 0 and 86400"
+            "relay.general.context_ttl_seconds must be between 0 and 86400"
         )
     model = router.model
     if model.provider not in {"openai-compatible", "pi-cli", "command"}:
         raise ValueError(
-            "Telegram general_router.model.provider must be "
-            "'openai-compatible', 'pi-cli', or 'command'"
+            "relay.general.model.provider must be 'openai-compatible', "
+            "'pi-cli', or 'command'"
         )
     if model.timeout_seconds <= 0:
-        raise ValueError("Telegram general_router model timeout must be positive")
+        raise ValueError("relay.general model timeout must be positive")
     if model.max_output_bytes < 1024:
         raise ValueError(
-            "Telegram general_router model max_output_bytes must be at least 1024"
+            "relay.general model max_output_bytes must be at least 1024"
         )
     if model.provider == "openai-compatible":
         if not model.model or not model.base_url:
             raise ValueError(
-                "Telegram openai-compatible router requires model and base_url"
+                "openai-compatible General router requires model and base_url"
             )
     elif model.provider == "pi-cli":
         if not model.model or not model.cli_path.strip():
-            raise ValueError(
-                "Telegram pi-cli router requires model and cli_path"
-            )
+            raise ValueError("pi-cli General router requires model and cli_path")
     elif not model.argv:
-        raise ValueError("Telegram command router requires a non-empty argv list")
+        raise ValueError("command General router requires a non-empty argv list")
 
 
 def _validate_runtime_features(config: AppConfig) -> None:
@@ -859,6 +907,11 @@ def _validate_runtime_features(config: AppConfig) -> None:
             )
         return
     if config.runtime.provider == "herdr-tui":
+        _validate_target_exposure(
+            mode=config.runtime.tui.target_exposure.mode,
+            selectors=config.runtime.tui.target_exposure.addresses,
+            path="runtime.herdr_tui.target_exposure",
+        )
         if config.enable_interrupt:
             raise ValueError(
                 "Discord interrupt requires a guarded native backend operation"
@@ -907,6 +960,18 @@ def _validate_target_exposure(
         raise ValueError(f"{path}.mode 'selected' requires exact selectors")
     if mode in {"all-eligible", "none"} and selectors:
         raise ValueError(f"{path}.mode '{mode}' cannot include selectors")
+
+
+def _tui_target_exposure(data: dict[str, Any]) -> TuiTargetExposureConfig:
+    raw = data.get("target_exposure")
+    if raw is None:
+        return TuiTargetExposureConfig()
+    if not isinstance(raw, dict):
+        raise ValueError("runtime.herdr_tui.target_exposure must be a YAML mapping")
+    return TuiTargetExposureConfig(
+        mode=_target_exposure_mode(raw.get("mode")),
+        addresses=_string_set(raw.get("addresses")),
+    )
 
 
 def _core_target_exposure(

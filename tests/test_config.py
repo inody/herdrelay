@@ -1,6 +1,44 @@
 import pytest
 
-from herdrelay.config import load_config
+from herdrelay.config import effective_general_provider, load_config
+
+
+@pytest.mark.parametrize(
+    ("runtime", "expected"),
+    (("orca", "orca-bot"), ("herdr-core", "router"), ("herdr-tui", "router")),
+)
+def test_general_auto_selects_provider_for_runtime(
+    tmp_path, monkeypatch, runtime, expected
+):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f"""
+runtime:
+  provider: {runtime}
+relay:
+  general:
+    enabled: true
+    provider: auto
+    model:
+      provider: command
+      argv: [router]
+    orca_bot:
+      bot_id: bot-1
+      gateway_worktree: folder:bot
+      gateway_command: run-gateway
+transports:
+  discord:
+    enabled: true
+    enable_send: true
+    allowed_user_ids: [42]
+"""
+    )
+
+    config = load_config(config_path)
+
+    assert effective_general_provider(config) == expected
 
 
 def test_load_config_reads_thread_and_streaming_settings(tmp_path, monkeypatch):

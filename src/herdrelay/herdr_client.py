@@ -26,17 +26,17 @@ class HerdrClient:
     def list_targets(self) -> list[HerdrTarget]:
         workspace_labels = self.list_workspaces()
         try:
-            return normalize_targets(
+            return self._filter_exposed(normalize_targets(
                 self.cli.agent_list(),
                 preferred_kind="agent",
                 workspace_labels=workspace_labels,
-            )
+            ))
         except HerdrCliError:
-            return normalize_targets(
+            return self._filter_exposed(normalize_targets(
                 self.cli.pane_list(),
                 preferred_kind="pane",
                 workspace_labels=workspace_labels,
-            )
+            ))
 
     def list_panes(self) -> list[HerdrTarget]:
         """List all live panes, including shells without a detected agent.
@@ -53,11 +53,19 @@ class HerdrClient:
             for item in items
         ):
             raise HerdrCliError("Herdr did not return a valid pane list")
-        return normalize_targets(
+        return self._filter_exposed(normalize_targets(
             items,
             preferred_kind="pane",
             workspace_labels=self.list_workspaces(),
-        )
+        ))
+
+    def _filter_exposed(self, targets: list[HerdrTarget]) -> list[HerdrTarget]:
+        exposure = self.config.runtime.tui.target_exposure
+        if exposure.mode == "none":
+            return []
+        if exposure.mode == "selected":
+            return [target for target in targets if target.target in exposure.addresses]
+        return targets
 
     def list_workspaces(self) -> dict[str, str]:
         """Return a mapping of workspace_id -> human-readable label."""

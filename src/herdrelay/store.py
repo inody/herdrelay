@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .domain import BackendKind, TargetKey
 from .models import (
+    AgentThreadRoute,
     AuditEntry,
     Binding,
     PendingQuestion,
@@ -80,6 +81,7 @@ class Store:
                   thread_id TEXT NOT NULL,
                   guild_id TEXT NOT NULL,
                   alias TEXT,
+                  closed INTEGER NOT NULL DEFAULT 0,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 );
@@ -138,8 +140,19 @@ class Store:
                 );
                 """
             )
+            self._migrate_agent_threads(conn)
             self._migrate_telegram_topics(conn)
             self._migrate_telegram_confirmations(conn)
+
+    def _migrate_agent_threads(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(agent_threads)")
+        }
+        if "closed" not in columns:
+            conn.execute(
+                "ALTER TABLE agent_threads ADD COLUMN closed INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _migrate_telegram_confirmations(self, conn: sqlite3.Connection) -> None:
         columns = {
@@ -830,12 +843,15 @@ class Store:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO agent_threads (pane_id, thread_id, guild_id, alias, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO agent_threads (
+                  pane_id, thread_id, guild_id, alias, closed, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, 0, ?, ?)
                 ON CONFLICT(pane_id) DO UPDATE SET
                   thread_id = excluded.thread_id,
                   guild_id = excluded.guild_id,
                   alias = excluded.alias,
+                  closed = 0,
                   updated_at = excluded.updated_at
                 """,
                 (pane_id, str(thread_id), str(guild_id), alias, now, now),
@@ -855,12 +871,13 @@ class Store:
             conn.execute(
                 """
                 INSERT INTO agent_threads (
-                  pane_id, thread_id, guild_id, alias, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                  pane_id, thread_id, guild_id, alias, closed, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(pane_id) DO UPDATE SET
                   thread_id = excluded.thread_id,
                   guild_id = excluded.guild_id,
                   alias = excluded.alias,
+                  closed = excluded.closed,
                   updated_at = excluded.updated_at
                 """,
                 (
@@ -868,6 +885,7 @@ class Store:
                     row["thread_id"],
                     row["guild_id"],
                     row["alias"],
+                    row["closed"],
                     row["created_at"],
                     now,
                 ),
@@ -893,11 +911,40 @@ class Store:
 
     def list_agent_threads(self) -> dict[str, str]:
         """Return mapping of pane_id -> thread_id for all recorded threads."""
+        return {
+            route.pane_id: route.thread_id
+            for route in self.list_agent_thread_routes()
+        }
+
+    def list_agent_thread_routes(self) -> list[AgentThreadRoute]:
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT pane_id, thread_id FROM agent_threads"
-            ).fetchall()
-        return {str(row["pane_id"]): str(row["thread_id"]) for row in rows}
+            rows = conn.execute("SELECT * FROM agent_threads").fetchall()
+        return [
+            AgentThreadRoute(
+                pane_id=str(row["pane_id"]),
+                thread_id=str(row["thread_id"]),
+                guild_id=str(row["guild_id"]),
+                alias=str(row["alias"]) if row["alias"] is not None else None,
+                closed=bool(row["closed"]),
+                created_at=str(row["created_at"]),
+                updated_at=str(row["updated_at"]),
+            )
+            for row in rows
+        ]
+
+    def set_agent_thread_closed(self, *, pane_id: str, closed: bool) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE agent_threads SET closed = ?, updated_at = ? WHERE pane_id = ?",
+                (int(closed), _now(), pane_id),
+            )
+
+    def delete_agent_thread(self, *, pane_id: str) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM agent_threads WHERE pane_id = ?", (pane_id,)
+            )
+            return cursor.rowcount
 
 
 def _pending_question(row: sqlite3.Row) -> PendingQuestion | None:

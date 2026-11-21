@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 import logging
+from time import monotonic
 
 import discord
 
 from .config import AppConfig
-from .domain import BackendKind
-from .formatter import target_alias
+from .domain import BackendKind, TargetKey
+from .formatter import target_alias, target_route_name, target_route_name_for
 from .models import HerdrTarget
 from .runtime import RuntimeClient
 from .store import Store
@@ -18,27 +20,20 @@ THREAD_NAME_MAX = 100
 
 
 def thread_name(
-    target: HerdrTarget, *, backend: BackendKind | None = None
+    target: HerdrTarget,
+    *,
+    key: TargetKey | None = None,
+    backend: BackendKind | None = None,
 ) -> str:
-    """Build a Discord thread name, prefixed with a marker only when blocked.
-
-    Status changes between working/idle/done are frequent and would trip Discord's
-    channel-edit rate limits, so we only mark blocked panes distinctly.
-    """
-    alias = target_alias(target)
-    agent = target.agent_name or target.kind or "?"
-    status = (target.status or "").casefold()
-    status_prefix = "🔴 " if status == "blocked" else ""
-    backend_prefix = f"[{_backend_label(backend)}] " if backend is not None else ""
-    return f"{status_prefix}{backend_prefix}{alias}/{agent}"[:THREAD_NAME_MAX]
-
-
-def _backend_label(backend: BackendKind) -> str:
-    return {
-        BackendKind.HERDR_CORE: "core",
-        BackendKind.HERDR_TUI: "tui",
-        BackendKind.ORCA: "orca",
-    }[backend]
+    """Build the stable transport-neutral agent conversation name."""
+    if key is not None:
+        route_name = target_route_name(key, target)
+    elif backend is not None:
+        route_name = target_route_name_for(backend, target.target, target)
+    else:
+        agent = target.agent_name or target.kind or "?"
+        route_name = f"{target_alias(target)}/{agent}"
+    return route_name[:THREAD_NAME_MAX]
 
 
 class ThreadManager:
@@ -58,6 +53,7 @@ class ThreadManager:
         self.client = client
         self._stopped = asyncio.Event()
         self._membership_synced: set[int] = set()
+        self._missing_since: dict[str, float] = {}
 
     def stop(self) -> None:
         self._stopped.set()
@@ -96,6 +92,7 @@ class ThreadManager:
             except Exception:
                 LOG.exception("Failed to sync thread for %s", target.target)
         await self._archive_stale_threads(parent, active_pane_ids)
+        await self._delete_expired_threads(parent)
         self.store.clear_pending_questions_except(active_pane_ids)
 
     async def _sync_target(self, parent: discord.TextChannel, target: HerdrTarget) -> None:
@@ -106,7 +103,7 @@ class ThreadManager:
         pane_id = target.target
         key = self.client.target_key(pane_id)
         route_target = key.to_route_value()
-        name = thread_name(target, backend=key.backend)
+        name = thread_name(target, key=key)
         alias = target_alias(target)
         existing = self.store.get_agent_thread(route_target)
         if existing is None and route_target != pane_id:
@@ -146,26 +143,30 @@ class ThreadManager:
                 route_target,
             )
             return
-        await self._ensure_allowed_members(thread, parent.guild)
+        self._missing_since.pop(route_target, None)
+        edits: dict[str, object] = {}
         if thread.archived:
+            edits["archived"] = False
+            edits["reason"] = f"Target {pane_id} active again"
+        if thread.name != name:
+            edits["name"] = name
+        if edits:
             try:
-                await thread.edit(archived=False, reason=f"Pane {pane_id} active again")
-                LOG.info("Unarchived thread %s for %s", thread.id, route_target)
+                await thread.edit(**edits)
+                self.store.upsert_agent_thread(
+                    pane_id=route_target,
+                    thread_id=thread.id,
+                    guild_id=parent.guild.id,
+                    alias=alias,
+                )
+                LOG.info("Updated thread %s for %s", thread.id, route_target)
             except discord.HTTPException:
-                LOG.warning("Could not unarchive thread %s", thread.id)
-        if thread.name == name:
-            return
-        try:
-            await thread.edit(name=name)
-            self.store.upsert_agent_thread(
-                pane_id=route_target,
-                thread_id=thread.id,
-                guild_id=parent.guild.id,
-                alias=alias,
+                LOG.warning("Could not update thread %s (rate limited?)", thread.id)
+        else:
+            self.store.set_agent_thread_closed(
+                pane_id=route_target, closed=False
             )
-            LOG.info("Renamed thread %s to %s", thread.id, name)
-        except discord.HTTPException:
-            LOG.warning("Could not rename thread %s (rate limited?)", thread.id)
+        await self._ensure_allowed_members(thread, parent.guild)
 
     async def _ensure_allowed_members(
         self, thread: discord.Thread, guild: discord.Guild
@@ -201,21 +202,71 @@ class ThreadManager:
     async def _archive_stale_threads(
         self, parent: discord.TextChannel, active_pane_ids: set[str]
     ) -> None:
-        """Archive threads whose pane no longer exists."""
-        for pane_id, thread_id_str in self.store.list_agent_threads().items():
+        """Archive missing current-backend threads after grace, and old backends now."""
+        now = monotonic()
+        current_backend = _current_backend(self.config)
+        for route in self.store.list_agent_thread_routes():
+            pane_id = route.pane_id
             if pane_id in active_pane_ids:
+                self._missing_since.pop(pane_id, None)
                 continue
             try:
-                thread = await self._fetch_thread(parent, int(thread_id_str))
+                key = TargetKey.from_route_value(pane_id)
+            except ValueError:
+                key = None
+            switched_backend = key is not None and key.backend is not current_backend
+            missing_since = self._missing_since.setdefault(pane_id, now)
+            if (
+                not switched_backend
+                and now - missing_since
+                < self.config.discord_target_absence_grace_seconds
+            ):
+                continue
+            try:
+                thread = await self._fetch_thread(parent, int(route.thread_id))
             except ValueError:
                 continue
-            if thread is None or thread.archived:
+            if thread is None:
+                continue
+            if thread.archived:
+                if not route.closed:
+                    self.store.set_agent_thread_closed(pane_id=pane_id, closed=True)
                 continue
             try:
-                await thread.edit(archived=True, reason=f"Pane {pane_id} closed")
-                LOG.info("Archived thread %s (pane %s gone)", thread_id_str, pane_id)
+                await thread.edit(archived=True, reason=f"Target {pane_id} closed")
+                self.store.set_agent_thread_closed(pane_id=pane_id, closed=True)
+                LOG.info("Archived thread %s (target %s gone)", route.thread_id, pane_id)
             except discord.HTTPException:
-                LOG.warning("Could not archive thread %s", thread_id_str)
+                LOG.warning("Could not archive thread %s", route.thread_id)
+
+    async def _delete_expired_threads(self, parent: discord.TextChannel) -> None:
+        retention = self.config.closed_thread_retention_minutes
+        if retention is None:
+            return
+        cutoff = datetime.now(UTC).timestamp() - retention * 60
+        for route in self.store.list_agent_thread_routes():
+            if not route.closed or _timestamp(route.updated_at) > cutoff:
+                continue
+            thread = None
+            try:
+                thread = await self._fetch_thread(parent, int(route.thread_id))
+            except ValueError:
+                pass
+            if thread is not None:
+                try:
+                    await thread.delete(reason="HerdRelay closed-thread retention expired")
+                except discord.HTTPException:
+                    LOG.warning("Could not delete expired thread %s", route.thread_id)
+                    continue
+            self.store.delete_binding(
+                guild_id=route.guild_id,
+                channel_id=parent.id,
+                thread_id=route.thread_id,
+            )
+            self.store.delete_agent_thread(pane_id=route.pane_id)
+            self._membership_synced.discard(int(route.thread_id))
+            self._missing_since.pop(route.pane_id, None)
+            LOG.info("Deleted expired thread %s", route.thread_id)
 
     async def _fetch_thread(
         self, parent: discord.TextChannel, thread_id: int
@@ -239,3 +290,18 @@ class ThreadManager:
         if not isinstance(channel, discord.TextChannel):
             raise RuntimeError(f"Thread parent channel is not a text channel: {channel_id}")
         return channel
+
+
+def _current_backend(config: AppConfig) -> BackendKind:
+    return {
+        "herdr-tui": BackendKind.HERDR_TUI,
+        "herdr-core": BackendKind.HERDR_CORE,
+        "orca": BackendKind.ORCA,
+    }[config.runtime.provider]
+
+
+def _timestamp(value: str) -> float:
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except ValueError:
+        return 0

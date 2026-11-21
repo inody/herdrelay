@@ -19,15 +19,19 @@ It reuses an existing `herdr-discord-bridge.sqlite3` only when the preferred
 file is absent. Keep the chosen database when upgrading because it contains:
 
 - `bindings`: Discord location to Herdr pane mappings;
-- `agent_threads`: pane to automatic-thread mappings;
+- `agent_threads`: normalized target to automatic-thread mappings and archive state;
 - `audit_log`: input and control action records;
 - `event_dedupe`: delivered hook and watcher event keys; and
 - `pending_questions`: unanswered structured Claude questions;
 - `telegram_topics`: normalized target-to-topic routes; and
 - `transport_audit`: claimed Discord/Telegram mutations and outcomes.
 
-HerdRelay does not currently expose a database migration or pruning command.
-Back up the database with the bot stopped, or use SQLite's online-backup tools.
+Use the same `storage.database_path` for Orca, Herdr Core, and TUI configurations.
+Normalized target keys keep routes distinct while allowing a backend switch to
+archive or close the previous backend's conversations and later reuse retained
+routes. HerdRelay performs schema migration at startup but does not expose a
+manual pruning command. Back up the database with the bot stopped, or use
+SQLite's online-backup tools.
 
 ## Herdr session selection
 
@@ -110,18 +114,21 @@ and reuses an existing stable route when one appeared concurrently. Do not
 delete a still-tracked topic manually: a missing Telegram topic with a retained
 SQLite route cannot be reopened.
 
-## Telegram General providers
+## General providers
 
-When `transports.telegram.general_router.enabled` is true, `provider` selects
-`router` or `orca-bot`. General itself is the trigger; no wake word is required.
-Slash commands are handled locally before General processing, and bound Agent
-topics bypass either provider entirely.
+When `relay.general.enabled` is true, Telegram General and the configured
+Discord parent channel use the same provider. `provider: auto` selects
+`orca-bot` for Orca and `router` for Herdr Core or the legacy TUI. Explicit
+provider selection remains available, and failures never trigger automatic
+fallback. Commands are handled locally before General processing. Bound
+Telegram topics and Discord child threads bypass General entirely.
 
-With `provider: router`, authorized ordinary text in General is sent to the
-configured intent model.
+With the router provider, authorized ordinary text is sent to the configured
+intent model.
 
-The model receives opaque candidate IDs plus topic ID, workspace/title, agent,
-status, and display alias. It does not receive the runtime address or cwd. Its
+The model receives opaque candidate IDs plus workspace/title, agent, status,
+and display alias. It does not receive a transport destination ID, runtime
+address, or cwd. Its
 JSON decision must select a supplied candidate and extract the forwarded prompt
 as an exact substring of the original message. HerdRelay then refreshes the
 runtime, verifies the exact target identity, applies the normal blocklist and
@@ -144,29 +151,32 @@ Telegram installations that report General with a numeric thread ID, set
 `message_thread_id`.
 
 When `context_ttl_seconds` is positive, a successful General route stores the
-selected topic ID with a timestamp under a chat-and-user-specific SQLite state
-key. On the next request, the model receives that current candidate as
+selected target identity with a timestamp under a transport-, conversation-,
+and-user-specific SQLite state key. On the next request, the model receives that
+current candidate as
 `recent_context` together with its age. The model returns
 `routing_basis=explicit_destination` when the utterance names a target, or
 `routing_basis=recent_context` for a conversational continuation. Explicit
 switches take priority. HerdRelay rejects a context-based decision unless it
 selects the exact stored candidate, which must still be live. Context expires at
-the configured TTL, disappears when its topic is unavailable, survives a
-service restart while fresh, and can be cleared with `/forget`. Ambiguous or
+the configured TTL, disappears when its conversation is unavailable, survives a
+service restart while fresh, and can be cleared with Telegram `/forget` or
+Discord `@herdr forget`. Ambiguous or
 failed requests do not replace it.
 
-With `provider: orca-bot`, authorized General text is sent verbatim to the exact
+With the Orca Bot provider, authorized General text is sent verbatim to the exact
 configured Orca Bot ID. This provider requires the Orca runtime and does not
 fall back to the model router. HerdRelay supervises a dedicated non-Agent Orca
 terminal in the Bot's worktree because `orca orchestration send` requires a live
 sender-terminal identity. The terminal runs the configured gateway worker,
-does not receive a Telegram topic, and is identified by `gateway_title` plus a
+does not receive an Agent conversation, and is identified by `gateway_title` plus a
 private heartbeat. A stale worker is replaced only after a second stale window;
 a worker lock prevents two consumers from processing the queue.
 
 The gateway stores mode-0600 atomic JSON requests, processing state, outbound
-message correlations, events, heartbeat, and the Telegram-only Bot chat ID under
-a mode-0700 queue directory. It uses only `orca orchestration send` and
+message correlations, events, heartbeat, and transport-specific Bot chat IDs
+under a mode-0700 queue directory. Telegram and Discord have separate Bot chats.
+It uses only `orca orchestration send` and
 `orca orchestration check`. Replies are accepted only when their `thread_id`
 matches an outstanding outbound message ID, then are consumed from the mailbox
 and delivered to the original General destination. A send timeout, restart with
@@ -222,7 +232,7 @@ Do not enable voice input until the configured Python/command, `ffmpeg`, and
 model cache have been tested locally. Model downloads may be large and should be
 performed during explicit setup rather than an unattended production request.
 
-## Thread and binding lifecycle
+## Discord thread and binding lifecycle
 
 `enable_auto_threads` starts a reconciliation loop using the selected runtime's
 backend-neutral target discovery.
@@ -232,19 +242,22 @@ backend-neutral target discovery.
 - The thread is a public thread under `thread_parent_channel_id`.
 - Each configured `allowed_user_ids` member is added to new and restored threads
   so the thread appears in that user's normal Discord thread list.
-- The name is `[backend] alias/agent`, where `backend` is `core`, `tui`, or
-  `orca`, and the alias prefers the workspace label, then the cwd basename, then
-  the target address. The prefix distinguishes current routes from historical
-  threads left by another runtime backend.
-- A blocked pane is prefixed with `🔴 `. Other lifecycle changes do not change
-  the status prefix, which avoids excessive Discord rename requests.
+- The name is `[backend] alias/agent · address`, where `backend` is `hc`,
+  `herdr`, or `orca`, and the alias prefers the workspace label, then the cwd
+  basename, then the target address. The prefix distinguishes current routes
+  from historical threads left by another runtime backend.
+- Runtime status does not alter the name; status is delivered in messages.
 - Thread names are truncated to Discord's 100-character limit.
 - If agent detection disappears but the pane remains, HerdRelay preserves the
   existing name, binding, and archive state.
 - If an agent returns to the same pane, HerdRelay reuses and, if needed,
   unarchives the existing thread.
-- If the pane disappears from a successful pane snapshot, its thread is
-  archived.
+- If the target disappears from a successful snapshot for
+  `target_absence_grace_seconds`, its thread is archived.
+- Archived managed threads are deleted after
+  `closed_thread_retention_minutes`; `null` retains them indefinitely.
+- On a backend switch, routes belonging to the previous backend are archived
+  immediately. A returning target reuses the route while it is retained.
 - A failed or malformed pane snapshot aborts the synchronization before any
   archival decision.
 - If Discord can no longer fetch a recorded thread, HerdRelay leaves the record
@@ -259,7 +272,12 @@ manual bind command in the Discord interface.
 
 ## Input path
 
-For an ordinary bound-thread message, HerdRelay:
+All HerdRelay-generated Telegram and Discord UI messages are English. User
+prompts and Agent or Bot replies are not translated.
+
+For an ordinary message in the Discord parent channel, HerdRelay performs the
+same General provider selection as Telegram General. For an ordinary
+bound-thread message, HerdRelay:
 
 1. ignores bot authors, empty content, non-thread channels, and unbound threads;
 2. checks for a pending structured question and accepts a valid numeric answer

@@ -32,12 +32,27 @@ class RouterCandidate:
     candidate_id: str
     key: TargetKey
     target: HerdrTarget
-    route: TelegramTopicRoute
+    route: TelegramTopicRoute | None = None
+    conversation_id: str | None = None
+    name: str | None = None
+
+    @property
+    def destination_id(self) -> str:
+        if self.route is not None:
+            return self.route.thread_id
+        if self.conversation_id is None:
+            raise ValueError("router candidate has no destination")
+        return self.conversation_id
+
+    @property
+    def display_name(self) -> str:
+        if self.route is not None:
+            return self.route.name
+        return self.name or target_alias(self.target)
 
     def public_data(self) -> dict[str, Any]:
         return {
             "id": self.candidate_id,
-            "topic_id": int(self.route.thread_id),
             "workspace": self.target.workspace_label,
             "title": self.target.tab_label,
             "agent": self.target.agent_name,
@@ -275,13 +290,13 @@ class TelegramGeneralRouter:
         utterance = message.prompt_text
         if not utterance or len(utterance) > self.config.max_message_chars:
             await self._feedback(
-                message, "入力が空か長すぎるため、何も送信していません。"
+                message, "The input is empty or too long. Nothing was sent."
             )
             return False
         candidates = await self._candidates()
         if not candidates:
             await self._feedback(
-                message, "利用可能なAgent topicがありません。何も送信していません。"
+                message, "No Agent topics are available. Nothing was sent."
             )
             return False
         recent_context = self._recent_context(message, candidates)
@@ -302,7 +317,7 @@ class TelegramGeneralRouter:
                 payload=utterance,
             )
             await self._feedback(
-                message, "送信先を解決できませんでした。何も送信していません。"
+                message, "The destination could not be resolved. Nothing was sent."
             )
             return False
 
@@ -339,7 +354,7 @@ class TelegramGeneralRouter:
             )
             await self._feedback(
                 message,
-                "送信先を一つに決められませんでした。何も送信していません。\n"
+                "A single destination could not be selected. Nothing was sent.\n"
                 + _candidate_summary(candidates),
             )
             return False
@@ -622,10 +637,10 @@ def _parse_decision(value: str, *, request: RoutingRequest) -> RoutingDecision:
 
 
 def _candidate_summary(candidates: tuple[RouterCandidate, ...]) -> str:
-    lines = ["候補のAgent:"]
+    lines = ["Candidate agents:"]
     for candidate in candidates[:8]:
         lines.append(
-            f"{candidate.candidate_id}: {candidate.route.name} "
+            f"{candidate.candidate_id}: {candidate.display_name} "
             f"({candidate.target.status or 'unknown'})"
         )
     return "\n".join(lines)

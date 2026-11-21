@@ -1,12 +1,39 @@
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
 
-from herdrelay.config import AppConfig
+from herdrelay.config import (
+    AppConfig,
+    HerdrCliConfig,
+    RuntimeConfig,
+    TuiTargetExposureConfig,
+)
 from herdrelay.domain import MutationOutcomeUnknownError, TargetKey
 from herdrelay.herdr_cli import HerdrCliError
 from herdrelay.herdr_client import HerdrClient, normalize_targets
 from herdrelay.models import HerdrTarget, PendingQuestion, QuestionOption
+
+
+def test_tui_target_exposure_filters_exact_addresses():
+    config = replace(
+        AppConfig(discord_token="token"),
+        runtime=RuntimeConfig(
+            provider="herdr-tui",
+            tui=HerdrCliConfig(
+                target_exposure=TuiTargetExposureConfig(
+                    mode="selected", addresses=frozenset({"w1:p2"})
+                )
+            ),
+        ),
+    )
+    client = HerdrClient(config)
+    targets = [
+        HerdrTarget(target="w1:p1"),
+        HerdrTarget(target="w1:p2"),
+    ]
+
+    assert client._filter_exposed(targets) == [targets[1]]
 
 
 def test_normalize_targets_from_result_agents():

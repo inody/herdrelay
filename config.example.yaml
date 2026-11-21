@@ -4,6 +4,10 @@ runtime:
     cli_path: herdr
     default_source: recent-unwrapped
     command_timeout_seconds: 20
+    target_exposure:
+      mode: all-eligible          # all-eligible, selected, or none
+      # selected mode only:
+      addresses: []               # exact pane IDs
   herdr_core:
     socket_path: null             # existing Core only; HerdRelay never starts it
     connect_timeout_seconds: 5
@@ -43,6 +47,34 @@ relay:
     - "rm -rf"
     - "sudo"
     - "git reset --hard"
+  general:
+    enabled: false                 # Telegram General and Discord parent channel
+    provider: auto                 # auto, router, or orca-bot
+    activation: all-text
+    execution_policy: auto-unique
+    general_topic_id: null         # set only if Telegram reports one explicitly
+    context_ttl_seconds: 0         # router only; 0 disables recent-target context
+    model:                         # auto uses this for hc/herdr
+      provider: none               # openai-compatible, pi-cli, or command
+      model: null
+      base_url: null
+      api_key_env: null
+      cli_path: pi                 # pi-cli uses existing Pi authentication
+      node_path: null              # stable Node path for launchd if needed
+      pass_env: []                 # extra credential env names
+      extensions: []               # explicitly trusted provider extensions
+      argv: []                     # command provider; executed without a shell
+      timeout_seconds: 5
+      max_output_bytes: 16384
+    orca_bot:                      # auto uses this for Orca
+      bot_id: null                 # exact ID from `orca bot list --json`
+      queue_path: ~/.cache/herdrelay/orca-bot-gateway
+      gateway_worktree: null       # exact folder:/id or worktree selector
+      gateway_title: HerdRelay Gateway
+      gateway_command: null        # command run inside the dedicated Orca terminal
+      refresh_seconds: 1
+      heartbeat_stale_seconds: 15
+      command_timeout_seconds: 20
   streaming:
     mode: hooks                    # hooks (recommended) or poll
     refresh_seconds: 8             # poll mode only
@@ -60,7 +92,9 @@ transports:
     allowed_guild_ids: []
     allowed_channel_ids: []
     allowed_user_ids: []
-    thread_parent_channel_id: null
+    thread_parent_channel_id: null # normal text here uses relay.general
+    target_absence_grace_seconds: 60
+    closed_thread_retention_minutes: 10 # null keeps archived threads indefinitely
     enable_send: false
     enable_questions: false        # legacy TUI structured answers only
     enable_watcher: false
@@ -96,34 +130,6 @@ transports:
     status_refresh_seconds: 5      # legacy TUI/Orca polling; Core uses native events
     target_absence_grace_seconds: 60 # ignore transient discovery gaps
     closed_topic_retention_minutes: 10 # null keeps closed topics indefinitely
-    general_router:
-      enabled: false               # handle authorized General text and voice
-      provider: router             # router or orca-bot
-      activation: all-text         # General itself is the trigger
-      execution_policy: auto-unique
-      general_topic_id: null       # set only if Telegram reports one explicitly
-      context_ttl_seconds: 0       # router only; 0 disables recent-target context
-      model:                       # used only when provider=router
-        provider: none             # openai-compatible, pi-cli, or command
-        model: null
-        base_url: null
-        api_key_env: null
-        cli_path: pi               # pi-cli uses existing Pi authentication
-        node_path: null             # set a stable Node path for launchd if needed
-        pass_env: []                # extra credential env names; minimal by default
-        extensions: []             # explicitly load trusted provider extensions
-        argv: []                   # command provider; executed without a shell
-        timeout_seconds: 5
-        max_output_bytes: 16384
-      orca_bot:                    # used only when provider=orca-bot
-        bot_id: null               # exact ID from `orca bot list --json`
-        queue_path: ~/.cache/herdrelay/orca-bot-gateway
-        gateway_worktree: null     # exact folder:/id or worktree selector
-        gateway_title: HerdRelay Gateway
-        gateway_command: null      # command run inside the dedicated Orca terminal
-        refresh_seconds: 1
-        heartbeat_stale_seconds: 15
-        command_timeout_seconds: 20
     voice_input:
       enabled: false               # transcribe Telegram voice messages in General
       scope: general               # or general-and-bound for direct topic voice

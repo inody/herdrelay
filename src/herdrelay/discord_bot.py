@@ -6,7 +6,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from .config import AppConfig
+from .config import AppConfig, effective_general_provider
 from .domain import MutationOutcomeUnknownError, TargetKey
 from .formatter import (
     target_alias,
@@ -16,19 +16,34 @@ from .hc_client import HcClient
 from .core_discord_watcher import CoreEventWatcher
 from .herdr_client import TargetResolutionError
 from .models import AuditEntry, PendingQuestion
+from .orca_bot_gateway import GatewayQueue
 from .questions import QuestionAnswerError, parse_question_answer, selected_labels
 from .runtime import InterruptRuntime, QuestionAnswerRuntime, RuntimeClient
 from .discord_security import DiscordLocation, SecurityError, SecurityPolicy
 from .store import Store
+from .discord_general import (
+    DiscordGeneralHandler,
+    DiscordGeneralRouter,
+    DiscordOrcaBotGeneral,
+)
 from .discord_output import StreamManager
 from .discord_threads import ThreadManager
 from .discord_watcher import EventWatcher
+from .telegram_router import IntentModel
 
 LOG = logging.getLogger(__name__)
 
 
 class HerdrDiscordBot(commands.Bot):
-    def __init__(self, *, config: AppConfig, store: Store, client: RuntimeClient):
+    def __init__(
+        self,
+        *,
+        config: AppConfig,
+        store: Store,
+        client: RuntimeClient,
+        gateway_queue: GatewayQueue | None = None,
+        router_model: IntentModel | None = None,
+    ):
         intents = discord.Intents.default()
         if config.enable_send or config.enable_questions:
             intents.message_content = True
@@ -43,6 +58,24 @@ class HerdrDiscordBot(commands.Bot):
         self._thread_task: asyncio.Task | None = None
         self.stream_manager: StreamManager | None = None
         self._stream_task: asyncio.Task | None = None
+        self.general_handler: DiscordGeneralHandler | None = None
+        if config.telegram.general_router.enabled:
+            if effective_general_provider(config) == "orca-bot":
+                queue = gateway_queue or GatewayQueue(
+                    config.telegram.general_router.orca_bot.queue_path
+                )
+                handler = DiscordOrcaBotGeneral(
+                    config=config, store=store, queue=queue
+                )
+                handler.client = self
+                self.general_handler = handler
+            else:
+                self.general_handler = DiscordGeneralRouter(
+                    config=config,
+                    store=store,
+                    client=client,
+                    model=router_model,
+                )
 
     async def setup_hook(self) -> None:
         # Sync the (empty) command tree so Discord drops any previously
@@ -144,7 +177,41 @@ class HerdrDiscordBot(commands.Bot):
         if self.user and self.user in message.mentions:
             await self._handle_control_command(message)
             return
+        if await self._handle_general(message):
+            return
         await self._handle_thread_send(message)
+
+    async def _handle_general(self, message: discord.Message) -> bool:
+        if (
+            self.general_handler is None
+            or self.config.thread_parent_channel_id is None
+            or message.channel.id != self.config.thread_parent_channel_id
+        ):
+            return False
+        location = _location_from_message(message)
+        content = (message.content or "").strip()
+        try:
+            self.security.ensure_send_allowed(message.author.id, location, content)
+        except Exception as exc:
+            self.store.add_audit(
+                AuditEntry(
+                    discord_user_id=str(message.author.id),
+                    guild_id=str(location.guild_id) if location.guild_id else None,
+                    channel_id=str(location.channel_id),
+                    thread_id=None,
+                    action="general_send",
+                    payload_preview=truncate(content, max_chars=200),
+                    result=truncate(f"denied: {exc}", max_chars=500),
+                )
+            )
+            await message.reply(
+                f"Error: {exc}",
+                allowed_mentions=discord.AllowedMentions.none(),
+                mention_author=False,
+            )
+            return True
+        await self.general_handler.handle(message)
+        return True
 
     async def _handle_thread_send(self, message: discord.Message) -> bool:
         """Forward a normal message posted in a bound thread to its Herdr pane."""
@@ -260,12 +327,34 @@ class HerdrDiscordBot(commands.Bot):
             elif action == "list":
                 await self._control_list(message)
                 self._audit_control_command(message, action, "ok")
+            elif action == "forget":
+                if (
+                    self.general_handler is None
+                    or message.channel.id != self.config.thread_parent_channel_id
+                ):
+                    raise ValueError("General context can only be reset in agent-threads.")
+                reset = self.general_handler.clear_context(message)
+                text = (
+                    "The General Orca Bot conversation was reset."
+                    if effective_general_provider(self.config) == "orca-bot"
+                    else (
+                        "The recent General destination was cleared."
+                        if reset
+                        else "No recent General destination is saved."
+                    )
+                )
+                await message.reply(
+                    text,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    mention_author=False,
+                )
+                self._audit_control_command(message, action, "ok")
             elif action == "help":
                 await message.reply(self._control_help())
                 self._audit_control_command(message, action, "ok")
             else:
                 raise ValueError(
-                    f"Unknown command `{cmd}`. Try: interrupt, list, help"
+                    f"Unknown command `{cmd}`. Try: interrupt, list, forget, help"
                 )
         except Exception as exc:
             result = "denied" if isinstance(exc, SecurityError) else "error"
@@ -287,7 +376,11 @@ class HerdrDiscordBot(commands.Bot):
         self, message: discord.Message, command: str, result: str, *, target: str | None = None,
     ) -> None:
         location = _location_from_message(message)
-        action = command if command in {"interrupt", "list", "help"} else "unknown"
+        action = (
+            command
+            if command in {"interrupt", "list", "forget", "help"}
+            else "unknown"
+        )
         self.store.add_audit(AuditEntry(
             discord_user_id=str(message.author.id),
             guild_id=str(location.guild_id) if location.guild_id is not None else None,
@@ -368,9 +461,11 @@ class HerdrDiscordBot(commands.Bot):
         lines.extend(
             (
                 "@herdr list                                    List available agents",
+                "@herdr forget                                  Reset General context",
                 "@herdr help                                    Show this help",
                 "```",
-                "Inside an agent thread, normal text submits a prompt.",
+                "In agent-threads, normal text uses General routing.",
+                "Inside an agent thread, normal text submits directly.",
             )
         )
         return "\n".join(lines)
@@ -521,5 +616,18 @@ async def _send_error(interaction: discord.Interaction, exc: Exception) -> None:
         await interaction.response.send_message(message, ephemeral=True)
 
 
-def build_bot(config: AppConfig, store: Store, client: RuntimeClient) -> HerdrDiscordBot:
-    return HerdrDiscordBot(config=config, store=store, client=client)
+def build_bot(
+    config: AppConfig,
+    store: Store,
+    client: RuntimeClient,
+    *,
+    gateway_queue: GatewayQueue | None = None,
+    router_model: IntentModel | None = None,
+) -> HerdrDiscordBot:
+    return HerdrDiscordBot(
+        config=config,
+        store=store,
+        client=client,
+        gateway_queue=gateway_queue,
+        router_model=router_model,
+    )

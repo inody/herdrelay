@@ -143,7 +143,7 @@ async def test_orca_bot_forget_enqueues_chat_reset(tmp_path):
         "requests/reset-11.json"
     )
     assert json.loads(reset_path.read_text())["kind"] == "reset"
-    assert api.sent[-1]["text"] == "General用のOrca Bot会話をリセットしました。"
+    assert api.sent[-1]["text"] == "The General Orca Bot conversation was reset."
 
 
 @pytest.mark.asyncio

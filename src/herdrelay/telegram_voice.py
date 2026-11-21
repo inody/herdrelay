@@ -62,7 +62,7 @@ class TelegramVoiceHandler:
                 )
                 await self._feedback(
                     message,
-                    "音声入力は現在Generalでのみ利用できます。何も送信していません。",
+                    "Voice input is currently available only in General. Nothing was sent.",
                 )
                 return False
             if message.message_thread_id is None:
@@ -79,7 +79,7 @@ class TelegramVoiceHandler:
                 )
                 await self._feedback(
                     message,
-                    "このtopicは利用可能なAgentに接続されていません。",
+                    "This topic is not connected to an available Agent.",
                 )
                 return False
         if voice.duration_seconds > self.voice_config.max_duration_seconds:
@@ -90,7 +90,7 @@ class TelegramVoiceHandler:
             self._audit(message, outcome="rejected", detail=detail)
             await self._feedback(
                 message,
-                "音声が長すぎるため、何も送信していません。",
+                "The voice message is too long. Nothing was sent.",
             )
             return False
         if (
@@ -104,7 +104,7 @@ class TelegramVoiceHandler:
             self._audit(message, outcome="rejected", detail=detail)
             await self._feedback(
                 message,
-                "音声ファイルが大きすぎるため、何も送信していません。",
+                "The voice file is too large. Nothing was sent.",
             )
             return False
 
@@ -134,7 +134,7 @@ class TelegramVoiceHandler:
             self._audit(message, outcome="failed", detail=str(exc))
             await self._feedback(
                 message,
-                "音声を文字起こしできませんでした。何も送信していません。",
+                "The voice message could not be transcribed. Nothing was sent.",
             )
             return False
 
@@ -150,7 +150,7 @@ class TelegramVoiceHandler:
         )
         await self._feedback(
             message,
-            "文字起こし:\n" + truncate(transcript.text, max_chars=500),
+            "Transcript:\n" + truncate(transcript.text, max_chars=500),
         )
         routed_message = replace(
             message,

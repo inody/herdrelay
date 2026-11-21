@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .domain import BackendKind, TargetKey
 from .models import HerdrTarget
 
 
@@ -13,6 +14,28 @@ def target_alias(target: HerdrTarget) -> str:
     if not label or label in ("~", "-"):
         label = target.target
     return label
+
+
+def backend_label(backend: BackendKind) -> str:
+    return {
+        BackendKind.HERDR_CORE: "hc",
+        BackendKind.HERDR_TUI: "herdr",
+        BackendKind.ORCA: "orca",
+    }[backend]
+
+
+def target_route_name(key: TargetKey, target: HerdrTarget) -> str:
+    return target_route_name_for(key.backend, key.address, target)
+
+
+def target_route_name_for(
+    backend: BackendKind, address: str, target: HerdrTarget
+) -> str:
+    agent = target.agent_name or target.kind or "?"
+    return (
+        f"[{backend_label(backend)}] {target_alias(target)}/{agent}"
+        f" · {target_address_label(address)}"
+    )
 
 
 def target_address_label(address: str) -> str:

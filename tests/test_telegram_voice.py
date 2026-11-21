@@ -196,7 +196,7 @@ async def test_general_voice_is_transcribed_then_routed_through_normal_prompt_pa
     assert public_request["source_kind"] == "voice"
     assert "asr_candidate_hints" not in public_request
     assert "speech_keys" not in public_request["candidates"][0]
-    assert api.sent[0]["text"].startswith("文字起こし:\nHJB FDM")
+    assert api.sent[0]["text"].startswith("Transcript:\nHJB FDM")
     assert api.sent[-1]["text"].startswith("→ HJB_FDM/pi")
     assert not transcriber.paths[0].exists()
     assert [entry["action"] for entry in store.list_transport_audits()] == [
@@ -217,7 +217,7 @@ async def test_voice_over_limit_is_rejected_without_download_or_mutation(tmp_pat
 
     assert api.downloads == []
     assert client.sent == []
-    assert "長すぎる" in api.sent[-1]["text"]
+    assert "too long" in api.sent[-1]["text"]
     [audit] = store.list_transport_audits()
     assert audit["action"] == "transcribe_voice"
     assert audit["outcome"] == "rejected"
@@ -241,7 +241,7 @@ async def test_voice_in_bound_topic_is_sent_directly_without_router(tmp_path):
     assert client.sent == [("local/tab:pane", "このまま続けてください")]
     assert model.requests == []
     assert api.sent[0]["message_thread_id"] == 179
-    assert api.sent[0]["text"].startswith("文字起こし:\n")
+    assert api.sent[0]["text"].startswith("Transcript:\n")
     assert [entry["action"] for entry in store.list_transport_audits()] == [
         "transcribe_voice",
         "send_text",

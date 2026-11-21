@@ -58,6 +58,17 @@ class TelegramTopicRoute:
 
 
 @dataclass(frozen=True)
+class AgentThreadRoute:
+    pane_id: str
+    thread_id: str
+    guild_id: str
+    alias: str | None
+    closed: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class Binding:
     guild_id: str
     channel_id: str

@@ -11,7 +11,7 @@ from herdrelay.store import Store
 from herdrelay.discord_threads import ThreadManager, thread_name
 
 
-def test_thread_name_marks_blocked_panes():
+def test_thread_name_is_stable_when_blocked():
     target = HerdrTarget(
         target="w1:p1",
         workspace_label="cbo_mppi",
@@ -19,10 +19,10 @@ def test_thread_name_marks_blocked_panes():
         status="blocked",
     )
 
-    assert thread_name(target) == "🔴 cbo_mppi/codex"
+    assert thread_name(target) == "cbo_mppi/codex"
 
 
-def test_thread_name_has_no_marker_when_not_blocked():
+def test_thread_name_has_no_status_marker():
     blocked = HerdrTarget(
         target="w7:p5", workspace_label="herdrelay", agent_name="claude", status="blocked"
     )
@@ -33,10 +33,9 @@ def test_thread_name_has_no_marker_when_not_blocked():
         target="w7:p5", workspace_label="herdrelay", agent_name="claude", status="idle"
     )
 
-    assert thread_name(blocked).startswith("🔴")
-    assert not thread_name(working).startswith("🔴")
-    assert not thread_name(idle).startswith("🔴")
+    assert thread_name(blocked) == "herdrelay/claude"
     assert thread_name(working) == "herdrelay/claude"
+    assert thread_name(idle) == "herdrelay/claude"
 
 
 def test_thread_name_identifies_runtime_backend():
@@ -49,10 +48,10 @@ def test_thread_name_identifies_runtime_backend():
 
     assert (
         thread_name(target, backend=BackendKind.ORCA)
-        == "[orca] herdr-chat-bridge/pi"
+        == "[orca] herdr-chat-bridge/pi · local/tab:pane"
     )
-    assert thread_name(target, backend=BackendKind.HERDR_CORE).startswith("[core] ")
-    assert thread_name(target, backend=BackendKind.HERDR_TUI).startswith("[tui] ")
+    assert thread_name(target, backend=BackendKind.HERDR_CORE).startswith("[hc] ")
+    assert thread_name(target, backend=BackendKind.HERDR_TUI).startswith("[herdr] ")
 
 
 def test_thread_name_truncates_to_discord_limit():
@@ -78,10 +77,14 @@ def manager(tmp_path):
     client.target_key.side_effect = TargetKey.legacy
     parent = SimpleNamespace(id=10, guild=SimpleNamespace(id=1), create_thread=AsyncMock())
     thread = SimpleNamespace(
-        id=123, name="[tui] project/pi", archived=False, edit=AsyncMock()
+        id=123, name="[herdr] project/pi · w1:p1", archived=False,
+        edit=AsyncMock(), delete=AsyncMock(),
     )
     result = ThreadManager(
-        bot=SimpleNamespace(user=None), config=AppConfig(discord_token="token"),
+        bot=SimpleNamespace(user=None),
+        config=AppConfig(
+            discord_token="token", discord_target_absence_grace_seconds=0
+        ),
         store=store, client=client,
     )
     result._parent_channel = AsyncMock(return_value=parent)
@@ -140,7 +143,7 @@ async def test_reappearing_agent_reuses_existing_thread(manager):
     await manager.sync()
 
     manager._fetch_thread.return_value.edit.assert_awaited_once_with(
-        name="[tui] project/claude"
+        name="[herdr] project/claude · w1:p1"
     )
     manager._parent_channel.return_value.create_thread.assert_not_awaited()
     assert manager.store.get_agent_thread("w1:p1") == "123"
@@ -167,7 +170,7 @@ async def test_agent_relaunch_reactivates_existing_archived_thread(manager):
     await manager.sync()
 
     manager._fetch_thread.return_value.edit.assert_awaited_once_with(
-        archived=False, reason="Pane w1:p1 active again",
+        archived=False, reason="Target w1:p1 active again",
     )
     manager._parent_channel.return_value.create_thread.assert_not_awaited()
 
@@ -292,8 +295,51 @@ async def test_actually_closed_pane_thread_is_archived(manager):
     await manager.sync()
 
     manager._fetch_thread.return_value.edit.assert_awaited_once_with(
-        archived=True, reason="Pane w1:p1 closed",
+        archived=True, reason="Target w1:p1 closed",
     )
+
+
+@pytest.mark.asyncio
+async def test_missing_target_waits_for_absence_grace(manager, monkeypatch):
+    manager.config = AppConfig(
+        discord_token="token", discord_target_absence_grace_seconds=60
+    )
+    manager.client.list_panes.return_value = []
+    times = iter((100.0, 120.0, 161.0))
+    monkeypatch.setattr("herdrelay.discord_threads.monotonic", lambda: next(times))
+
+    await manager.sync()
+    await manager.sync()
+    manager._fetch_thread.return_value.edit.assert_not_awaited()
+
+    await manager.sync()
+    manager._fetch_thread.return_value.edit.assert_awaited_once_with(
+        archived=True, reason="Target w1:p1 closed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_expired_archived_thread_is_deleted(manager):
+    manager.config = AppConfig(
+        discord_token="token",
+        discord_target_absence_grace_seconds=0,
+        closed_thread_retention_minutes=10,
+    )
+    manager.client.list_panes.return_value = []
+
+    await manager.sync()
+    manager._fetch_thread.return_value.archived = True
+    with manager.store._connect() as conn:
+        conn.execute(
+            "UPDATE agent_threads SET updated_at = ? WHERE pane_id = ?",
+            ("2000-01-01T00:00:00+00:00", "w1:p1"),
+        )
+
+    await manager.sync()
+
+    manager._fetch_thread.return_value.delete.assert_awaited_once()
+    assert manager.store.get_agent_thread("w1:p1") is None
+    assert manager.store.find_binding_for_target("w1:p1") is None
 
 
 @pytest.mark.asyncio

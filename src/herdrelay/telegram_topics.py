@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from .config import AppConfig
 from .domain import TargetKey
-from .formatter import target_address_label, target_alias
+from .formatter import target_route_name
 from .models import HerdrTarget, TelegramTopicRoute
 from .store import Store
 from .telegram_api import TelegramApiError, TelegramBotApi
@@ -41,10 +41,7 @@ class TelegramTopicManager:
         chat_id = self.telegram.forum_chat_id
         if chat_id is None:
             raise RuntimeError("Telegram forum_chat_id is not configured")
-        name = (
-            f"{target_alias(target)}/{target.agent_name}"
-            f" · {target_address_label(key.address)}"
-        )[:TOPIC_NAME_LIMIT]
+        name = target_route_name(key, target)[:TOPIC_NAME_LIMIT]
         topic = self.store.get_telegram_topic_for_target(key)
         if topic is None or int(topic.chat_id) != chat_id:
             topic = await self._create_topic_safely(

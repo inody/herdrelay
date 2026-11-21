@@ -4,10 +4,12 @@ import asyncio
 import logging
 
 from .backends import BackendProvider, build_backend_provider
-from .config import AppConfig
+from .config import AppConfig, effective_general_provider
 from .discord_bot import HerdrDiscordBot, build_bot
+from .orca_bot_gateway import GatewayQueue
 from .runtime import RuntimeClient
 from .store import Store
+from .telegram_orca_bot import OrcaBotGatewaySupervisor
 from .telegram_service import TelegramService
 
 LOG = logging.getLogger(__name__)
@@ -26,14 +28,51 @@ class HerdRelayApplication:
             config, store=self.store
         )
         self.client: RuntimeClient = self.backend_provider.client
-        self.discord: HerdrDiscordBot | None = (
-            build_bot(config, self.store, self.client)
-            if config.discord.enabled
-            else None
-        )
-        self.telegram: TelegramService | None = (
-            TelegramService(config=config, store=self.store, client=self.client)
-            if config.telegram.enabled
+        self._gateway_stopped = asyncio.Event()
+        self.gateway_queue: GatewayQueue | None = None
+        if (
+            config.telegram.general_router.enabled
+            and effective_general_provider(config) == "orca-bot"
+        ):
+            self.gateway_queue = GatewayQueue(
+                config.telegram.general_router.orca_bot.queue_path
+            )
+        if config.discord.enabled:
+            if self.gateway_queue is None:
+                self.discord = build_bot(config, self.store, self.client)
+            else:
+                self.discord = build_bot(
+                    config,
+                    self.store,
+                    self.client,
+                    gateway_queue=self.gateway_queue,
+                )
+        else:
+            self.discord = None
+        if config.telegram.enabled:
+            if self.gateway_queue is None:
+                self.telegram = TelegramService(
+                    config=config, store=self.store, client=self.client
+                )
+            else:
+                self.telegram = TelegramService(
+                    config=config,
+                    store=self.store,
+                    client=self.client,
+                    gateway_queue=self.gateway_queue,
+                    supervise_gateway=False,
+                )
+        else:
+            self.telegram = None
+        self.gateway: OrcaBotGatewaySupervisor | None = (
+            OrcaBotGatewaySupervisor(
+                config=config,
+                store=self.store,
+                stopped=self._gateway_stopped,
+                queue=self.gateway_queue,
+                deliver_event=self._deliver_gateway_event,
+            )
+            if self.gateway_queue is not None
             else None
         )
         self._tasks: list[asyncio.Task[None]] = []
@@ -57,6 +96,12 @@ class HerdRelayApplication:
                     name="herdrelay-telegram",
                 )
             )
+        if self.gateway is not None:
+            self._tasks.append(
+                asyncio.create_task(
+                    self.gateway.run_forever(), name="herdrelay-orca-bot-gateway"
+                )
+            )
         for index, service in enumerate(self.backend_provider.services):
             self._tasks.append(
                 asyncio.create_task(
@@ -74,10 +119,27 @@ class HerdRelayApplication:
         finally:
             await self.close()
 
+    async def _deliver_gateway_event(self, event: dict) -> None:
+        transport = event.get("transport") or "telegram"
+        if transport == "telegram" and self.telegram is not None:
+            handler = self.telegram.general_router
+            deliver = getattr(handler, "handle_gateway_event", None)
+            if deliver is not None:
+                await deliver(event)
+                return
+        if transport == "discord" and self.discord is not None:
+            handler = self.discord.general_handler
+            deliver = getattr(handler, "handle_gateway_event", None)
+            if deliver is not None:
+                await deliver(event)
+                return
+        raise RuntimeError(f"No General event destination for transport {transport!r}")
+
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
+        self._gateway_stopped.set()
 
         if self.telegram is not None:
             self.telegram.stop()

@@ -6,6 +6,7 @@ import json
 import logging
 from pathlib import Path
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .config import AppConfig
@@ -50,7 +51,7 @@ class TelegramOrcaBotGeneral:
         text = message.prompt_text
         if not text or len(text) > self.config.max_message_chars:
             await self._feedback(
-                message, "入力が空か長すぎるため、何も送信していません。"
+                message, "The input is empty or too long. Nothing was sent."
             )
             return False
         blocked = self.mutations.blocked_text(text)
@@ -98,8 +99,9 @@ class TelegramOrcaBotGeneral:
             return True
         request_id = f"telegram-{message.update_id}"
         request = {
-            "version": 1,
+            "version": 2,
             "kind": "send",
+            "transport": "telegram",
             "request_id": request_id,
             "audit_id": audit_id,
             "event_key": event_key,
@@ -119,7 +121,7 @@ class TelegramOrcaBotGeneral:
                 outcome="failed",
                 detail=truncate(str(exc), max_chars=500),
             )
-            await self._feedback(message, "⚠️ Orca Botへの送信準備に失敗しました。")
+            await self._feedback(message, "⚠️ Failed to queue the Orca Bot request.")
             return True
         await self.mutations.safe_reaction(message, "👀")
         return True
@@ -128,8 +130,9 @@ class TelegramOrcaBotGeneral:
         request_id = f"reset-{message.update_id}"
         self.queue.enqueue(
             {
-                "version": 1,
+                "version": 2,
                 "kind": "reset",
+                "transport": "telegram",
                 "request_id": request_id,
                 "chat_id": message.chat_id,
                 "thread_id": message.message_thread_id,
@@ -140,6 +143,50 @@ class TelegramOrcaBotGeneral:
             }
         )
         return True
+
+    async def handle_gateway_event(self, event: dict[str, Any]) -> None:
+        kind = _required_string(event, "kind")
+        if kind == "sent":
+            try:
+                await self.api.set_message_reaction(
+                    chat_id=_required_int(event, "chat_id"),
+                    message_id=_required_int(event, "message_id"),
+                    emoji="✅",
+                )
+            except Exception:
+                LOG.exception("Failed to confirm Telegram Orca Bot send")
+        elif kind in {"send_failed", "outcome_unknown"}:
+            await self.api.send_text(
+                chat_id=_required_int(event, "chat_id"),
+                message_thread_id=_optional_int(event.get("thread_id")),
+                text=(
+                    "⚠️ The Orca Bot send outcome is unknown. It was not retried."
+                    if kind == "outcome_unknown"
+                    else "⚠️ Failed to send the request to Orca Bot."
+                ),
+            )
+        elif kind == "reply":
+            text = _required_string(event, "text")
+            await self.api.send_text(
+                chat_id=_required_int(event, "chat_id"),
+                message_thread_id=_optional_int(event.get("thread_id")),
+                text=text,
+            )
+            self.store.add_transport_audit(
+                TransportAuditEntry(
+                    transport="telegram",
+                    actor_id=str(event.get("user_id") or "orca-bot"),
+                    container_id=str(event.get("chat_id")),
+                    conversation_id=_thread_value(
+                        _optional_int(event.get("thread_id"))
+                    ),
+                    action="bot_reply",
+                    target_key=f"orca-bot:{self.bot.bot_id}",
+                    payload_preview=truncate(text, max_chars=200),
+                    outcome="succeeded",
+                    detail=f"request_id={event.get('request_id')}",
+                )
+            )
 
     async def _feedback(self, message: TelegramInboundMessage, text: str) -> None:
         await self.api.send_text(
@@ -155,17 +202,24 @@ class OrcaBotGatewaySupervisor:
         *,
         config: AppConfig,
         store: Store,
-        api: TelegramBotApi,
         stopped: asyncio.Event,
         queue: GatewayQueue,
+        deliver_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        api: TelegramBotApi | None = None,
     ):
         self.config = config
         self.store = store
-        self.api = api
         self.stopped = stopped
         self.runtime = config.runtime.orca
         self.bot = config.telegram.general_router.orca_bot
         self.queue = queue
+        self.api = api
+        if deliver_event is None:
+            if api is None:
+                raise ValueError("deliver_event or api is required")
+            self.deliver_event = self._deliver_legacy_telegram_event
+        else:
+            self.deliver_event = deliver_event
         self._next_create_at = 0.0
         self._stale_seen_at: float | None = None
 
@@ -200,7 +254,7 @@ class OrcaBotGatewaySupervisor:
     async def _handle_event(self, path: Path, event: dict[str, Any]) -> None:
         request_id = _required_string(event, "request_id")
         kind = _required_string(event, "kind")
-        event_key = f"telegram:orca-bot-gateway:{path.name}"
+        event_key = f"orca-bot-gateway:{path.name}"
         if self.store.has_event_key(event_key):
             path.unlink(missing_ok=True)
             return
@@ -225,13 +279,32 @@ class OrcaBotGatewaySupervisor:
                     outcome=outcome,
                     detail=truncate(detail, max_chars=500),
                 )
+        elif kind not in {"reply", "reset"}:
+            raise ValueError(f"unknown Orca Bot gateway event kind: {kind}")
+        await self.deliver_event(event)
+        self.store.mark_event_seen(event_key)
+        path.unlink(missing_ok=True)
+
+    async def _deliver_legacy_telegram_event(self, event: dict[str, Any]) -> None:
+        assert self.api is not None
+        kind = _required_string(event, "kind")
+        if kind == "sent":
+            try:
+                await self.api.set_message_reaction(
+                    chat_id=_required_int(event, "chat_id"),
+                    message_id=_required_int(event, "message_id"),
+                    emoji="✅",
+                )
+            except Exception:
+                LOG.exception("Failed to confirm Telegram Orca Bot send")
+        elif kind in {"send_failed", "outcome_unknown"}:
             await self.api.send_text(
                 chat_id=_required_int(event, "chat_id"),
                 message_thread_id=_optional_int(event.get("thread_id")),
                 text=(
-                    "⚠️ Orca Botへの送信結果が不明です。自動再送していません。"
-                    if outcome == "outcome_unknown"
-                    else "⚠️ Orca Botへの送信に失敗しました。"
+                    "⚠️ The Orca Bot send outcome is unknown. It was not retried."
+                    if kind == "outcome_unknown"
+                    else "⚠️ Failed to send the request to Orca Bot."
                 ),
             )
         elif kind == "reply":
@@ -246,22 +319,16 @@ class OrcaBotGatewaySupervisor:
                     transport="telegram",
                     actor_id=str(event.get("user_id") or "orca-bot"),
                     container_id=str(event.get("chat_id")),
-                    conversation_id=(
-                        str(event["thread_id"])
-                        if event.get("thread_id") is not None
-                        else None
+                    conversation_id=_thread_value(
+                        _optional_int(event.get("thread_id"))
                     ),
                     action="bot_reply",
                     target_key=f"orca-bot:{self.bot.bot_id}",
                     payload_preview=truncate(text, max_chars=200),
                     outcome="succeeded",
-                    detail=f"request_id={request_id}",
+                    detail=f"request_id={event.get('request_id')}",
                 )
             )
-        elif kind != "reset":
-            raise ValueError(f"unknown Orca Bot gateway event kind: {kind}")
-        self.store.mark_event_seen(event_key)
-        path.unlink(missing_ok=True)
 
     def ensure_worker(self) -> None:
         heartbeat = self._heartbeat()

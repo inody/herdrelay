@@ -303,7 +303,7 @@ async def test_forget_clears_recent_general_context(tmp_path):
     await relay.poll_once()
 
     assert store.get_state(context_key) is None
-    assert api.sent[-1]["text"] == "直近のGeneral送信先を解除しました。"
+    assert api.sent[-1]["text"] == "The recent General destination was cleared."
     assert store.list_transport_audits()[-1]["action"] == "route_context"
 
 
@@ -325,7 +325,9 @@ async def test_general_router_rejects_ambiguous_decision_without_mutation(tmp_pa
     await relay.poll_once()
 
     assert client.sent == []
-    assert api.sent[-1]["text"].startswith("送信先を一つに決められませんでした")
+    assert api.sent[-1]["text"].startswith(
+        "A single destination could not be selected."
+    )
     [audit] = store.list_transport_audits()
     assert audit["action"] == "route_text"
     assert audit["outcome"] == "rejected"

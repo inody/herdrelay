@@ -11,7 +11,7 @@ import tempfile
 import time
 from typing import Any
 
-from .config import AppConfig, load_config
+from .config import AppConfig, effective_general_provider, load_config
 
 LOG = logging.getLogger(__name__)
 GATEWAY_VERSION = 1
@@ -30,8 +30,16 @@ class GatewayQueue:
         self.pending = self.root / "pending"
         self.events = self.root / "events"
         self.heartbeat = self.root / "heartbeat.json"
-        self.chat_state = self.root / "chat.json"
+        self.legacy_chat_state = self.root / "chat.json"
+        self.chat_state = self.root / "chat.telegram.json"
         self.lock = self.root / "worker.lock"
+
+    def chat_state_for(self, transport: str) -> Path:
+        if transport == "telegram":
+            return self.chat_state
+        if transport != "discord":
+            raise ValueError(f"unsupported gateway transport: {transport!r}")
+        return self.root / "chat.discord.json"
 
     def prepare(self) -> None:
         for path in (
@@ -128,7 +136,10 @@ class OrcaBotGatewayWorker:
                 request_id = _safe_id(request.get("request_id"))
                 kind = request.get("kind")
                 if kind == "reset":
-                    self.queue.chat_state.unlink(missing_ok=True)
+                    transport = _transport(request)
+                    self.queue.chat_state_for(transport).unlink(missing_ok=True)
+                    if transport == "telegram":
+                        self.queue.legacy_chat_state.unlink(missing_ok=True)
                     self._write_event(
                         request_id=request_id,
                         suffix="reset",
@@ -166,7 +177,8 @@ class OrcaBotGatewayWorker:
         text = request.get("text")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("gateway request text must be non-empty")
-        chat_id = self._chat_id()
+        transport = _transport(request)
+        chat_id = self._chat_id(transport)
         body_path: Path | None = None
         try:
             descriptor, raw_path = tempfile.mkstemp(
@@ -213,7 +225,7 @@ class OrcaBotGatewayWorker:
                 raise ValueError("Orca did not return the new bot chat identity")
             chat_id = to_handle[len(prefix) :]
             _write_json(
-                self.queue.chat_state,
+                self.queue.chat_state_for(transport),
                 {
                     "version": GATEWAY_VERSION,
                     "bot_id": self.bot.bot_id,
@@ -304,11 +316,17 @@ class OrcaBotGatewayWorker:
         except Exception as exc:
             LOG.warning("Could not consume Orca bot gateway mailbox: %s", exc)
 
-    def _chat_id(self) -> str | None:
+    def _chat_id(self, transport: str) -> str | None:
+        state_path = self.queue.chat_state_for(transport)
         try:
-            state = _read_json(self.queue.chat_state)
+            state = _read_json(state_path)
         except FileNotFoundError:
-            return None
+            if transport != "telegram":
+                return None
+            try:
+                state = _read_json(self.queue.legacy_chat_state)
+            except FileNotFoundError:
+                return None
         if state.get("bot_id") != self.bot.bot_id:
             return None
         value = state.get("chat_id")
@@ -390,18 +408,29 @@ def _event_base(request: dict[str, Any]) -> dict[str, Any]:
         "request_id",
         "audit_id",
         "event_key",
+        "transport",
         "chat_id",
         "thread_id",
         "user_id",
         "message_id",
+        "guild_id",
+        "channel_id",
         "source_kind",
     )
     return {key: request.get(key) for key in keys}
 
 
+def _transport(request: dict[str, Any]) -> str:
+    transport = request.get("transport") or "telegram"
+    if transport not in {"telegram", "discord"}:
+        raise ValueError(f"unsupported gateway transport: {transport!r}")
+    return str(transport)
+
+
 def _subject(request: dict[str, Any]) -> str:
+    transport = _transport(request).title()
     source = request.get("source_kind")
-    return "Telegram General (voice)" if source == "voice" else "Telegram General"
+    return f"{transport} General (voice)" if source == "voice" else f"{transport} General"
 
 
 def _safe_id(value: Any) -> str:
@@ -466,7 +495,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     config = load_config(args.config, require_discord_token=False)
-    if config.telegram.general_router.provider != "orca-bot":
+    if effective_general_provider(config) != "orca-bot":
         raise ValueError("Telegram General provider is not configured as orca-bot")
     OrcaBotGatewayWorker(config).run_forever()
 
