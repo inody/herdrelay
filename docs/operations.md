@@ -79,10 +79,12 @@ is recorded as `outcome_unknown` and is not retried automatically. Direct
 public-CLI live acceptance confirmed that an exposed Pi agent received the
 prompt and entered `working`.
 
-Telegram live E2E acceptance also succeeded: one authorized topic message was
-claimed once, recorded as a `succeeded` `send_text` audit against the exact Orca
-target key, observed as the agent's completed response, and delivered once to
-the same topic. Discord live acceptance remains pending.
+Telegram and Discord live E2E acceptance succeeded for bound Orca Agent
+conversations: authorized messages were claimed once, audited against the exact
+Orca target key, observed as completed responses, and delivered once to the
+originating conversation. The Discord parent channel and Telegram General were
+also accepted through separate Orca Bot chats, with `bot_send` and `bot_reply`
+recorded as succeeded for both transports.
 
 Orca interrupt remains disabled. In live characterization,
 `orca terminal send --interrupt` returned `accepted: true` and wrote one byte,
