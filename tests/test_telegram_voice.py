@@ -14,7 +14,7 @@ from herdrelay.config import (
     TelegramVoiceInputConfig,
     VoiceTranscriptionConfig,
 )
-from herdrelay.domain import TargetKey
+from herdrelay.domain import MutationReceipt, TargetKey
 from herdrelay.models import HerdrTarget
 from herdrelay.store import Store
 from herdrelay.telegram_router import RoutingDecision
@@ -67,6 +67,7 @@ class FakeClient:
 
     def send(self, address, text):
         self.sent.append((address, text))
+        return MutationReceipt(observed_turn=None, result={})
 
 
 @dataclass

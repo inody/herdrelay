@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-import json
 from pathlib import Path
-import sqlite3
 
 import pytest
 
@@ -15,7 +15,11 @@ from herdrelay.config import (
     RuntimeConfig,
     TelegramConfig,
 )
-from herdrelay.domain import MutationOutcomeUnknownError, TargetKey
+from herdrelay.domain import (
+    MutationOutcomeUnknownError,
+    MutationReceipt,
+    TargetKey,
+)
 from herdrelay.hc_client import HcClient, HcMutationReceipt
 from herdrelay.hc_events import HcTerminalState
 from herdrelay.hc_protocol import (
@@ -338,6 +342,7 @@ class FakeLegacyClient:
 
     def send(self, target, text):
         self.sent.append((target, text))
+        return MutationReceipt(observed_turn=None, result={})
 
 
 class FakeMutationClient(HcClient):
@@ -1100,6 +1105,10 @@ async def test_orca_prompt_is_sent_through_exact_bound_target(tmp_path):
 
         def send(self, address, text):
             self.sent.append((address, text))
+            return MutationReceipt(
+                observed_turn=None,
+                result={"accepted": True, "request_id": "request-1"},
+            )
 
     app_config = AppConfig(
         discord_token="unused",

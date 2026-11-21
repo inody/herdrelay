@@ -7,13 +7,23 @@ import time
 from datetime import UTC, datetime, timedelta
 
 from .config import AppConfig
-from .domain import MutationOutcomeUnknownError, RuntimeKind, TargetKey
+from .domain import (
+    Actor,
+    BackendKind,
+    Location,
+    MutationOutcomeUnknownError,
+    RuntimeKind,
+    TargetKey,
+)
 from .formatter import target_alias, truncate
-from .hc_client import HcClient
 from .hc_rpc import HcRpcError
-from .herdr_cli import HerdrCliError
 from .models import TransportAuditEntry
 from .orca_cli import OrcaCliError
+from .prompt_submission import (
+    PromptOutcome,
+    PromptSubmission,
+    PromptSubmissionService,
+)
 from .runtime import InterruptRuntime, RuntimeClient
 from .store import Store
 from .telegram_api import TelegramBotApi
@@ -37,7 +47,15 @@ class TelegramMutationHandler:
         self.telegram = config.telegram
         self.store = store
         self.client = client
-        self.core_client = client if isinstance(client, HcClient) else None
+        self.prompt_service = PromptSubmissionService(
+            store=store,
+            client=client,
+            rate_limit=lambda submission: self.mutation_rate_limit(
+                actor_id=submission.actor.actor_id,
+                container_id=submission.location.container_id,
+                target_key=submission.target.to_storage_key(),
+            ),
+        )
         capabilities = getattr(client, "capabilities", None)
         self.interrupt_client = (
             client
@@ -369,122 +387,53 @@ class TelegramMutationHandler:
             )
             return False
 
-        target_key = key.to_storage_key()
-        rate_limit = self.mutation_rate_limit(
-            actor_id=str(message.user_id),
-            container_id=str(message.chat_id),
-            target_key=target_key,
-        )
-        if rate_limit is not None:
-            self.store.add_transport_audit(
-                TransportAuditEntry(
+        result = await asyncio.to_thread(
+            self.prompt_service.submit,
+            PromptSubmission(
+                event_key=event_key,
+                actor=Actor(transport="telegram", actor_id=str(message.user_id)),
+                location=Location(
                     transport="telegram",
-                    actor_id=str(message.user_id),
                     container_id=str(message.chat_id),
                     conversation_id=(
                         str(message.message_thread_id)
                         if message.message_thread_id is not None
                         else None
                     ),
-                    action="send_text",
-                    target_key=target_key,
-                    payload_preview=truncate(text, max_chars=200),
-                    outcome="rejected",
-                    detail=rate_limit,
-                )
-            )
-            await self._feedback(message, "Mutation rate limit exceeded.")
-            return False
-        audit_id = self.store.claim_transport_mutation(
-            event_key=event_key,
-            entry=TransportAuditEntry(
-                transport="telegram",
-                actor_id=str(message.user_id),
-                container_id=str(message.chat_id),
-                conversation_id=(
-                    str(message.message_thread_id)
-                    if message.message_thread_id is not None
-                    else None
                 ),
-                action="send_text",
-                target_key=target_key,
-                payload_preview=truncate(text, max_chars=200),
-                outcome="attempt",
+                target=key,
+                text=text,
             ),
         )
-        if audit_id is None:
+        if result.outcome is PromptOutcome.DEDUPLICATED:
             return True
-
-        try:
-            receipt = None
-            if self.core_client is not None and key.runtime is RuntimeKind.HERDR_CORE:
-                receipt = await asyncio.to_thread(
-                    self.core_client.send_with_receipt,
-                    target.target,
-                    text,
-                )
-            else:
-                await asyncio.to_thread(self.client.send, target.target, text)
-        except MutationOutcomeUnknownError as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="outcome_unknown",
-                detail=truncate(str(exc), max_chars=500),
-            )
+        if result.outcome is PromptOutcome.SUCCEEDED:
+            await self.safe_reaction(message, "👀")
+            return True
+        if (
+            result.outcome is PromptOutcome.REJECTED
+            and result.detail is not None
+            and result.detail.startswith("rate limit:")
+        ):
+            await self._feedback(message, "Mutation rate limit exceeded.")
+            return False
+        if result.outcome is PromptOutcome.OUTCOME_UNKNOWN:
             await self._safe_feedback(
                 message,
                 "⚠️ Prompt outcome is unknown. Inspect the agent before retrying.",
             )
-        except HcRpcError as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="rejected" if exc.kind else "failed",
-                detail=truncate(str(exc), max_chars=500),
+            return True
+        if result.outcome is PromptOutcome.REJECTED:
+            await self._safe_feedback(
+                message, f"⚠️ Prompt rejected: {result.detail or 'unknown reason'}"
             )
-            await self._safe_feedback(message, f"⚠️ Prompt rejected: {exc}")
-        except OrcaCliError as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="rejected" if exc.kind else "failed",
-                detail=truncate(str(exc), max_chars=500),
+            return True
+        if key.backend in {BackendKind.HERDR_CORE, BackendKind.ORCA}:
+            await self._safe_feedback(
+                message, f"⚠️ Prompt rejected: {result.detail or 'unknown reason'}"
             )
-            await self._safe_feedback(message, f"⚠️ Prompt rejected: {exc}")
-        except HerdrCliError as exc:
-            outcome = (
-                "outcome_unknown"
-                if "timed out" in str(exc).casefold()
-                else "failed"
-            )
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome=outcome,
-                detail=truncate(str(exc), max_chars=500),
-            )
-            feedback = (
-                "⚠️ Prompt outcome is unknown. Inspect the agent before retrying."
-                if outcome == "outcome_unknown"
-                else "⚠️ Prompt submission failed."
-            )
-            await self._safe_feedback(message, feedback)
-        except Exception as exc:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="failed",
-                detail=truncate(str(exc), max_chars=500),
-            )
-            await self._safe_feedback(message, "⚠️ Prompt submission failed.")
         else:
-            self.store.finish_transport_audit(
-                audit_id,
-                outcome="succeeded",
-                detail=(
-                    truncate(str(receipt.result), max_chars=500)
-                    if receipt is not None
-                    else None
-                ),
-                observed_turn=(receipt.observed_turn if receipt is not None else None),
-            )
-            await self.safe_reaction(message, "👀")
+            await self._safe_feedback(message, "⚠️ Prompt submission failed.")
         return True
 
     async def _feedback(self, message, text: str) -> None:

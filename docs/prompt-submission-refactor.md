@@ -57,7 +57,7 @@ question controls.
   boundary.
 - [x] Stage 3: add `PromptSubmissionService` and parity tests while no transport
   uses it.
-- [ ] Stage 4: migrate Telegram direct-Agent submission.
+- [x] Stage 4: migrate Telegram direct-Agent submission.
 - [ ] Stage 5: migrate Discord General router submission.
 - [ ] Stage 6: migrate Discord bound-thread submission while leaving structured
   question handling in the Discord adapter.
@@ -80,3 +80,6 @@ cross-transport policy is approved.
 - Stage 3: `497 passed, 1 skipped`; the unused application service claims each
   event atomically, revalidates exact identity, submits once, finalizes audit,
   and preserves `outcome_unknown` without retrying.
+- Stage 4: `497 passed, 1 skipped`; Telegram bound, routed General, and
+  text-normalized voice prompts use the shared service. Interrupt confirmation
+  remains transport-specific and unchanged.

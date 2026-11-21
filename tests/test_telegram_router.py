@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
 import sys
+from dataclasses import dataclass, field, replace
 
 import pytest
 
@@ -12,7 +12,7 @@ from herdrelay.config import (
     TelegramConfig,
     TelegramGeneralRouterConfig,
 )
-from herdrelay.domain import TargetKey
+from herdrelay.domain import MutationReceipt, TargetKey
 from herdrelay.models import HerdrTarget
 from herdrelay.store import Store
 from herdrelay.telegram_router import (
@@ -69,6 +69,7 @@ class FakeClient:
 
     def send(self, address, text):
         self.sent.append((address, text))
+        return MutationReceipt(observed_turn=None, result={})
 
 
 @dataclass
