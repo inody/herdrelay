@@ -73,8 +73,30 @@ class MutationOutcome(StrEnum):
     OUTCOME_UNKNOWN = "outcome_unknown"
 
 
-class MutationOutcomeUnknownError(RuntimeError):
+class MutationError(RuntimeError):
+    """Base class for normalized backend mutation failures."""
+
+
+class MutationRejectedError(MutationError):
+    """The backend definitively rejected the mutation before applying it."""
+
+
+class MutationFailedError(MutationError):
+    """The backend definitively failed without applying the mutation."""
+
+
+class BackendUnavailableError(MutationFailedError):
+    """The selected backend or exact target is currently unavailable."""
+
+
+class MutationOutcomeUnknownError(MutationError):
     """A mutation may have applied, so callers must not retry automatically."""
+
+
+@dataclass(frozen=True, slots=True)
+class MutationReceipt:
+    observed_turn: int | None
+    result: Mapping[str, Any]
 
 
 @dataclass(frozen=True, slots=True)

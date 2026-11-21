@@ -12,8 +12,14 @@ from herdrelay.domain import (
     InboundAction,
     InboundActionKind,
     LifecycleState,
+    BackendUnavailableError,
     Location,
+    MutationError,
+    MutationFailedError,
     MutationOutcome,
+    MutationOutcomeUnknownError,
+    MutationReceipt,
+    MutationRejectedError,
     MutationResult,
     OutputEventKind,
     RelayOutputEvent,
@@ -188,6 +194,18 @@ def test_send_action_requires_matching_transport_target_and_text():
             actor=Actor(transport="discord", actor_id="42"),
             location=location,
         )
+
+
+def test_backend_mutation_contract_separates_definitive_and_unknown_failures():
+    assert issubclass(MutationRejectedError, MutationError)
+    assert issubclass(MutationFailedError, MutationError)
+    assert issubclass(BackendUnavailableError, MutationFailedError)
+    assert issubclass(MutationOutcomeUnknownError, MutationError)
+    assert not issubclass(MutationOutcomeUnknownError, MutationFailedError)
+
+    receipt = MutationReceipt(observed_turn=7, result={"started": True})
+    assert receipt.observed_turn == 7
+    assert receipt.result == {"started": True}
 
 
 def test_mutation_result_represents_unknown_outcome_without_implying_failure():
