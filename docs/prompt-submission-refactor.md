@@ -63,7 +63,7 @@ question controls.
   question handling in the Discord adapter.
 - [x] Stage 7: remove obsolete transport-specific execution code and verify the
   complete test suite.
-- [ ] Stage 8: repeat live Telegram/Discord General and bound acceptance, then
+- [x] Stage 8: repeat live Telegram/Discord General and bound acceptance, then
   restart and verify Orca production.
 
 Shared rate-limit configuration is intentionally not part of the mechanical
@@ -93,3 +93,10 @@ cross-transport policy is approved.
   CLI/RPC errors, the compatibility backend uses the required receipt contract
   directly, and an import-boundary test protects the application service from
   transport SDK and concrete backend dependencies.
+- Stage 8: production was restarted on Orca and reconnected to Discord,
+  Telegram, output watchers, and the Orca Bot gateway. Live acceptance recorded
+  succeeded `bot_send`/`bot_reply` pairs for Discord and Telegram General plus
+  succeeded `thread_send` and `send_text` mutations for the exact
+  `herdr-chat-bridge/pi` Discord thread and Telegram topic. Exact General replies
+  were `HR_STAGE8_DG_OK` and `HR_STAGE8_TG_OK`; bound replies were observed in
+  the Agent conversation and delivered by both output transports.
