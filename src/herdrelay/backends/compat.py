@@ -9,6 +9,7 @@ from ..domain import (
     LifecycleState,
     MutationOutcome,
     MutationOutcomeUnknownError,
+    MutationReceipt,
     MutationRejectedError,
     MutationResult,
     TargetKey,
@@ -71,8 +72,8 @@ class CompatibilityBackend:
             return _failed_mutation(exc)
         return MutationResult(
             outcome=MutationOutcome.SUCCEEDED,
-            observed_turn=getattr(receipt, "observed_turn", None),
-            backend_data=_result_mapping(getattr(receipt, "result", None)),
+            observed_turn=receipt.observed_turn,
+            backend_data=_result_mapping(receipt.result),
         )
 
     async def interrupt(
@@ -109,12 +110,8 @@ class CompatibilityBackend:
             backend_data=_result_mapping(getattr(receipt, "result", receipt)),
         )
 
-    async def _send(self, target: str, text: str) -> Any:
-        send_with_receipt = getattr(self.client, "send_with_receipt", None)
-        if callable(send_with_receipt):
-            return await asyncio.to_thread(send_with_receipt, target, text)
-        await asyncio.to_thread(self.client.send, target, text)
-        return None
+    async def _send(self, target: str, text: str) -> MutationReceipt:
+        return await asyncio.to_thread(self.client.send, target, text)
 
     async def _interrupt(self, target: str) -> Any:
         interrupt_with_receipt = getattr(self.client, "interrupt_with_receipt", None)

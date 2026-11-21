@@ -203,6 +203,10 @@ def test_backend_mutation_contract_separates_definitive_and_unknown_failures():
     assert issubclass(MutationOutcomeUnknownError, MutationError)
     assert not issubclass(MutationOutcomeUnknownError, MutationFailedError)
 
+    rejection = MutationRejectedError("blocked", code="blocked")
+    assert str(rejection) == "blocked"
+    assert rejection.code == "blocked"
+
     receipt = MutationReceipt(observed_turn=7, result={"started": True})
     assert receipt.observed_turn == 7
     assert receipt.result == {"started": True}

@@ -23,15 +23,15 @@ _ACTIVE_TERMINAL_AGENT_STATES = frozenset({"working", "blocked", "waiting"})
 OrcaMutationReceipt = MutationReceipt
 
 
-class OrcaMutationRejected(OrcaCliError, MutationRejectedError):
+class OrcaMutationRejected(MutationRejectedError):
     """Orca definitively rejected a prompt before applying it."""
 
 
-class OrcaMutationFailed(OrcaCliError, MutationFailedError):
+class OrcaMutationFailed(MutationFailedError):
     """Orca definitively failed to apply a prompt."""
 
 
-class OrcaBackendUnavailable(OrcaCliError, BackendUnavailableError):
+class OrcaBackendUnavailable(BackendUnavailableError):
     """Orca or the exact target was unavailable before prompt submission."""
 
 
@@ -142,7 +142,7 @@ class OrcaClient:
     ) -> MutationReceipt:
         if not message:
             raise OrcaMutationRejected(
-                "Orca prompt must not be empty", kind="invalid"
+                "Orca prompt must not be empty", code="invalid"
             )
         resolution_error: OrcaCliError | None = None
         for _attempt in range(2):
@@ -150,7 +150,7 @@ class OrcaClient:
                 current = self._resolve_live_target(target)
                 if current.status and current.status.casefold() == "blocked":
                     raise OrcaMutationRejected(
-                        f"Orca agent is blocked: {target}", kind="blocked"
+                        f"Orca agent is blocked: {target}", code="blocked"
                     )
                 _, terminal = self._resolve_mutation_terminal(
                     target, current=current
@@ -163,7 +163,7 @@ class OrcaClient:
         else:
             assert resolution_error is not None
             raise OrcaBackendUnavailable(
-                str(resolution_error), kind=resolution_error.kind
+                str(resolution_error), code=resolution_error.kind
             ) from resolution_error
         try:
             result = self.cli.terminal_send(
@@ -175,7 +175,7 @@ class OrcaClient:
             raise
         except OrcaCliError as exc:
             error_type = OrcaMutationRejected if exc.kind else OrcaMutationFailed
-            raise error_type(str(exc), kind=exc.kind) from exc
+            raise error_type(str(exc), code=exc.kind) from exc
         return MutationReceipt(observed_turn=None, result=result)
 
     def resolve_target(self, query: str) -> HerdrTarget:

@@ -23,15 +23,15 @@ KNOWN_AGENT_APPS = frozenset({"pi", "claude", "codex"})
 HcMutationReceipt = MutationReceipt
 
 
-class HcMutationRejected(HcRpcError, MutationRejectedError):
+class HcMutationRejected(MutationRejectedError):
     """Core definitively rejected a prompt before applying it."""
 
 
-class HcMutationFailed(HcRpcError, MutationFailedError):
+class HcMutationFailed(MutationFailedError):
     """Core definitively failed to apply a prompt."""
 
 
-class HcBackendUnavailable(HcRpcError, BackendUnavailableError):
+class HcBackendUnavailable(BackendUnavailableError):
     """Core or the exact target was unavailable before prompt submission."""
 
 
@@ -147,32 +147,32 @@ class HcClient:
 
     def send_with_receipt(self, target: str, message: str) -> MutationReceipt:
         if not message:
-            raise HcMutationRejected("Core prompt must not be empty", kind="invalid")
+            raise HcMutationRejected("Core prompt must not be empty", code="invalid")
         try:
             self._ensure_target_exposed(target)
         except HcRpcError as exc:
-            raise HcMutationRejected(str(exc), kind=exc.kind or "policy") from exc
+            raise HcMutationRejected(str(exc), code=exc.kind or "policy") from exc
         try:
             raw = self._call("terminal.get", {"terminal": target, "caller": None})
         except HcRpcError as exc:
-            raise HcBackendUnavailable(str(exc), kind=exc.kind) from exc
+            raise HcBackendUnavailable(str(exc), code=exc.kind) from exc
         try:
             terminal = parse_terminal(raw)
         except HcProtocolError as exc:
             raise HcBackendUnavailable(str(exc)) from exc
         if terminal.state != "live":
             raise HcMutationRejected(
-                f"Core terminal is not live: {target}", kind="not_live"
+                f"Core terminal is not live: {target}", code="not_live"
             )
         if terminal.status is not None and terminal.status.state.casefold() == "blocked":
             raise HcMutationRejected(
-                f"Core terminal is blocked: {target}", kind="blocked"
+                f"Core terminal is blocked: {target}", code="blocked"
             )
         projected = self._target_from_terminal(terminal, raw=raw)
         if not projected.agent_name:
             raise HcMutationRejected(
                 f"Core terminal is not an eligible live agent: {target}",
-                kind="ineligible",
+                code="ineligible",
             )
         try:
             result = self._call(
@@ -189,7 +189,7 @@ class HcClient:
             raise
         except HcRpcError as exc:
             error_type = HcMutationRejected if exc.kind else HcMutationFailed
-            raise error_type(str(exc), kind=exc.kind) from exc
+            raise error_type(str(exc), code=exc.kind) from exc
         return MutationReceipt(observed_turn=terminal.turn, result=result)
 
     def interrupt(self, target: str) -> dict[str, Any]:

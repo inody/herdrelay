@@ -24,15 +24,15 @@ class TargetResolutionError(ValueError):
     pass
 
 
-class HerdrMutationRejected(HerdrCliError, MutationRejectedError):
+class HerdrMutationRejected(MutationRejectedError):
     """Legacy Herdr definitively rejected a prompt before applying it."""
 
 
-class HerdrMutationFailed(HerdrCliError, MutationFailedError):
+class HerdrMutationFailed(MutationFailedError):
     """Legacy Herdr definitively failed to apply a prompt."""
 
 
-class HerdrBackendUnavailable(HerdrCliError, BackendUnavailableError):
+class HerdrBackendUnavailable(BackendUnavailableError):
     """Legacy Herdr or its CLI was unavailable before prompt submission."""
 
 
@@ -184,7 +184,7 @@ class HerdrClient:
         raise TargetResolutionError(f"Target is ambiguous: {query}")
 
 
-def _normalize_herdr_send_error(exc: HerdrCliError) -> HerdrCliError:
+def _normalize_herdr_send_error(exc: HerdrCliError) -> MutationFailedError:
     error_type = (
         HerdrBackendUnavailable
         if "cli not found" in str(exc).casefold()

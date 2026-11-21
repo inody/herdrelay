@@ -76,6 +76,10 @@ class MutationOutcome(StrEnum):
 class MutationError(RuntimeError):
     """Base class for normalized backend mutation failures."""
 
+    def __init__(self, message: str, *, code: str | None = None):
+        super().__init__(message)
+        self.code = code
+
 
 class MutationRejectedError(MutationError):
     """The backend definitively rejected the mutation before applying it."""

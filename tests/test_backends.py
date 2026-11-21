@@ -57,6 +57,9 @@ class FakeClient:
         self.sent.append((target, text))
         return Receipt(observed_turn=4, result={"accepted": True})
 
+    def send(self, target, text):
+        return self.send_with_receipt(target, text)
+
     def interrupt_with_receipt(self, target):
         self.interrupted.append(target)
         return Receipt(observed_turn=5, result={"interrupted": True})

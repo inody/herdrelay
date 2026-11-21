@@ -133,7 +133,7 @@ def test_send_definitive_cli_failure_uses_normalized_contract():
     with pytest.raises(MutationFailedError, match="command failed") as caught:
         client.send("w7:p2", "hello")
 
-    assert isinstance(caught.value, HerdrCliError)
+    assert caught.value.code is None
     fake_cli.pane_run.assert_not_called()
 
 
@@ -148,7 +148,7 @@ def test_send_missing_cli_uses_backend_unavailable_contract():
     with pytest.raises(BackendUnavailableError, match="CLI not found") as caught:
         client.send("w7:p2", "hello")
 
-    assert isinstance(caught.value, HerdrCliError)
+    assert caught.value.code is None
 
 
 def test_send_fallback_returns_receipt_after_definitive_agent_prompt_failure():

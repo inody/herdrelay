@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +23,9 @@ from herdrelay.prompt_submission import (
 )
 from herdrelay.runtime import RuntimeCapabilities
 from herdrelay.store import Store
+
+ROOT = Path(__file__).parents[1]
+PROMPT_SUBMISSION_SOURCE = ROOT / "src" / "herdrelay" / "prompt_submission.py"
 
 
 @dataclass
@@ -78,6 +83,30 @@ def make_service(tmp_path, client, *, rate_limit=None):
         rate_limit=rate_limit,
     )
     return service, store
+
+
+def test_prompt_submission_application_service_has_no_transport_or_backend_imports():
+    tree = ast.parse(PROMPT_SUBMISSION_SOURCE.read_text())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+
+    forbidden = {
+        "discord",
+        "telegram",
+        "hc_client",
+        "hc_rpc",
+        "orca_client",
+        "orca_cli",
+        "herdr_client",
+        "herdr_cli",
+    }
+    assert forbidden.isdisjoint(
+        {name.removeprefix("herdrelay.").lstrip(".") for name in imported}
+    )
 
 
 def test_prompt_submission_claims_revalidates_sends_and_finishes_audit(tmp_path):

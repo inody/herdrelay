@@ -386,7 +386,7 @@ def test_orca_client_rejects_changed_runtime_and_ambiguous_terminal():
     client.cli = AmbiguousCli()
     with pytest.raises(BackendUnavailableError, match="exactly one") as caught:
         client.send(target.target, "continue")
-    assert isinstance(caught.value, OrcaCliError)
+    assert caught.value.code is None
 
 
 def test_orca_client_rejects_ambiguous_temporary_pty_alias():
@@ -410,7 +410,7 @@ def test_orca_client_rejects_ambiguous_temporary_pty_alias():
     }
     with pytest.raises(BackendUnavailableError, match="exactly one") as caught:
         client.send("local/tab:pane", "continue")
-    assert isinstance(caught.value, OrcaCliError)
+    assert caught.value.code is None
 
 
 def test_orca_client_normalizes_definitive_and_unknown_send_failures():
@@ -429,7 +429,7 @@ def test_orca_client_normalizes_definitive_and_unknown_send_failures():
     client.cli = FailingCli()
     with pytest.raises(MutationFailedError, match="send failed") as failed:
         client.send("local/tab:pane", "continue")
-    assert isinstance(failed.value, OrcaCliError)
+    assert failed.value.code is None
 
     def lose_response(**kwargs):
         raise OrcaMutationOutcomeUnknown("response timed out")
@@ -446,5 +446,4 @@ def test_orca_client_rejects_send_while_agent_is_blocked():
     with pytest.raises(MutationRejectedError, match="blocked") as caught:
         client.send("local/tab:pane", "continue")
 
-    assert isinstance(caught.value, OrcaCliError)
-    assert caught.value.kind == "blocked"
+    assert caught.value.code == "blocked"

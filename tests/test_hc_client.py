@@ -260,14 +260,14 @@ def test_core_client_refuses_send_to_blocked_stale_or_unlisted_target():
 
     with pytest.raises(MutationRejectedError, match="blocked") as blocked:
         client.send("blocked", "yes")
-    assert isinstance(blocked.value, HcRpcError)
-    with pytest.raises(HcRpcError, match="not an eligible live agent"):
+    assert blocked.value.code == "blocked"
+    with pytest.raises(MutationRejectedError, match="not an eligible live agent"):
         client.send("shell", "continue")
-    with pytest.raises(HcRpcError, match="connected-machine target is disabled"):
+    with pytest.raises(MutationRejectedError, match="connected-machine target is disabled"):
         client.send("remote/t1", "continue")
     with pytest.raises(HcRpcError, match="not interruptible in state idle"):
         client.interrupt("t1")
-    with pytest.raises(HcRpcError, match="not exposed by target policy"):
+    with pytest.raises(MutationRejectedError, match="not exposed by target policy"):
         client.send("t99", "continue")
     assert rpc.sent == []
 
@@ -285,7 +285,7 @@ def test_core_client_normalizes_definitive_and_unknown_send_failures():
     rpc.call = fail_send
     with pytest.raises(MutationFailedError, match="rejected") as failed:
         client.send("t1", "continue")
-    assert isinstance(failed.value, HcRpcError)
+    assert failed.value.code is None
 
     def lose_send_response(method, params):
         if method == "terminal.send":

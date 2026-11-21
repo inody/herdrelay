@@ -61,7 +61,7 @@ question controls.
 - [x] Stage 5: migrate Discord General router submission.
 - [x] Stage 6: migrate Discord bound-thread submission while leaving structured
   question handling in the Discord adapter.
-- [ ] Stage 7: remove obsolete transport-specific execution code and verify the
+- [x] Stage 7: remove obsolete transport-specific execution code and verify the
   complete test suite.
 - [ ] Stage 8: repeat live Telegram/Discord General and bound acceptance, then
   restart and verify Orca production.
@@ -89,3 +89,7 @@ cross-transport policy is approved.
 - Stage 6: `501 passed, 1 skipped`; Discord bound text and native voice prompts
   use the shared service and event dedupe. Legacy structured-question selection
   remains in the Discord adapter and retains its one-time claim behavior.
+- Stage 7: `502 passed, 1 skipped`; prompt exceptions no longer inherit backend
+  CLI/RPC errors, the compatibility backend uses the required receipt contract
+  directly, and an import-boundary test protects the application service from
+  transport SDK and concrete backend dependencies.
