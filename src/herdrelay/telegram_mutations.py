@@ -197,7 +197,7 @@ class TelegramMutationHandler:
             )
             return False
 
-        rate_limit = self._mutation_rate_limit(
+        rate_limit = self.mutation_rate_limit(
             actor_id=str(callback.user_id),
             container_id=str(callback.chat_id),
             target_key=target_key,
@@ -342,15 +342,7 @@ class TelegramMutationHandler:
                 f"Message exceeds the {self.config.max_message_chars}-character limit.",
             )
             return False
-        lowered = text.casefold()
-        blocked = next(
-            (
-                item
-                for item in self.config.dangerous_text_blocklist
-                if item.casefold() in lowered
-            ),
-            None,
-        )
+        blocked = self.blocked_text(text)
         if blocked is not None:
             await self._feedback(message, "Message was rejected by the text blocklist.")
             return False
@@ -378,7 +370,7 @@ class TelegramMutationHandler:
             return False
 
         target_key = key.to_storage_key()
-        rate_limit = self._mutation_rate_limit(
+        rate_limit = self.mutation_rate_limit(
             actor_id=str(message.user_id),
             container_id=str(message.chat_id),
             target_key=target_key,
@@ -492,7 +484,7 @@ class TelegramMutationHandler:
                 ),
                 observed_turn=(receipt.observed_turn if receipt is not None else None),
             )
-            await self._safe_reaction(message, "👀")
+            await self.safe_reaction(message, "👀")
         return True
 
     async def _feedback(self, message, text: str) -> None:
@@ -508,7 +500,7 @@ class TelegramMutationHandler:
         except Exception:
             LOG.exception("Failed to send Telegram mutation feedback")
 
-    async def _safe_reaction(self, message, emoji: str) -> None:
+    async def safe_reaction(self, message, emoji: str) -> None:
         try:
             await self.api.set_message_reaction(
                 chat_id=message.chat_id,
@@ -518,7 +510,18 @@ class TelegramMutationHandler:
         except Exception:
             LOG.exception("Failed to set Telegram mutation reaction")
 
-    def _mutation_rate_limit(
+    def blocked_text(self, text: str) -> str | None:
+        lowered = text.casefold()
+        return next(
+            (
+                item
+                for item in self.config.dangerous_text_blocklist
+                if item.casefold() in lowered
+            ),
+            None,
+        )
+
+    def mutation_rate_limit(
         self, *, actor_id: str, container_id: str, target_key: str
     ) -> str | None:
         since = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()

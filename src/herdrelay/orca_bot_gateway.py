@@ -199,17 +199,6 @@ class OrcaBotGatewayWorker:
                 ],
                 mutation=True,
             )
-        except subprocess.TimeoutExpired:
-            self._write_event(
-                request_id=request_id,
-                suffix="outcome-unknown",
-                payload={
-                    **_event_base(request),
-                    "kind": "outcome_unknown",
-                    "detail": "Orca bot send timed out after mutation began",
-                },
-            )
-            return
         finally:
             if body_path is not None:
                 body_path.unlink(missing_ok=True)
@@ -347,36 +336,53 @@ class OrcaBotGatewayWorker:
     def _orca_json(
         self, args: list[str], *, mutation: bool = False
     ) -> dict[str, Any]:
-        command = [
-            self.runtime.cli_path,
-            *args,
-            "--environment",
-            self.runtime.environment,
-            "--json",
-        ]
+        return run_orca_json(
+            cli_path=self.runtime.cli_path,
+            environment=self.runtime.environment,
+            timeout_seconds=self.bot.command_timeout_seconds,
+            args=args,
+            mutation=mutation,
+        )
+
+
+def run_orca_json(
+    *,
+    cli_path: str,
+    environment: str,
+    timeout_seconds: float,
+    args: list[str],
+    mutation: bool = False,
+) -> dict[str, Any]:
+    command = [cli_path, *args, "--environment", environment, "--json"]
+    try:
         completed = subprocess.run(
             command,
             check=False,
             capture_output=True,
             text=True,
-            timeout=self.bot.command_timeout_seconds,
+            timeout=timeout_seconds,
         )
-        try:
-            payload = json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:
-            detail = completed.stderr.strip() or completed.stdout.strip()
-            raise RuntimeError(f"Orca did not return JSON: {detail}") from exc
-        if not isinstance(payload, dict):
-            raise RuntimeError("Orca response must be an object")
-        if completed.returncode != 0 or payload.get("ok") is not True:
-            error = payload.get("error")
-            code = error.get("code") if isinstance(error, dict) else None
-            message = error.get("message") if isinstance(error, dict) else None
-            detail = str(message or completed.stderr.strip() or "Orca command failed")
-            if mutation and code in {"outcome_unknown", "request_outcome_unknown"}:
-                raise GatewayOutcomeUnknown(detail)
-            raise RuntimeError(detail)
-        return payload
+    except subprocess.TimeoutExpired as exc:
+        detail = f"Orca command timed out: {' '.join(command)}"
+        if mutation:
+            raise GatewayOutcomeUnknown(detail) from exc
+        raise RuntimeError(detail) from exc
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise RuntimeError(f"Orca did not return JSON: {detail}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Orca response must be an object")
+    if completed.returncode != 0 or payload.get("ok") is not True:
+        error = payload.get("error")
+        code = error.get("code") if isinstance(error, dict) else None
+        message = error.get("message") if isinstance(error, dict) else None
+        detail = str(message or completed.stderr.strip() or "Orca command failed")
+        if mutation and code in {"outcome_unknown", "request_outcome_unknown"}:
+            raise GatewayOutcomeUnknown(detail)
+        raise RuntimeError(detail)
+    return payload
 
 
 def _event_base(request: dict[str, Any]) -> dict[str, Any]:

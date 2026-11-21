@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import subprocess
+import time
 
 import pytest
 
@@ -15,7 +17,13 @@ from herdrelay.config import (
     TelegramGeneralRouterConfig,
     TelegramOrcaBotConfig,
 )
-from herdrelay.orca_bot_gateway import GatewayQueue, OrcaBotGatewayWorker, _write_json
+from herdrelay.orca_bot_gateway import (
+    GatewayOutcomeUnknown,
+    GatewayQueue,
+    OrcaBotGatewayWorker,
+    _write_json,
+    run_orca_json,
+)
 from herdrelay.store import Store
 from herdrelay.telegram_orca_bot import OrcaBotGatewaySupervisor
 from herdrelay.telegram_service import TelegramService
@@ -174,6 +182,109 @@ async def test_gateway_reply_is_delivered_to_general_and_audited(tmp_path):
     assert audit["action"] == "bot_reply"
     assert audit["outcome"] == "succeeded"
     assert not (queue.events / "telegram-10.reply.json").exists()
+
+
+def test_supervisor_replaces_exact_stale_handle_even_if_title_changed(
+    tmp_path, monkeypatch
+):
+    config = bot_config(tmp_path)
+    queue = GatewayQueue(config.telegram.general_router.orca_bot.queue_path)
+    queue.prepare()
+    _write_json(
+        queue.heartbeat,
+        {
+            "version": 1,
+            "handle": "term-exact",
+            "pane_key": "tab:pane",
+            "bot_id": "bot-1",
+            "gateway_worktree": "folder:bot-home",
+            "updated_at": 0,
+        },
+    )
+    supervisor = OrcaBotGatewaySupervisor(
+        config=config,
+        store=Store(config.database_path),
+        api=FakeApi(),
+        stopped=asyncio.Event(),
+        queue=queue,
+    )
+    supervisor._stale_seen_at = (
+        time.monotonic()
+        - config.telegram.general_router.orca_bot.heartbeat_stale_seconds
+        - 1
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "_terminal_list",
+        lambda: [
+            {
+                "handle": "term-exact",
+                "worktreeId": "folder:bot-home",
+                "title": "python",
+                "paneTitle": None,
+            }
+        ],
+    )
+    closed = []
+    created = []
+    monkeypatch.setattr(supervisor, "_terminal_close", closed.append)
+    monkeypatch.setattr(supervisor, "_terminal_create", lambda: created.append(True))
+
+    supervisor.ensure_worker()
+
+    assert closed == ["term-exact"]
+    assert created == [True]
+
+
+def test_supervisor_does_not_close_same_title_in_another_worktree(
+    tmp_path, monkeypatch
+):
+    config = bot_config(tmp_path)
+    queue = GatewayQueue(config.telegram.general_router.orca_bot.queue_path)
+    supervisor = OrcaBotGatewaySupervisor(
+        config=config,
+        store=Store(config.database_path),
+        api=FakeApi(),
+        stopped=asyncio.Event(),
+        queue=queue,
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "_terminal_list",
+        lambda: [
+            {
+                "handle": "term-user",
+                "worktreeId": "folder:someone-else",
+                "title": "HerdRelay Gateway",
+                "paneTitle": "HerdRelay Gateway",
+            }
+        ],
+    )
+    closed = []
+    created = []
+    monkeypatch.setattr(supervisor, "_terminal_close", closed.append)
+    monkeypatch.setattr(supervisor, "_terminal_create", lambda: created.append(True))
+
+    supervisor.ensure_worker()
+
+    assert closed == []
+    assert created == [True]
+
+
+def test_shared_orca_runner_classifies_mutation_timeout_as_unknown(monkeypatch):
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(["orca"], 5)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+
+    with pytest.raises(GatewayOutcomeUnknown, match="timed out"):
+        run_orca_json(
+            cli_path="orca",
+            environment="local",
+            timeout_seconds=5,
+            args=["orchestration", "send"],
+            mutation=True,
+        )
 
 
 def test_gateway_worker_recovers_inflight_send_as_outcome_unknown(

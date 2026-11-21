@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 import json
 import logging
 from pathlib import Path
-import subprocess
 import time
 from typing import Any
 
 from .config import AppConfig
 from .formatter import truncate
 from .models import TransportAuditEntry
-from .orca_bot_gateway import GatewayQueue, _read_json
+from .orca_bot_gateway import GatewayQueue, _read_json, run_orca_json
 from .store import Store
 from .telegram_api import TelegramBotApi
 from .telegram_mutations import TelegramMutationHandler
@@ -54,20 +53,13 @@ class TelegramOrcaBotGeneral:
                 message, "入力が空か長すぎるため、何も送信していません。"
             )
             return False
-        blocked = next(
-            (
-                item
-                for item in self.config.dangerous_text_blocklist
-                if item.casefold() in text.casefold()
-            ),
-            None,
-        )
+        blocked = self.mutations.blocked_text(text)
         if blocked is not None:
             await self._feedback(message, "Message was rejected by the text blocklist.")
             return False
 
         target_key = f"orca-bot:{self.bot.bot_id}"
-        rate_limit = self._mutation_rate_limit(
+        rate_limit = self.mutations.mutation_rate_limit(
             actor_id=str(message.user_id),
             container_id=str(message.chat_id),
             target_key=target_key,
@@ -129,7 +121,7 @@ class TelegramOrcaBotGeneral:
             )
             await self._feedback(message, "⚠️ Orca Botへの送信準備に失敗しました。")
             return True
-        await self._safe_reaction(message, "👀")
+        await self.mutations.safe_reaction(message, "👀")
         return True
 
     def clear_context(self, message: TelegramInboundMessage) -> bool:
@@ -149,49 +141,12 @@ class TelegramOrcaBotGeneral:
         )
         return True
 
-    def _mutation_rate_limit(
-        self, *, actor_id: str, container_id: str, target_key: str
-    ) -> str | None:
-        since = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
-        checks = (
-            ("actor", self.telegram.actor_mutations_per_minute, {"actor_id": actor_id}),
-            (
-                "chat",
-                self.telegram.chat_mutations_per_minute,
-                {"container_id": container_id},
-            ),
-            (
-                "target",
-                self.telegram.target_mutations_per_minute,
-                {"target_key": target_key},
-            ),
-        )
-        for label, limit, key in checks:
-            count = self.store.count_transport_mutations(
-                transport="telegram", since=since, **key
-            )
-            if count >= limit:
-                return f"rate limit: {label} has {count} mutations in the last minute"
-        return None
-
     async def _feedback(self, message: TelegramInboundMessage, text: str) -> None:
         await self.api.send_text(
             chat_id=message.chat_id,
             message_thread_id=message.message_thread_id,
             text=text,
         )
-
-    async def _safe_reaction(
-        self, message: TelegramInboundMessage, emoji: str
-    ) -> None:
-        try:
-            await self.api.set_message_reaction(
-                chat_id=message.chat_id,
-                message_id=message.message_id,
-                emoji=emoji,
-            )
-        except Exception:
-            LOG.exception("Failed to set Telegram Orca Bot reaction")
 
 
 class OrcaBotGatewaySupervisor:
@@ -319,7 +274,39 @@ class OrcaBotGatewaySupervisor:
             return
 
         terminals = self._terminal_list()
-        matches = [
+        stale_terminals = self._stale_terminal_candidates(
+            terminals=terminals,
+            heartbeat=heartbeat,
+        )
+        if stale_terminals:
+            self._mark_stale_or_wait()
+            if self._stale_seen_at is not None:
+                return
+        self._stale_seen_at = None
+
+        for terminal in stale_terminals:
+            handle = terminal.get("handle")
+            if isinstance(handle, str) and handle:
+                self._terminal_close(handle)
+        if time.monotonic() < self._next_create_at:
+            return
+        self._terminal_create()
+
+    def _stale_terminal_candidates(
+        self,
+        *,
+        terminals: list[dict[str, Any]],
+        heartbeat: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        if heartbeat is not None:
+            handle = heartbeat["handle"]
+            return [
+                terminal
+                for terminal in terminals
+                if terminal.get("handle") == handle
+                and terminal.get("worktreeId") == self.bot.gateway_worktree
+            ]
+        return [
             terminal
             for terminal in terminals
             if terminal.get("worktreeId") == self.bot.gateway_worktree
@@ -328,27 +315,6 @@ class OrcaBotGatewaySupervisor:
                 or terminal.get("title") == self.bot.gateway_title
             )
         ]
-        heartbeat_handle = heartbeat.get("handle") if heartbeat else None
-        if heartbeat_handle and any(
-            terminal.get("handle") == heartbeat_handle for terminal in matches
-        ):
-            self._mark_stale_or_wait()
-            if self._stale_seen_at is not None:
-                return
-        elif matches:
-            self._mark_stale_or_wait()
-            if self._stale_seen_at is not None:
-                return
-        self._stale_seen_at = None
-
-        if matches:
-            for terminal in matches:
-                handle = terminal.get("handle")
-                if isinstance(handle, str) and handle:
-                    self._terminal_close(handle)
-        if time.monotonic() < self._next_create_at:
-            return
-        self._terminal_create()
 
     def _mark_stale_or_wait(self) -> None:
         now = time.monotonic()
@@ -421,38 +387,13 @@ class OrcaBotGatewaySupervisor:
     def _orca_json(
         self, args: list[str], *, mutation: bool = False
     ) -> dict[str, Any]:
-        command = [
-            self.runtime.cli_path,
-            *args,
-            "--environment",
-            self.runtime.environment,
-            "--json",
-        ]
-        try:
-            completed = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=self.bot.command_timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            detail = f"Orca command timed out: {' '.join(command)}"
-            if mutation:
-                raise RuntimeError(f"outcome unknown: {detail}") from exc
-            raise RuntimeError(detail) from exc
-        try:
-            payload = json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:
-            detail = completed.stderr.strip() or completed.stdout.strip()
-            raise RuntimeError(f"Orca did not return JSON: {detail}") from exc
-        if not isinstance(payload, dict):
-            raise RuntimeError("Orca response must be an object")
-        if completed.returncode != 0 or payload.get("ok") is not True:
-            error = payload.get("error")
-            message = error.get("message") if isinstance(error, dict) else None
-            raise RuntimeError(str(message or completed.stderr.strip() or "Orca failed"))
-        return payload
+        return run_orca_json(
+            cli_path=self.runtime.cli_path,
+            environment=self.runtime.environment,
+            timeout_seconds=self.bot.command_timeout_seconds,
+            args=args,
+            mutation=mutation,
+        )
 
 
 def _thread_value(value: int | None) -> str | None:
