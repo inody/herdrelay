@@ -819,6 +819,7 @@ transports:
     config = load_config(config_path)
 
     voice = config.telegram.voice_input
+    assert config.voice_input == voice
     assert voice.enabled is True
     assert voice.scope == "general-and-bound"
     assert voice.max_duration_seconds == 90
@@ -827,6 +828,38 @@ transports:
     assert voice.transcription.model == "mlx-community/whisper-large-v3-turbo"
     assert voice.transcription.python_path == "/opt/voice/bin/python"
     assert voice.transcription.pass_env == ("HF_TOKEN",)
+
+
+def test_load_config_reads_shared_relay_voice_input(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+transports:
+  discord:
+    enabled: true
+    enable_send: true
+relay:
+  general:
+    enabled: true
+    model:
+      provider: command
+      argv: [router]
+  voice_input:
+    enabled: true
+    scope: general-and-bound
+    transcription:
+      provider: command
+      argv: [transcribe, "{input}"]
+"""
+    )
+
+    config = load_config(config_path)
+
+    assert config.voice_input.enabled is True
+    assert config.voice_input.scope == "general-and-bound"
+    assert config.telegram.voice_input == config.voice_input
+    assert config.voice_input.transcription.argv == ("transcribe", "{input}")
 
 
 def test_load_config_rejects_invalid_core_runtime_values(tmp_path, monkeypatch):

@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
-from .config import AppConfig, effective_general_provider
+from .config import AppConfig, effective_general_provider, effective_voice_input
 from .formatter import target_alias
 from .orca_bot_gateway import GatewayQueue
 from .runtime import RuntimeClient
@@ -106,7 +106,11 @@ class TelegramService:
                 router=self.general_router,
                 transcriber=voice_transcriber,
             )
-            if self.telegram.voice_input.enabled and self.general_router is not None
+            if (
+                effective_voice_input(config).enabled
+                and self.telegram.enable_send
+                and self.general_router is not None
+            )
             else None
         )
         self.status_relay = TelegramStatusRelay(

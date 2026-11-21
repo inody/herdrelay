@@ -47,6 +47,20 @@ relay:
     - "rm -rf"
     - "sudo"
     - "git reset --hard"
+  voice_input:                    # shared by Telegram and Discord voice messages
+    enabled: false
+    scope: general                # or general-and-bound for direct route voice
+    max_duration_seconds: 120
+    max_file_bytes: 10000000
+    transcription:
+      provider: none              # mlx-whisper or command
+      model: null                 # e.g. mlx-community/whisper-large-v3-turbo
+      language: smart             # auto, ja, en, or smart retry mode
+      python_path: python3        # Python containing mlx-whisper
+      argv: []                    # command provider; use {input} placeholder
+      pass_env: []                # extra env names; minimal by default
+      timeout_seconds: 120
+      max_output_bytes: 1048576
   general:
     enabled: false                 # Telegram General and Discord parent channel
     provider: auto                 # auto, router, or orca-bot
@@ -130,17 +144,3 @@ transports:
     status_refresh_seconds: 5      # legacy TUI/Orca polling; Core uses native events
     target_absence_grace_seconds: 60 # ignore transient discovery gaps
     closed_topic_retention_minutes: 10 # null keeps closed topics indefinitely
-    voice_input:
-      enabled: false               # transcribe Telegram voice messages in General
-      scope: general               # or general-and-bound for direct topic voice
-      max_duration_seconds: 120
-      max_file_bytes: 10000000
-      transcription:
-        provider: none             # mlx-whisper or command
-        model: null                # e.g. mlx-community/whisper-large-v3-turbo
-        language: smart            # auto, ja, en, or smart retry mode
-        python_path: python3        # Python containing mlx-whisper
-        argv: []                   # command provider; use {input} placeholder
-        pass_env: []               # extra env names; minimal by default
-        timeout_seconds: 120
-        max_output_bytes: 1048576

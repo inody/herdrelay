@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 from typing import Protocol
 
-from .config import AppConfig
+from .config import AppConfig, effective_voice_input
 from .formatter import truncate
 from .models import TransportAuditEntry
 from .store import Store
@@ -39,7 +39,7 @@ class TelegramVoiceHandler:
         transcriber: VoiceTranscriber | None = None,
     ):
         self.config = config
-        self.voice_config = config.telegram.voice_input
+        self.voice_config = effective_voice_input(config)
         self.store = store
         self.api = api
         self.router = router

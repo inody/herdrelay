@@ -196,25 +196,25 @@ production policy permits read-only inspection and explicitly requested Agent
 launches, but requires confirmation before Mail, Todoist, external-app,
 destructive command, Agent close, or terminal deletion mutations.
 
-## Telegram voice input
+## Voice input
 
-`transports.telegram.voice_input.enabled` accepts authorized Telegram voice
-messages, downloads the Bot API file into a mode-0700 cache directory,
-transcribes it, and deletes the temporary audio. General passes the transcript
-through the selected `router` or `orca-bot` provider. With
-`scope: general-and-bound`, a voice message
-inside a bound topic bypasses destination classification exactly like bound text
-and submits the full transcript through that topic's existing route. The normal
-live identity check, blocklist, mutation rate limits, dedupe, and audit still
-apply. Bound-topic voice does not change the recent General destination.
+`relay.voice_input.enabled` accepts authorized Telegram and Discord voice
+messages, downloads the attachment into a mode-0700 cache directory, transcribes
+it, and deletes the temporary audio. General passes the transcript through the
+selected `router` or `orca-bot` provider. With `scope: general-and-bound`, a
+voice message inside a bound topic or thread bypasses destination classification
+exactly like bound text and submits the full transcript through that route. The
+normal live identity check, blocklist, mutation limits, dedupe, and audit still
+apply. Bound-route voice does not change the recent General destination.
 
-The default limits are 120 seconds and 10 MB. Telegram's advertised size is
-checked before download and the actual streamed byte count is checked again.
-A failed download, timeout, empty transcript, invalid provider output, ambiguous
-route, or changed runtime target causes no mutation and is not retried
-automatically. Router processing records `transcribe_voice`, `route_text`, and
-`send_text` as distinct audit actions; Orca Bot processing records
-`transcribe_voice`, `bot_send`, and `bot_reply`.
+The default limits are 120 seconds and 10 MB. Advertised size and duration are
+checked before download, and downloaded size is checked again. Discord accepts
+native voice messages, not arbitrary audio attachments. A failed download,
+timeout, empty transcript, invalid provider output, ambiguous route, or changed
+runtime target causes no mutation and is not retried automatically. Router
+processing records `transcribe_voice`, `route_text`, and `send_text` as distinct
+audit actions; Orca Bot processing records `transcribe_voice`, `bot_send`, and
+`bot_reply`.
 
 The `mlx-whisper` provider invokes a separate Python interpreter and emits a
 small JSON transcript contract. Set `python_path` to an environment containing

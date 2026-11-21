@@ -6,7 +6,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from .config import AppConfig, effective_general_provider
+from .config import AppConfig, effective_general_provider, effective_voice_input
 from .domain import MutationOutcomeUnknownError, TargetKey
 from .formatter import (
     target_alias,
@@ -27,9 +27,11 @@ from .discord_general import (
     DiscordOrcaBotGeneral,
 )
 from .discord_output import StreamManager
+from .discord_voice import DiscordVoiceHandler, is_discord_voice_message
 from .discord_threads import ThreadManager
 from .discord_watcher import EventWatcher
 from .telegram_router import IntentModel
+from .voice_transcription import VoiceTranscriber
 
 LOG = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class HerdrDiscordBot(commands.Bot):
         client: RuntimeClient,
         gateway_queue: GatewayQueue | None = None,
         router_model: IntentModel | None = None,
+        voice_transcriber: VoiceTranscriber | None = None,
     ):
         intents = discord.Intents.default()
         if config.enable_send or config.enable_questions:
@@ -76,6 +79,19 @@ class HerdrDiscordBot(commands.Bot):
                     client=client,
                     model=router_model,
                 )
+        self.voice_handler = (
+            DiscordVoiceHandler(
+                config=config,
+                store=store,
+                transcriber=voice_transcriber,
+            )
+            if (
+                effective_voice_input(config).enabled
+                and config.enable_send
+                and self.general_handler is not None
+            )
+            else None
+        )
 
     async def setup_hook(self) -> None:
         # Sync the (empty) command tree so Discord drops any previously
@@ -175,6 +191,9 @@ class HerdrDiscordBot(commands.Bot):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
+        if is_discord_voice_message(message):
+            if await self._handle_voice_message(message):
+                return
         if (
             (self.user and self.user in message.mentions)
             or _has_literal_control_prefix(message.content)
@@ -185,7 +204,70 @@ class HerdrDiscordBot(commands.Bot):
             return
         await self._handle_thread_send(message)
 
-    async def _handle_general(self, message: discord.Message) -> bool:
+    async def _handle_voice_message(self, message: discord.Message) -> bool:
+        parent_channel_id = self.config.thread_parent_channel_id
+        if parent_channel_id is None:
+            return False
+        location = _location_from_message(message)
+        is_general = message.channel.id == parent_channel_id
+        binding = None
+        if (
+            not is_general
+            and getattr(message.channel, "parent_id", None) == parent_channel_id
+        ):
+            binding = self.store.get_binding(
+                guild_id=location.guild_id or 0,
+                channel_id=location.channel_id,
+                thread_id=location.thread_id,
+            )
+        if not is_general and binding is None:
+            return False
+        voice_config = effective_voice_input(self.config)
+        if self.voice_handler is None:
+            await message.reply(
+                "Voice input is disabled. Nothing was sent.",
+                allowed_mentions=discord.AllowedMentions.none(),
+                mention_author=False,
+            )
+            return True
+        if not is_general and voice_config.scope != "general-and-bound":
+            await message.reply(
+                "Voice input is currently available only in General. Nothing was sent.",
+                allowed_mentions=discord.AllowedMentions.none(),
+                mention_author=False,
+            )
+            return True
+        try:
+            self.security.ensure_send_allowed(message.author.id, location, "")
+        except Exception as exc:
+            await message.reply(
+                f"Error: {exc}",
+                allowed_mentions=discord.AllowedMentions.none(),
+                mention_author=False,
+            )
+            return True
+        transcript = await self.voice_handler.transcribe(message)
+        if transcript is None:
+            return True
+        if is_general:
+            return await self._handle_general(
+                message,
+                content=transcript,
+                source_kind="voice",
+            )
+        return await self._handle_thread_send(
+            message,
+            content=transcript,
+            action="thread_send_voice",
+        )
+
+    async def _handle_general(
+        self,
+        message: discord.Message,
+        *,
+        content: str | None = None,
+        source_kind: str = "text",
+    ) -> bool:
         if (
             self.general_handler is None
             or self.config.thread_parent_channel_id is None
@@ -193,7 +275,8 @@ class HerdrDiscordBot(commands.Bot):
         ):
             return False
         location = _location_from_message(message)
-        content = (message.content or "").strip()
+        content_override = content is not None
+        content = (message.content if content is None else content or "").strip()
         try:
             self.security.ensure_send_allowed(message.author.id, location, content)
         except Exception as exc:
@@ -214,10 +297,23 @@ class HerdrDiscordBot(commands.Bot):
                 mention_author=False,
             )
             return True
-        await self.general_handler.handle(message)
+        if content_override or source_kind != "text":
+            await self.general_handler.handle(
+                message,
+                text=content,
+                source_kind=source_kind,
+            )
+        else:
+            await self.general_handler.handle(message)
         return True
 
-    async def _handle_thread_send(self, message: discord.Message) -> bool:
+    async def _handle_thread_send(
+        self,
+        message: discord.Message,
+        *,
+        content: str | None = None,
+        action: str = "thread_send",
+    ) -> bool:
         """Forward a normal message posted in a bound thread to its Herdr pane."""
         parent_id = getattr(message.channel, "parent_id", None)
         if parent_id is None:
@@ -230,7 +326,7 @@ class HerdrDiscordBot(commands.Bot):
         )
         if binding is None:
             return False
-        content = (message.content or "").strip()
+        content = (message.content if content is None else content or "").strip()
         if not content:
             return False
         audit_fields = dict(
@@ -238,7 +334,7 @@ class HerdrDiscordBot(commands.Bot):
             guild_id=str(location.guild_id) if location.guild_id is not None else None,
             channel_id=str(location.channel_id),
             thread_id=str(location.thread_id) if location.thread_id is not None else None,
-            action="thread_send",
+            action=action,
             herdr_target=binding.herdr_target,
             payload_preview=truncate(content, max_chars=200),
         )
@@ -643,6 +739,7 @@ def build_bot(
     *,
     gateway_queue: GatewayQueue | None = None,
     router_model: IntentModel | None = None,
+    voice_transcriber: VoiceTranscriber | None = None,
 ) -> HerdrDiscordBot:
     return HerdrDiscordBot(
         config=config,
@@ -650,4 +747,5 @@ def build_bot(
         client=client,
         gateway_queue=gateway_queue,
         router_model=router_model,
+        voice_transcriber=voice_transcriber,
     )

@@ -14,8 +14,8 @@ The normal product surface is deliberately small:
 - relay lifecycle status, structured questions, and completed responses; and
 - route Telegram General and the Discord parent channel through the same
   backend-aware General provider; and
-- transcribe bounded Telegram voice messages locally before routing or direct
-  delivery.
+- transcribe bounded Telegram and Discord voice messages locally before routing
+  or direct delivery.
 
 The selected runtime remains the authority. HerdRelay's direct mutation path
 does not provide shell access, arbitrary terminal input, generic approval,
@@ -355,32 +355,31 @@ Configure side-effect confirmations and allowed behavior in the Bot's
 `/forget` atomically moves future messages to a newly created Bot chat while
 allowing already-pending replies to finish.
 
-### Optional Telegram voice input
+### Optional voice input
 
-Authorized Telegram voice messages can be transcribed locally. Voice input
-requires `enable_send: true` and an enabled General provider. General passes the
-transcript through the selected `router` or `orca-bot` provider; with
-`scope: general-and-bound`, a bound topic submits the full transcript directly
-through its existing Agent route
-without an LLM call. The default `scope: general` keeps bound topics text-only.
+Authorized Telegram and Discord voice messages can be transcribed locally.
+Voice input requires `enable_send: true` on the originating transport and an
+enabled General provider. General passes the transcript through the selected
+`router` or `orca-bot` provider; with `scope: general-and-bound`, a bound topic
+or thread submits the full transcript directly through its existing Agent route
+without an LLM call. The default `scope: general` keeps bound routes text-only.
 Audio is downloaded to a private temporary directory, bounded by duration and
-file size, and deleted after each attempt. Telegram photo, video, document, and
-other media messages are not forwarded to Agents.
+file size, and deleted after each attempt. Other media and ordinary audio-file
+attachments are not forwarded to Agents.
 
 ```yaml
-transports:
-  telegram:
-    voice_input:
-      enabled: true
-      scope: general-and-bound
-      max_duration_seconds: 120
-      max_file_bytes: 10000000
-      transcription:
-        provider: mlx-whisper
-        model: mlx-community/whisper-large-v3-turbo
-        language: smart
-        python_path: /path/to/python-with-mlx-whisper
-        timeout_seconds: 120
+relay:
+  voice_input:
+    enabled: true
+    scope: general-and-bound
+    max_duration_seconds: 120
+    max_file_bytes: 10000000
+    transcription:
+      provider: mlx-whisper
+      model: mlx-community/whisper-large-v3-turbo
+      language: smart
+      python_path: /path/to/python-with-mlx-whisper
+      timeout_seconds: 120
 ```
 
 The `mlx-whisper` provider runs in a separate Python subprocess with a minimal

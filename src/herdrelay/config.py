@@ -109,7 +109,7 @@ class VoiceTranscriptionConfig:
 
 
 @dataclass(frozen=True)
-class TelegramVoiceInputConfig:
+class VoiceInputConfig:
     enabled: bool = False
     scope: str = "general"
     max_duration_seconds: int = 120
@@ -117,6 +117,10 @@ class TelegramVoiceInputConfig:
     transcription: VoiceTranscriptionConfig = field(
         default_factory=VoiceTranscriptionConfig
     )
+
+
+# Backward-compatible import name for callers that configured Telegram first.
+TelegramVoiceInputConfig = VoiceInputConfig
 
 
 @dataclass(frozen=True)
@@ -170,8 +174,8 @@ class TelegramConfig:
     general_router: TelegramGeneralRouterConfig = field(
         default_factory=TelegramGeneralRouterConfig
     )
-    voice_input: TelegramVoiceInputConfig = field(
-        default_factory=TelegramVoiceInputConfig
+    voice_input: VoiceInputConfig = field(
+        default_factory=VoiceInputConfig
     )
 
 
@@ -225,6 +229,7 @@ class AppConfig:
     enable_streaming: bool = False
     allow_pane_send_fallback: bool = False
     dangerous_text_blocklist: tuple[str, ...] = ()
+    voice_input: VoiceInputConfig = field(default_factory=VoiceInputConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
     auto_threads: AutoThreadsConfig = field(default_factory=AutoThreadsConfig)
@@ -301,13 +306,17 @@ def load_config(
         raise ValueError(
             "transports.telegram.general_router.orca_bot must be a YAML mapping"
         )
-    voice_input_data = telegram_data.get("voice_input") or {}
+    voice_input_data = (
+        relay_data.get("voice_input")
+        if "voice_input" in relay_data
+        else telegram_data.get("voice_input")
+    ) or {}
     if not isinstance(voice_input_data, dict):
-        raise ValueError("transports.telegram.voice_input must be a YAML mapping")
+        raise ValueError("relay.voice_input must be a YAML mapping")
     transcription_data = voice_input_data.get("transcription") or {}
     if not isinstance(transcription_data, dict):
         raise ValueError(
-            "transports.telegram.voice_input.transcription must be a YAML mapping"
+            "relay.voice_input.transcription must be a YAML mapping"
         )
     storage_data = data.get("storage") or {}
     if not isinstance(storage_data, dict):
@@ -339,6 +348,28 @@ def load_config(
     orca_target_exposure = _orca_target_exposure(orca_data)
     orca_host_ids = _orca_host_ids(orca_data)
     runtime_provider = _runtime_provider(runtime_data.get("provider"))
+    voice_input = VoiceInputConfig(
+        enabled=bool(voice_input_data.get("enabled", False)),
+        scope=str(voice_input_data.get("scope") or "general").casefold(),
+        max_duration_seconds=int(
+            voice_input_data.get("max_duration_seconds", 120)
+        ),
+        max_file_bytes=int(voice_input_data.get("max_file_bytes", 10_000_000)),
+        transcription=VoiceTranscriptionConfig(
+            provider=str(transcription_data.get("provider") or "none").casefold(),
+            model=_optional_str(transcription_data.get("model")),
+            language=str(transcription_data.get("language") or "smart").casefold(),
+            python_path=str(transcription_data.get("python_path") or "python3"),
+            argv=tuple(str(item) for item in transcription_data.get("argv") or ()),
+            pass_env=tuple(
+                str(item) for item in transcription_data.get("pass_env") or ()
+            ),
+            timeout_seconds=float(transcription_data.get("timeout_seconds", 120)),
+            max_output_bytes=int(
+                transcription_data.get("max_output_bytes", 1_048_576)
+            ),
+        ),
+    )
 
     config = AppConfig(
         discord_token=token,
@@ -421,6 +452,7 @@ def load_config(
                 data.get("dangerous_text_blocklist") or (),
             )
         ),
+        voice_input=voice_input,
         runtime=RuntimeConfig(
             provider=runtime_provider,
             tui=HerdrCliConfig(
@@ -563,41 +595,7 @@ def load_config(
             closed_topic_retention_days=_optional_int(
                 telegram_data.get("closed_topic_retention_days")
             ),
-            voice_input=TelegramVoiceInputConfig(
-                enabled=bool(voice_input_data.get("enabled", False)),
-                scope=str(voice_input_data.get("scope") or "general").casefold(),
-                max_duration_seconds=int(
-                    voice_input_data.get("max_duration_seconds", 120)
-                ),
-                max_file_bytes=int(
-                    voice_input_data.get("max_file_bytes", 10_000_000)
-                ),
-                transcription=VoiceTranscriptionConfig(
-                    provider=str(
-                        transcription_data.get("provider") or "none"
-                    ).casefold(),
-                    model=_optional_str(transcription_data.get("model")),
-                    language=str(
-                        transcription_data.get("language") or "smart"
-                    ).casefold(),
-                    python_path=str(
-                        transcription_data.get("python_path") or "python3"
-                    ),
-                    argv=tuple(
-                        str(item) for item in transcription_data.get("argv") or ()
-                    ),
-                    pass_env=tuple(
-                        str(item)
-                        for item in transcription_data.get("pass_env") or ()
-                    ),
-                    timeout_seconds=float(
-                        transcription_data.get("timeout_seconds", 120)
-                    ),
-                    max_output_bytes=int(
-                        transcription_data.get("max_output_bytes", 1_048_576)
-                    ),
-                ),
-            ),
+            voice_input=voice_input,
             general_router=TelegramGeneralRouterConfig(
                 enabled=bool(general_router_data.get("enabled", False)),
                 provider=str(
@@ -676,6 +674,7 @@ def load_config(
     _validate_discord_lifecycle(config)
     _validate_telegram(config)
     _validate_general(config)
+    _validate_voice_input(config)
     return config
 
 
@@ -745,46 +744,56 @@ def _validate_telegram(config: AppConfig) -> None:
         raise ValueError(
             "Telegram closed_topic_retention_days must be at least 1 or null"
         )
-    voice = telegram.voice_input
-    if voice.enabled:
-        if not telegram.enable_send:
-            raise ValueError("Telegram voice_input requires enable_send: true")
-        if not telegram.general_router.enabled:
-            raise ValueError("Telegram voice_input requires general_router.enabled: true")
-        if voice.scope not in {"general", "general-and-bound"}:
-            raise ValueError(
-                "Telegram voice_input.scope must be 'general' or "
-                "'general-and-bound'"
-            )
-        if not 1 <= voice.max_duration_seconds <= 3600:
-            raise ValueError(
-                "Telegram voice_input.max_duration_seconds must be between 1 and 3600"
-            )
-        if not 1024 <= voice.max_file_bytes <= 100_000_000:
-            raise ValueError(
-                "Telegram voice_input.max_file_bytes must be between 1024 and 100000000"
-            )
-        transcription = voice.transcription
-        if transcription.provider not in {"mlx-whisper", "command"}:
-            raise ValueError(
-                "Telegram voice transcription provider must be 'mlx-whisper' or 'command'"
-            )
-        if transcription.timeout_seconds <= 0:
-            raise ValueError("Telegram voice transcription timeout must be positive")
-        if transcription.max_output_bytes < 1024:
-            raise ValueError(
-                "Telegram voice transcription max_output_bytes must be at least 1024"
-            )
-        if transcription.provider == "mlx-whisper":
-            if not transcription.model or not transcription.python_path.strip():
-                raise ValueError(
-                    "Telegram mlx-whisper transcription requires model and python_path"
-                )
-        elif not transcription.argv:
-            raise ValueError(
-                "Telegram command transcription requires a non-empty argv list"
-            )
 
+
+def effective_voice_input(config: AppConfig) -> VoiceInputConfig:
+    """Return the shared config, accepting manually built legacy configs."""
+    if config.voice_input.enabled:
+        return config.voice_input
+    return config.telegram.voice_input
+
+
+def _validate_voice_input(config: AppConfig) -> None:
+    voice = effective_voice_input(config)
+    if not voice.enabled:
+        return
+    if not (
+        (config.discord.enabled and config.enable_send)
+        or (config.telegram.enabled and config.telegram.enable_send)
+    ):
+        raise ValueError("voice_input requires enable_send on an enabled transport")
+    if not config.telegram.general_router.enabled:
+        raise ValueError("voice_input requires relay.general.enabled: true")
+    if voice.scope not in {"general", "general-and-bound"}:
+        raise ValueError(
+            "voice_input.scope must be 'general' or 'general-and-bound'"
+        )
+    if not 1 <= voice.max_duration_seconds <= 3600:
+        raise ValueError(
+            "voice_input.max_duration_seconds must be between 1 and 3600"
+        )
+    if not 1024 <= voice.max_file_bytes <= 100_000_000:
+        raise ValueError(
+            "voice_input.max_file_bytes must be between 1024 and 100000000"
+        )
+    transcription = voice.transcription
+    if transcription.provider not in {"mlx-whisper", "command"}:
+        raise ValueError(
+            "voice transcription provider must be 'mlx-whisper' or 'command'"
+        )
+    if transcription.timeout_seconds <= 0:
+        raise ValueError("voice transcription timeout must be positive")
+    if transcription.max_output_bytes < 1024:
+        raise ValueError(
+            "voice transcription max_output_bytes must be at least 1024"
+        )
+    if transcription.provider == "mlx-whisper":
+        if not transcription.model or not transcription.python_path.strip():
+            raise ValueError(
+                "mlx-whisper transcription requires model and python_path"
+            )
+    elif not transcription.argv:
+        raise ValueError("command transcription requires a non-empty argv list")
 
 
 def effective_general_provider(config: AppConfig) -> str:

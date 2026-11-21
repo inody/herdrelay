@@ -28,7 +28,13 @@ LOG = logging.getLogger(__name__)
 
 
 class DiscordGeneralHandler(Protocol):
-    async def handle(self, message: discord.Message) -> bool: ...
+    async def handle(
+        self,
+        message: discord.Message,
+        *,
+        text: str | None = None,
+        source_kind: str = "text",
+    ) -> bool: ...
 
     def clear_context(self, message: discord.Message) -> bool: ...
 
@@ -48,8 +54,14 @@ class DiscordGeneralRouter:
         self.client = client
         self.model = model or build_intent_model(self.router.model)
 
-    async def handle(self, message: discord.Message) -> bool:
-        utterance = (message.content or "").strip()
+    async def handle(
+        self,
+        message: discord.Message,
+        *,
+        text: str | None = None,
+        source_kind: str = "text",
+    ) -> bool:
+        utterance = (message.content if text is None else text or "").strip()
         if not utterance or len(utterance) > self.config.max_message_chars:
             await _reply(message, "The input is empty or too long. Nothing was sent.")
             return False
@@ -61,7 +73,7 @@ class DiscordGeneralRouter:
         request = RoutingRequest(
             utterance=utterance,
             candidates=candidates,
-            source_kind="text",
+            source_kind=source_kind,
             recent_context=recent_context,
         )
         try:
@@ -307,8 +319,14 @@ class DiscordOrcaBotGeneral:
         self.bot = config.telegram.general_router.orca_bot
         self.client: discord.Client | None = None
 
-    async def handle(self, message: discord.Message) -> bool:
-        text = (message.content or "").strip()
+    async def handle(
+        self,
+        message: discord.Message,
+        *,
+        text: str | None = None,
+        source_kind: str = "text",
+    ) -> bool:
+        text = (message.content if text is None else text or "").strip()
         if not text or len(text) > self.config.max_message_chars:
             await _reply(message, "The input is empty or too long. Nothing was sent.")
             return False
@@ -342,7 +360,7 @@ class DiscordOrcaBotGeneral:
             "channel_id": message.channel.id,
             "user_id": message.author.id,
             "message_id": message.id,
-            "source_kind": "text",
+            "source_kind": source_kind,
             "text": text,
             "created_at": datetime.now(UTC).isoformat(),
         }
