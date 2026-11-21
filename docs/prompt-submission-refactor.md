@@ -55,7 +55,7 @@ question controls.
   changing backend behavior.
 - [x] Stage 2: normalize Core, Orca, and legacy TUI prompt results at the backend
   boundary.
-- [ ] Stage 3: add `PromptSubmissionService` and parity tests while no transport
+- [x] Stage 3: add `PromptSubmissionService` and parity tests while no transport
   uses it.
 - [ ] Stage 4: migrate Telegram direct-Agent submission.
 - [ ] Stage 5: migrate Discord General router submission.
@@ -77,3 +77,6 @@ cross-transport policy is approved.
 - Stage 2: `489 passed, 1 skipped`; Core, Orca, and legacy TUI prompt clients
   return `MutationReceipt` and expose normalized mutation errors while retaining
   transitional backend exception ancestry for unchanged transport behavior.
+- Stage 3: `497 passed, 1 skipped`; the unused application service claims each
+  event atomically, revalidates exact identity, submits once, finalizes audit,
+  and preserves `outcome_unknown` without retrying.
