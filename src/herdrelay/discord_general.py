@@ -378,6 +378,21 @@ class DiscordOrcaBotGeneral:
         if self.client is None:
             raise RuntimeError("Discord client is not attached to General handler")
         channel_id = _required_int(event, "channel_id")
+        guild_id = _required_int(event, "guild_id")
+        if (
+            (self.config.allowed_guild_ids and guild_id not in self.config.allowed_guild_ids)
+            or channel_id != self.config.thread_parent_channel_id
+            or (
+                self.config.allowed_channel_ids
+                and channel_id not in self.config.allowed_channel_ids
+            )
+        ):
+            LOG.warning(
+                "Discarding Orca Bot event for unauthorized Discord destination %s/%s",
+                guild_id,
+                channel_id,
+            )
+            return
         channel = self.client.get_channel(channel_id)
         if channel is None:
             channel = await self.client.fetch_channel(channel_id)

@@ -145,6 +145,13 @@ class TelegramOrcaBotGeneral:
         return True
 
     async def handle_gateway_event(self, event: dict[str, Any]) -> None:
+        chat_id = _required_int(event, "chat_id")
+        if chat_id not in self.telegram.allowed_chat_ids:
+            LOG.warning(
+                "Discarding Orca Bot event for unauthorized Telegram chat %s",
+                chat_id,
+            )
+            return
         kind = _required_string(event, "kind")
         if kind == "sent":
             try:

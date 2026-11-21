@@ -206,6 +206,9 @@ async def test_discord_orca_bot_uses_transport_specific_queue_and_reply(tmp_path
     queue = GatewayQueue(tmp_path / "queue")
     config = AppConfig(
         discord_token="token",
+        allowed_guild_ids=frozenset({1}),
+        allowed_channel_ids=frozenset({100}),
+        thread_parent_channel_id=100,
         enable_send=True,
         runtime=RuntimeConfig(provider="orca"),
         telegram=TelegramConfig(
