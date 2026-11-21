@@ -14,7 +14,11 @@ from herdrelay.config import (
 )
 from herdrelay.discord_bot import HerdrDiscordBot
 from herdrelay.discord_voice import is_discord_voice_message
-from herdrelay.domain import TargetKey
+from herdrelay.domain import (
+    MutationOutcomeUnknownError,
+    MutationReceipt,
+    TargetKey,
+)
 from herdrelay.models import HerdrTarget
 from herdrelay.store import Store
 from herdrelay.voice_transcription import Transcript
@@ -49,15 +53,23 @@ class FakeTranscriber:
 
 
 class FakeClient:
-    def __init__(self):
+    def __init__(self, *, send_error: Exception | None = None):
         self.sent: list[tuple[str, str]] = []
+        self.send_error = send_error
 
     def resolve_target_key(self, key: TargetKey) -> HerdrTarget:
         assert key == TargetKey.legacy("w1:p1")
         return HerdrTarget(target="w1:p1", agent_name="pi", status="idle")
 
-    def send(self, target: str, text: str) -> None:
+    def target_key(self, target: str) -> TargetKey:
+        assert target == "w1:p1"
+        return TargetKey.legacy(target)
+
+    def send(self, target: str, text: str) -> MutationReceipt:
         self.sent.append((target, text))
+        if self.send_error is not None:
+            raise self.send_error
+        return MutationReceipt(observed_turn=None, result={})
 
 
 def config(tmp_path, *, scope: str = "general-and-bound") -> AppConfig:
@@ -160,6 +172,59 @@ async def test_discord_bound_voice_submits_directly_to_exact_agent(tmp_path):
             "SELECT action, result, payload_preview FROM audit_log"
         ).fetchone()
     assert tuple(audit) == ("thread_send_voice", "ok", "bound voice")
+    transport_audits = store.list_transport_audits()
+    assert [item["action"] for item in transport_audits] == [
+        "transcribe_voice",
+        "thread_send_voice",
+    ]
+    assert transport_audits[-1]["outcome"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_discord_bound_text_unknown_outcome_is_deduplicated(tmp_path):
+    app_config = config(tmp_path)
+    store = Store(app_config.database_path)
+    store.upsert_binding(
+        guild_id=1,
+        channel_id=100,
+        thread_id=200,
+        herdr_target=TargetKey.legacy("w1:p1").to_route_value(),
+        label="test",
+        created_by=42,
+    )
+    client = FakeClient(
+        send_error=MutationOutcomeUnknownError("response lost after submission")
+    )
+    bot = HerdrDiscordBot(
+        config=app_config,
+        store=store,
+        client=client,
+        router_model=SimpleNamespace(
+            provider_name="fake", model_name=None, classify=AsyncMock()
+        ),
+        voice_transcriber=FakeTranscriber(),
+    )
+    inbound = message(channel_id=200, parent_id=100)
+    inbound.content = "continue"
+    inbound.flags.voice = False
+    inbound.attachments = []
+
+    await bot.on_message(inbound)
+    await bot.on_message(inbound)
+
+    assert client.sent == [("w1:p1", "continue")]
+    inbound.add_reaction.assert_awaited_once_with("⚠️")
+    [transport_audit] = store.list_transport_audits()
+    assert transport_audit["action"] == "thread_send"
+    assert transport_audit["outcome"] == "outcome_unknown"
+    with store._connect() as connection:
+        [legacy_audit] = connection.execute(
+            "SELECT action, result FROM audit_log"
+        ).fetchall()
+    assert tuple(legacy_audit) == (
+        "thread_send",
+        "outcome_unknown: response lost after submission",
+    )
 
 
 def test_discord_audio_attachment_requires_native_voice_flag():

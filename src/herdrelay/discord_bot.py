@@ -7,29 +7,34 @@ import discord
 from discord.ext import commands
 
 from .config import AppConfig, effective_general_provider, effective_voice_input
-from .domain import MutationOutcomeUnknownError, TargetKey
-from .formatter import (
-    target_alias,
-    truncate,
-)
-from .hc_client import HcClient
 from .core_discord_watcher import CoreEventWatcher
-from .herdr_client import TargetResolutionError
-from .models import AuditEntry, PendingQuestion
-from .orca_bot_gateway import GatewayQueue
-from .questions import QuestionAnswerError, parse_question_answer, selected_labels
-from .runtime import InterruptRuntime, QuestionAnswerRuntime, RuntimeClient
-from .discord_security import DiscordLocation, SecurityError, SecurityPolicy
-from .store import Store
 from .discord_general import (
     DiscordGeneralHandler,
     DiscordGeneralRouter,
     DiscordOrcaBotGeneral,
 )
 from .discord_output import StreamManager
-from .discord_voice import DiscordVoiceHandler, is_discord_voice_message
+from .discord_security import DiscordLocation, SecurityError, SecurityPolicy
 from .discord_threads import ThreadManager
+from .discord_voice import DiscordVoiceHandler, is_discord_voice_message
 from .discord_watcher import EventWatcher
+from .domain import Actor, Location, MutationOutcomeUnknownError, TargetKey
+from .formatter import (
+    target_alias,
+    truncate,
+)
+from .hc_client import HcClient
+from .herdr_client import TargetResolutionError
+from .models import AuditEntry, PendingQuestion
+from .orca_bot_gateway import GatewayQueue
+from .prompt_submission import (
+    PromptOutcome,
+    PromptSubmission,
+    PromptSubmissionService,
+)
+from .questions import QuestionAnswerError, parse_question_answer, selected_labels
+from .runtime import InterruptRuntime, QuestionAnswerRuntime, RuntimeClient
+from .store import Store
 from .telegram_router import IntentModel
 from .voice_transcription import VoiceTranscriber
 
@@ -54,6 +59,7 @@ class HerdrDiscordBot(commands.Bot):
         self.config = config
         self.store = store
         self.client = client
+        self.prompt_service = PromptSubmissionService(store=store, client=client)
         self.security = SecurityPolicy(config)
         self._watcher_task: asyncio.Task | None = None
         self._watcher: EventWatcher | CoreEventWatcher | None = None
@@ -350,15 +356,53 @@ class HerdrDiscordBot(commands.Bot):
                 labels = await self._answer_pending_question(pending_question, selected)
                 audit_fields["action"] = "question_select"
                 audit_fields["payload_preview"] = labels
+                self.store.add_audit(AuditEntry(result="ok", **audit_fields))
+                await _react(message, "✅")
             else:
                 self.security.ensure_send_allowed(message.author.id, location, content)
-                target_info = await asyncio.to_thread(
-                    self.client.resolve_target_key,
-                    TargetKey.from_route_value(binding.herdr_target),
+                target_key = TargetKey.from_route_value(binding.herdr_target)
+                result = await asyncio.to_thread(
+                    self.prompt_service.submit,
+                    PromptSubmission(
+                        event_key=f"discord:message:{message.id}",
+                        actor=Actor(
+                            transport="discord", actor_id=str(message.author.id)
+                        ),
+                        location=Location(
+                            transport="discord",
+                            container_id=str(location.guild_id or 0),
+                            conversation_id=(
+                                str(location.thread_id)
+                                if location.thread_id is not None
+                                else str(location.channel_id)
+                            ),
+                        ),
+                        target=target_key,
+                        text=content,
+                        audit_action=action,
+                    ),
                 )
-                await asyncio.to_thread(self.client.send, target_info.target, content)
-            self.store.add_audit(AuditEntry(result="ok", **audit_fields))
-            await _react(message, "✅")
+                if result.outcome is PromptOutcome.DEDUPLICATED:
+                    return True
+                if result.outcome is PromptOutcome.SUCCEEDED:
+                    audit_result = "ok"
+                    reaction = "✅"
+                elif result.outcome is PromptOutcome.OUTCOME_UNKNOWN:
+                    audit_result = truncate(
+                        f"outcome_unknown: {result.detail or 'unknown'}",
+                        max_chars=500,
+                    )
+                    reaction = "⚠️"
+                else:
+                    audit_result = truncate(
+                        f"error: {result.detail or result.outcome.value}",
+                        max_chars=500,
+                    )
+                    reaction = "⚠️"
+                self.store.add_audit(
+                    AuditEntry(result=audit_result, **audit_fields)
+                )
+                await _react(message, reaction)
         except MutationOutcomeUnknownError as exc:
             self.store.add_audit(
                 AuditEntry(

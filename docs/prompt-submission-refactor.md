@@ -59,7 +59,7 @@ question controls.
   uses it.
 - [x] Stage 4: migrate Telegram direct-Agent submission.
 - [x] Stage 5: migrate Discord General router submission.
-- [ ] Stage 6: migrate Discord bound-thread submission while leaving structured
+- [x] Stage 6: migrate Discord bound-thread submission while leaving structured
   question handling in the Discord adapter.
 - [ ] Stage 7: remove obsolete transport-specific execution code and verify the
   complete test suite.
@@ -86,3 +86,6 @@ cross-transport policy is approved.
 - Stage 5: `500 passed, 1 skipped`; Discord router-based General submission uses
   the shared service, including claimed blocklist rejection and unknown-outcome
   handling. Orca Bot General remains a separate queue-based use case.
+- Stage 6: `501 passed, 1 skipped`; Discord bound text and native voice prompts
+  use the shared service and event dedupe. Legacy structured-question selection
+  remains in the Discord adapter and retains its one-time claim behavior.
