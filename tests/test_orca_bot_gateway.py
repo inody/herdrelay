@@ -21,6 +21,7 @@ from herdrelay.orca_bot_gateway import (
     GatewayOutcomeUnknown,
     GatewayQueue,
     OrcaBotGatewayWorker,
+    _subject,
     _write_json,
     run_orca_json,
 )
@@ -318,6 +319,11 @@ def test_gateway_worker_recovers_inflight_send_as_outcome_unknown(
     assert not (worker.queue.processing / "telegram-10.json").exists()
 
 
+def test_gateway_chat_titles_are_transport_specific():
+    assert _subject({"transport": "telegram"}) == "Telegram Chat"
+    assert _subject({"transport": "discord"}) == "Discord Chat"
+
+
 def test_gateway_worker_correlates_reply_with_outbound_message(tmp_path, monkeypatch):
     config = bot_config(tmp_path)
     monkeypatch.setenv("ORCA_TERMINAL_HANDLE", "term-gateway")
@@ -376,4 +382,11 @@ def test_gateway_worker_correlates_reply_with_outbound_message(tmp_path, monkeyp
     assert events["telegram-10.reply.json"]["text"] == "hello owner"
     assert json.loads(worker.queue.chat_state.read_text())["chat_id"] == "chat-1"
     assert list(worker.queue.pending.glob("*.json")) == []
-    assert consumed
+    assert [
+        "chat",
+        "rename",
+        "--session",
+        "chat-1",
+        "--name",
+        "Telegram Chat",
+    ] in consumed

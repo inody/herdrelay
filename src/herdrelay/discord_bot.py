@@ -132,11 +132,12 @@ class HerdrDiscordBot(commands.Bot):
             LOG.info("Started output relay")
 
     async def on_ready(self) -> None:
-        # Nickname the bot "herdr" so @he autocomplete points here.
+        # Use the product name so transport ownership is not confused with a
+        # selected Herdr runtime backend.
         for guild in self.guilds:
             try:
-                if guild.me.nick != "herdr":
-                    await guild.me.edit(nick="herdr")
+                if guild.me.nick != "HerdRelay":
+                    await guild.me.edit(nick="HerdRelay")
             except discord.HTTPException:
                 LOG.warning("Failed to set nickname in guild %s", guild.id)
         LOG.info("Logged in as %s", self.user)
@@ -174,7 +175,10 @@ class HerdrDiscordBot(commands.Bot):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
-        if self.user and self.user in message.mentions:
+        if (
+            (self.user and self.user in message.mentions)
+            or _has_literal_control_prefix(message.content)
+        ):
             await self._handle_control_command(message)
             return
         if await self._handle_general(message):
@@ -310,6 +314,7 @@ class HerdrDiscordBot(commands.Bot):
                 .replace(f"<@{self.user.id}>", "")
                 .strip()
             )
+        content = _strip_literal_control_prefix(content)
         parts = content.split()
         cmd = parts[0].lower() if parts else "help"
         if cmd == "?":
@@ -413,7 +418,7 @@ class HerdrDiscordBot(commands.Bot):
                     target_address = target.target
         if target_address is None:
             raise ValueError(
-                "Usage: `@herdr interrupt <target>` (or run inside an agent thread)"
+                "Usage: `@HerdRelay interrupt <target>` (or run inside an agent thread)"
             )
         if not (
             self.client.capabilities.native_interrupt
@@ -454,21 +459,36 @@ class HerdrDiscordBot(commands.Bot):
         ):
             lines.extend(
                 (
-                    "@herdr interrupt [<target>]                 Interrupt a working agent",
+                    "@HerdRelay interrupt [<target>]             Interrupt a working agent",
                     "  inside an agent thread: interrupts that target (no arg needed)",
                 )
             )
         lines.extend(
             (
-                "@herdr list                                    List available agents",
-                "@herdr forget                                  Reset General context",
-                "@herdr help                                    Show this help",
+                "@HerdRelay list                                List available agents",
+                "@HerdRelay forget                              Reset General context",
+                "@HerdRelay help                                Show this help",
                 "```",
                 "In agent-threads, normal text uses General routing.",
                 "Inside an agent thread, normal text submits directly.",
             )
         )
         return "\n".join(lines)
+
+
+def _has_literal_control_prefix(content: str) -> bool:
+    stripped = (content or "").lstrip()
+    prefix = "@HerdRelay"
+    return stripped.casefold() == prefix.casefold() or stripped.casefold().startswith(
+        prefix.casefold() + " "
+    )
+
+
+def _strip_literal_control_prefix(content: str) -> str:
+    stripped = (content or "").strip()
+    if not _has_literal_control_prefix(stripped):
+        return stripped
+    return stripped[len("@HerdRelay") :].strip()
 
 
 QUESTION_COMPONENT_MAX_OPTIONS = 25

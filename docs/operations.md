@@ -163,7 +163,7 @@ switches take priority. HerdRelay rejects a context-based decision unless it
 selects the exact stored candidate, which must still be live. Context expires at
 the configured TTL, disappears when its conversation is unavailable, survives a
 service restart while fresh, and can be cleared with Telegram `/forget` or
-Discord `@herdr forget`. Ambiguous or
+Discord `@HerdRelay forget`. Ambiguous or
 failed requests do not replace it.
 
 With the Orca Bot provider, authorized General text is sent verbatim to the exact
@@ -177,7 +177,11 @@ a worker lock prevents two consumers from processing the queue.
 
 The gateway stores mode-0600 atomic JSON requests, processing state, outbound
 message correlations, events, heartbeat, and transport-specific Bot chat IDs
-under a mode-0700 queue directory. Telegram and Discord have separate Bot chats.
+under a mode-0700 queue directory. The Bot chats are named `Home`,
+`Telegram Chat`, and `Discord Chat` in Orca. A newly created Side chat must be
+opened once from the Bot's `Home Chat` → right sidebar `Chats` list before Orca
+reveals it in the left Bots list; creating or renaming it through the public CLI
+does not select it in the UI.
 It uses only `orca orchestration send` and
 `orca orchestration check`. Replies are accepted only when their `thread_id`
 matches an outstanding outbound message ID, then are consumed from the mailbox

@@ -106,6 +106,19 @@ async def test_all_commands_check_location_before_backend_access(tmp_path, comma
 
 
 @pytest.mark.asyncio
+async def test_literal_herdrelay_prefix_is_a_control_command(tmp_path):
+    bot = make_bot(tmp_path)
+    msg = message(bot, "help")
+    msg.content = "@HerdRelay help"
+    msg.mentions = []
+
+    await bot.on_message(msg)
+
+    assert audits(bot)[0]["action"] == "control_help"
+    msg.reply.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("command", ["list", "help", "?", ""])
 async def test_read_commands_do_not_require_write_user(tmp_path, command):
     bot = make_bot(tmp_path)
@@ -193,8 +206,8 @@ async def test_help_lists_only_supported_enabled_controls(tmp_path):
     await core_bot.on_message(core_message)
     await legacy_bot.on_message(legacy_message)
 
-    assert "@herdr interrupt" in core_message.reply.call_args.args[0]
-    assert "@herdr interrupt" not in legacy_message.reply.call_args.args[0]
+    assert "@HerdRelay interrupt" in core_message.reply.call_args.args[0]
+    assert "@HerdRelay interrupt" not in legacy_message.reply.call_args.args[0]
     assert "start" not in legacy_message.reply.call_args.args[0]
     assert "close" not in legacy_message.reply.call_args.args[0]
 

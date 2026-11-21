@@ -346,8 +346,10 @@ relay:
 
 The Bot receives the original General text verbatim. HerdRelay correlates replies
 by the public CLI's outbound message ID and sends only matching replies back to
-the originating transport. Telegram and Discord use separate Bot chats so their
-conversation contexts cannot mix accidentally.
+the originating transport. Orca names the Bot conversations `Home`,
+`Telegram Chat`, and `Discord Chat`; their contexts cannot mix accidentally.
+After a new Side chat is created, open the Bot's `Home Chat`, select `Chats` in
+the right sidebar, and open that Side chat once to reveal it in the Bots list.
 Configure side-effect confirmations and allowed behavior in the Bot's
 `SOUL.md`; HerdRelay does not grant tools or silently reinterpret Bot failures.
 `/forget` atomically moves future messages to a newly created Bot chat while

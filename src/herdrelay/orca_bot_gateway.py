@@ -232,6 +232,7 @@ class OrcaBotGatewayWorker:
                     "chat_id": chat_id,
                 },
             )
+            self._rename_chat_best_effort(chat_id, request)
         pending = {
             **_event_base(request),
             "version": GATEWAY_VERSION,
@@ -244,6 +245,24 @@ class OrcaBotGatewayWorker:
             suffix="sent",
             payload={**pending, "kind": "sent"},
         )
+
+    def _rename_chat_best_effort(
+        self, chat_id: str, request: dict[str, Any]
+    ) -> None:
+        try:
+            self._orca_json(
+                [
+                    "chat",
+                    "rename",
+                    "--session",
+                    chat_id,
+                    "--name",
+                    _subject(request),
+                ],
+                mutation=True,
+            )
+        except Exception:
+            LOG.exception("Could not rename Orca Bot chat %s", chat_id)
 
     def _process_replies(self) -> None:
         try:
@@ -428,9 +447,10 @@ def _transport(request: dict[str, Any]) -> str:
 
 
 def _subject(request: dict[str, Any]) -> str:
-    transport = _transport(request).title()
-    source = request.get("source_kind")
-    return f"{transport} General (voice)" if source == "voice" else f"{transport} General"
+    return {
+        "telegram": "Telegram Chat",
+        "discord": "Discord Chat",
+    }[_transport(request)]
 
 
 def _safe_id(value: Any) -> str:
