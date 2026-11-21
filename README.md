@@ -425,7 +425,11 @@ Create the Bot in the
 
 Put the parent text-channel ID in both `thread_parent_channel_id` and
 `allowed_channel_ids`. Automatic threads are public threads within that parent
-channel; Discord permissions remain the visibility boundary.
+channel. HerdRelay adds configured allowed users as thread members and names
+managed threads `[core] alias/agent`, `[tui] alias/agent`, or
+`[orca] alias/agent`, so historical threads from another backend are not
+mistaken for the current route. Discord permissions remain the visibility
+boundary.
 
 A normal message in a bound thread submits a prompt. Mentioning the Bot exposes
 `list`, `help`, and the guarded `interrupt` command when the selected backend

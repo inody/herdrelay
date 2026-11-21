@@ -6,6 +6,7 @@ import logging
 import discord
 
 from .config import AppConfig
+from .domain import BackendKind
 from .formatter import target_alias
 from .models import HerdrTarget
 from .runtime import RuntimeClient
@@ -16,7 +17,9 @@ LOG = logging.getLogger(__name__)
 THREAD_NAME_MAX = 100
 
 
-def thread_name(target: HerdrTarget) -> str:
+def thread_name(
+    target: HerdrTarget, *, backend: BackendKind | None = None
+) -> str:
     """Build a Discord thread name, prefixed with a marker only when blocked.
 
     Status changes between working/idle/done are frequent and would trip Discord's
@@ -25,8 +28,17 @@ def thread_name(target: HerdrTarget) -> str:
     alias = target_alias(target)
     agent = target.agent_name or target.kind or "?"
     status = (target.status or "").casefold()
-    prefix = "🔴 " if status == "blocked" else ""
-    return f"{prefix}{alias}/{agent}"[:THREAD_NAME_MAX]
+    status_prefix = "🔴 " if status == "blocked" else ""
+    backend_prefix = f"[{_backend_label(backend)}] " if backend is not None else ""
+    return f"{status_prefix}{backend_prefix}{alias}/{agent}"[:THREAD_NAME_MAX]
+
+
+def _backend_label(backend: BackendKind) -> str:
+    return {
+        BackendKind.HERDR_CORE: "core",
+        BackendKind.HERDR_TUI: "tui",
+        BackendKind.ORCA: "orca",
+    }[backend]
 
 
 class ThreadManager:
@@ -45,6 +57,7 @@ class ThreadManager:
         self.store = store
         self.client = client
         self._stopped = asyncio.Event()
+        self._membership_synced: set[int] = set()
 
     def stop(self) -> None:
         self._stopped.set()
@@ -91,8 +104,9 @@ class ThreadManager:
         if not target.agent_name:
             return
         pane_id = target.target
-        route_target = self.client.target_key(pane_id).to_route_value()
-        name = thread_name(target)
+        key = self.client.target_key(pane_id)
+        route_target = key.to_route_value()
+        name = thread_name(target, backend=key.backend)
         alias = target_alias(target)
         existing = self.store.get_agent_thread(route_target)
         if existing is None and route_target != pane_id:
@@ -120,6 +134,7 @@ class ThreadManager:
                 label=alias,
                 created_by=str(self.bot.user.id) if self.bot.user else 0,
             )
+            await self._ensure_allowed_members(thread, parent.guild)
             LOG.info("Created thread %s for %s", thread.id, route_target)
             return
 
@@ -131,6 +146,7 @@ class ThreadManager:
                 route_target,
             )
             return
+        await self._ensure_allowed_members(thread, parent.guild)
         if thread.archived:
             try:
                 await thread.edit(archived=False, reason=f"Pane {pane_id} active again")
@@ -150,6 +166,37 @@ class ThreadManager:
             LOG.info("Renamed thread %s to %s", thread.id, name)
         except discord.HTTPException:
             LOG.warning("Could not rename thread %s (rate limited?)", thread.id)
+
+    async def _ensure_allowed_members(
+        self, thread: discord.Thread, guild: discord.Guild
+    ) -> None:
+        if thread.id in self._membership_synced or not self.config.allowed_user_ids:
+            return
+        succeeded = True
+        for user_id in self.config.allowed_user_ids:
+            member = guild.get_member(user_id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except discord.HTTPException:
+                    LOG.warning(
+                        "Could not resolve allowed Discord user %s for thread %s",
+                        user_id,
+                        thread.id,
+                    )
+                    succeeded = False
+                    continue
+            try:
+                await thread.add_user(member)
+            except discord.HTTPException:
+                LOG.warning(
+                    "Could not add allowed Discord user %s to thread %s",
+                    user_id,
+                    thread.id,
+                )
+                succeeded = False
+        if succeeded:
+            self._membership_synced.add(thread.id)
 
     async def _archive_stale_threads(
         self, parent: discord.TextChannel, active_pane_ids: set[str]

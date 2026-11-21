@@ -224,12 +224,18 @@ performed during explicit setup rather than an unattended production request.
 
 ## Thread and binding lifecycle
 
-`enable_auto_threads` starts a reconciliation loop using `herdr pane list`.
+`enable_auto_threads` starts a reconciliation loop using the selected runtime's
+backend-neutral target discovery.
 
-- A pane receives a thread only when its pane record includes a detected agent.
+- A target receives a thread only when its discovery record includes a detected
+  agent.
 - The thread is a public thread under `thread_parent_channel_id`.
-- The name is `alias/agent`, where the alias prefers the Herdr workspace label,
-  then the cwd basename, then the pane ID.
+- Each configured `allowed_user_ids` member is added to new and restored threads
+  so the thread appears in that user's normal Discord thread list.
+- The name is `[backend] alias/agent`, where `backend` is `core`, `tui`, or
+  `orca`, and the alias prefers the workspace label, then the cwd basename, then
+  the target address. The prefix distinguishes current routes from historical
+  threads left by another runtime backend.
 - A blocked pane is prefixed with `🔴 `. Other lifecycle changes do not change
   the status prefix, which avoids excessive Discord rename requests.
 - Thread names are truncated to Discord's 100-character limit.

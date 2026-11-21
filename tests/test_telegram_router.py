@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import sys
 
 import pytest
@@ -49,6 +49,7 @@ class FakeApi:
 @dataclass
 class FakeClient:
     target: HerdrTarget
+    key: TargetKey | None = None
     sent: list[tuple[str, str]] = field(default_factory=list)
 
     def list_targets(self):
@@ -59,7 +60,7 @@ class FakeClient:
 
     def target_key(self, address):
         assert address == self.target.target
-        return TargetKey.orca(instance_id="runtime-1", address=address)
+        return self.key or TargetKey.orca(instance_id="runtime-1", address=address)
 
     def resolve_target_key(self, key):
         if key != self.target_key(self.target.target):
@@ -169,6 +170,70 @@ async def test_general_text_is_routed_to_exact_live_candidate(tmp_path):
     assert "local/tab:pane" not in str(request)
     actions = [entry["action"] for entry in store.list_transport_audits()]
     assert actions == ["route_text", "send_text"]
+
+
+@pytest.mark.parametrize(
+    ("runtime_provider", "key"),
+    (
+        (
+            "herdr-core",
+            TargetKey.core(controller_core_id="core-1", address="t12"),
+        ),
+        ("herdr-tui", TargetKey.legacy("pane-7")),
+        (
+            "orca",
+            TargetKey.orca(instance_id="runtime-1", address="local/tab:pane"),
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_general_router_uses_backend_neutral_runtime_contract(
+    tmp_path, runtime_provider, key
+):
+    app_config = replace(
+        config(), runtime=RuntimeConfig(provider=runtime_provider)
+    )
+    target = HerdrTarget(
+        target=key.address,
+        agent_name="pi",
+        status="done",
+        workspace_label=f"{runtime_provider}-workspace",
+        tab_label="Pi main",
+    )
+    client = FakeClient(target=target, key=key)
+    store = Store(tmp_path / f"{runtime_provider}.sqlite3")
+    store.upsert_telegram_topic_for_target(
+        target=key,
+        chat_id=-1001,
+        thread_id=168,
+        name=f"{runtime_provider}/pi",
+    )
+    api = FakeApi([[update("このAgentにcontract testを送って")]])
+    model = FakeModel(
+        RoutingDecision(
+            intent="send_prompt",
+            candidate_id="candidate-1",
+            message_verbatim="contract testを送って",
+            ambiguous=False,
+            reason=None,
+            routing_basis="explicit_destination",
+        )
+    )
+    relay = TelegramService(
+        config=app_config,
+        store=store,
+        client=client,
+        api=api,
+        router_model=model,
+    )
+
+    await relay.poll_once()
+
+    assert client.sent == [(key.address, "contract testを送って")]
+    assert [entry["action"] for entry in store.list_transport_audits()] == [
+        "route_text",
+        "send_text",
+    ]
 
 
 @pytest.mark.asyncio

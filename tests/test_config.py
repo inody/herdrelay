@@ -566,6 +566,40 @@ transports:
     assert router.model.max_output_bytes == 8192
 
 
+@pytest.mark.parametrize("runtime_provider", ("herdr-core", "herdr-tui", "orca"))
+def test_load_config_allows_general_router_with_every_runtime(
+    tmp_path, monkeypatch, runtime_provider
+):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f"""
+runtime:
+  provider: {runtime_provider}
+transports:
+  discord:
+    enabled: false
+  telegram:
+    enabled: true
+    allowed_chat_ids: [-1]
+    allowed_user_ids: [2]
+    forum_chat_id: -1
+    enable_send: true
+    general_router:
+      enabled: true
+      provider: router
+      model:
+        provider: command
+        argv: [router]
+"""
+    )
+
+    config = load_config(config_path, require_discord_token=False)
+
+    assert config.runtime.provider == runtime_provider
+    assert config.telegram.general_router.provider == "router"
+
+
 def test_load_config_allows_telegram_with_legacy_tui(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
