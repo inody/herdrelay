@@ -153,16 +153,7 @@ class TelegramOrcaBotGeneral:
             )
             return
         kind = _required_string(event, "kind")
-        if kind == "sent":
-            try:
-                await self.api.set_message_reaction(
-                    chat_id=_required_int(event, "chat_id"),
-                    message_id=_required_int(event, "message_id"),
-                    emoji="✅",
-                )
-            except Exception:
-                LOG.exception("Failed to confirm Telegram Orca Bot send")
-        elif kind in {"send_failed", "outcome_unknown"}:
+        if kind in {"send_failed", "outcome_unknown"}:
             await self.api.send_text(
                 chat_id=_required_int(event, "chat_id"),
                 message_thread_id=_optional_int(event.get("thread_id")),
@@ -295,16 +286,7 @@ class OrcaBotGatewaySupervisor:
     async def _deliver_legacy_telegram_event(self, event: dict[str, Any]) -> None:
         assert self.api is not None
         kind = _required_string(event, "kind")
-        if kind == "sent":
-            try:
-                await self.api.set_message_reaction(
-                    chat_id=_required_int(event, "chat_id"),
-                    message_id=_required_int(event, "message_id"),
-                    emoji="✅",
-                )
-            except Exception:
-                LOG.exception("Failed to confirm Telegram Orca Bot send")
-        elif kind in {"send_failed", "outcome_unknown"}:
+        if kind in {"send_failed", "outcome_unknown"}:
             await self.api.send_text(
                 chat_id=_required_int(event, "chat_id"),
                 message_thread_id=_optional_int(event.get("thread_id")),
