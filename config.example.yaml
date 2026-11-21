@@ -97,12 +97,13 @@ transports:
     target_absence_grace_seconds: 60 # ignore transient discovery gaps
     closed_topic_retention_minutes: 10 # null keeps closed topics indefinitely
     general_router:
-      enabled: false               # route authorized General text with one LLM call
+      enabled: false               # handle authorized General text and voice
+      provider: router             # router or orca-bot
       activation: all-text         # General itself is the trigger
       execution_policy: auto-unique
       general_topic_id: null       # set only if Telegram reports one explicitly
-      context_ttl_seconds: 0       # 0 disables recent-target conversation context
-      model:
+      context_ttl_seconds: 0       # router only; 0 disables recent-target context
+      model:                       # used only when provider=router
         provider: none             # openai-compatible, pi-cli, or command
         model: null
         base_url: null
@@ -114,6 +115,15 @@ transports:
         argv: []                   # command provider; executed without a shell
         timeout_seconds: 5
         max_output_bytes: 16384
+      orca_bot:                    # used only when provider=orca-bot
+        bot_id: null               # exact ID from `orca bot list --json`
+        queue_path: ~/.cache/herdrelay/orca-bot-gateway
+        gateway_worktree: null     # exact folder:/id or worktree selector
+        gateway_title: HerdRelay Gateway
+        gateway_command: null      # command run inside the dedicated Orca terminal
+        refresh_seconds: 1
+        heartbeat_stale_seconds: 15
+        command_timeout_seconds: 20
     voice_input:
       enabled: false               # transcribe Telegram voice messages in General
       scope: general               # or general-and-bound for direct topic voice

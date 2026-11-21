@@ -4,17 +4,28 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 import tempfile
+from typing import Protocol
 
 from .config import AppConfig
 from .formatter import truncate
 from .models import TransportAuditEntry
 from .store import Store
 from .telegram_api import TelegramBotApi
-from .telegram_router import TelegramGeneralRouter
+from .telegram_mutations import TelegramMutationHandler
 from .telegram_updates import TelegramInboundMessage
 from .voice_transcription import VoiceTranscriber, build_voice_transcriber
 
 LOG = logging.getLogger(__name__)
+
+
+class TelegramGeneralHandler(Protocol):
+    mutations: TelegramMutationHandler
+
+    def accepts(self, message: TelegramInboundMessage) -> bool: ...
+
+    async def handle(
+        self, message: TelegramInboundMessage, *, event_key: str
+    ) -> bool: ...
 
 
 class TelegramVoiceHandler:
@@ -24,7 +35,7 @@ class TelegramVoiceHandler:
         config: AppConfig,
         store: Store,
         api: TelegramBotApi,
-        router: TelegramGeneralRouter,
+        router: TelegramGeneralHandler,
         transcriber: VoiceTranscriber | None = None,
     ):
         self.config = config

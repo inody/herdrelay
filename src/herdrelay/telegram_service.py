@@ -6,10 +6,15 @@ from typing import Any
 
 from .config import AppConfig
 from .formatter import target_alias
+from .orca_bot_gateway import GatewayQueue
 from .runtime import RuntimeClient
 from .store import Store
 from .telegram_api import TelegramBotApi
 from .telegram_mutations import TelegramMutationHandler
+from .telegram_orca_bot import (
+    OrcaBotGatewaySupervisor,
+    TelegramOrcaBotGeneral,
+)
 from .telegram_output import TelegramOutputRelay
 from .telegram_router import IntentModel, TelegramGeneralRouter
 from .telegram_status import TelegramStatusRelay
@@ -60,8 +65,29 @@ class TelegramService:
         self.mutations = TelegramMutationHandler(
             config=config, store=store, client=client, api=self.api
         )
-        self.general_router = (
-            TelegramGeneralRouter(
+        self.orca_bot_gateway = None
+        if not self.telegram.general_router.enabled:
+            self.general_router = None
+        elif self.telegram.general_router.provider == "orca-bot":
+            queue = GatewayQueue(
+                self.telegram.general_router.orca_bot.queue_path
+            )
+            self.general_router = TelegramOrcaBotGeneral(
+                config=config,
+                store=store,
+                api=self.api,
+                mutations=self.mutations,
+                queue=queue,
+            )
+            self.orca_bot_gateway = OrcaBotGatewaySupervisor(
+                config=config,
+                store=store,
+                api=self.api,
+                stopped=self._stopped,
+                queue=queue,
+            )
+        else:
+            self.general_router = TelegramGeneralRouter(
                 config=config,
                 store=store,
                 client=client,
@@ -69,9 +95,6 @@ class TelegramService:
                 mutations=self.mutations,
                 model=router_model,
             )
-            if self.telegram.general_router.enabled
-            else None
-        )
         self.voice_handler = (
             TelegramVoiceHandler(
                 config=config,
@@ -108,6 +131,10 @@ class TelegramService:
         ]
         if self.output_relay is not None:
             tasks.append(asyncio.create_task(self.output_relay.run_forever()))
+        if self.orca_bot_gateway is not None:
+            tasks.append(
+                asyncio.create_task(self.orca_bot_gateway.run_forever())
+            )
         try:
             await self._stopped.wait()
         finally:
@@ -199,11 +226,18 @@ class TelegramService:
                 text = "Agents\n" + "\n".join(lines)
         elif command in {"help", "start"}:
             if self.telegram.general_router.enabled:
-                prompt_help = (
-                    "Plain text in General is routed by the configured model; "
-                    "bound topics submit directly. Use /forget to clear the "
-                    "recent General destination."
-                )
+                if self.telegram.general_router.provider == "orca-bot":
+                    prompt_help = (
+                        "Plain text and voice in General are sent to the "
+                        "configured Orca Bot; bound topics submit directly. "
+                        "Use /forget to start a new General Bot conversation."
+                    )
+                else:
+                    prompt_help = (
+                        "Plain text in General is routed by the configured model; "
+                        "bound topics submit directly. Use /forget to clear the "
+                        "recent General destination."
+                    )
             elif self.telegram.enable_send:
                 prompt_help = "Plain text in a bound topic submits a prompt."
             else:
@@ -225,7 +259,11 @@ class TelegramService:
             if self.general_router is None:
                 text = "General routing context is disabled."
             elif self.general_router.clear_context(message):
-                text = "直近のGeneral送信先を解除しました。"
+                text = (
+                    "General用のOrca Bot会話をリセットしました。"
+                    if self.telegram.general_router.provider == "orca-bot"
+                    else "直近のGeneral送信先を解除しました。"
+                )
             else:
                 text = "保持されているGeneral送信先はありません。"
         elif command == "interrupt":

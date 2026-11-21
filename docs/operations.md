@@ -46,7 +46,7 @@ not follow the machine selected in another Herdr client.
 
 ## Orca backend exposure
 
-The experimental Orca backend uses only the documented `orca` CLI. New
+The Orca backend uses only the documented `orca` CLI. New
 configurations use `target_exposure.mode: all-eligible`: every listed terminal
 with a recognized agent identity on configured `host_ids` is available, and
 Telegram topics follow agent open/close lifecycle automatically. Temporary
@@ -110,12 +110,15 @@ and reuses an existing stable route when one appeared concurrently. Do not
 delete a still-tracked topic manually: a missing Telegram topic with a retained
 SQLite route cannot be reopened.
 
-## Telegram General router
+## Telegram General providers
 
-When `transports.telegram.general_router.enabled` is true, authorized ordinary
-text in General is sent to the configured stateless intent model. General itself
-is the trigger; no wake word is required. Slash commands are handled locally
-before routing, and bound agent topics bypass the model entirely.
+When `transports.telegram.general_router.enabled` is true, `provider` selects
+`router` or `orca-bot`. General itself is the trigger; no wake word is required.
+Slash commands are handled locally before General processing, and bound Agent
+topics bypass either provider entirely.
+
+With `provider: router`, authorized ordinary text in General is sent to the
+configured intent model.
 
 The model receives opaque candidate IDs plus topic ID, workspace/title, agent,
 status, and display alias. It does not receive the runtime address or cwd. Its
@@ -152,12 +155,38 @@ the configured TTL, disappears when its topic is unavailable, survives a
 service restart while fresh, and can be cleared with `/forget`. Ambiguous or
 failed requests do not replace it.
 
+With `provider: orca-bot`, authorized General text is sent verbatim to the exact
+configured Orca Bot ID. This provider requires the Orca runtime and does not
+fall back to the model router. HerdRelay supervises a dedicated non-Agent Orca
+terminal in the Bot's worktree because `orca orchestration send` requires a live
+sender-terminal identity. The terminal runs the configured gateway worker,
+does not receive a Telegram topic, and is identified by `gateway_title` plus a
+private heartbeat. A stale worker is replaced only after a second stale window;
+a worker lock prevents two consumers from processing the queue.
+
+The gateway stores mode-0600 atomic JSON requests, processing state, outbound
+message correlations, events, heartbeat, and the Telegram-only Bot chat ID under
+a mode-0700 queue directory. It uses only `orca orchestration send` and
+`orca orchestration check`. Replies are accepted only when their `thread_id`
+matches an outstanding outbound message ID, then are consumed from the mailbox
+and delivered to the original General destination. A send timeout, restart with
+an in-flight processing record, or public-CLI outcome-unknown error produces an
+`outcome_unknown` event and is never resent automatically. `/forget` removes the
+saved Bot chat ID so future requests create a new chat; pending replies from the
+old chat remain eligible for delivery.
+
+Set side-effect and confirmation rules in the Bot's `SOUL.md`. The current
+production policy permits read-only inspection and explicitly requested Agent
+launches, but requires confirmation before Mail, Todoist, external-app,
+destructive command, Agent close, or terminal deletion mutations.
+
 ## Telegram voice input
 
 `transports.telegram.voice_input.enabled` accepts authorized Telegram voice
 messages, downloads the Bot API file into a mode-0700 cache directory,
 transcribes it, and deletes the temporary audio. General passes the transcript
-through the existing LLM router. With `scope: general-and-bound`, a voice message
+through the selected `router` or `orca-bot` provider. With
+`scope: general-and-bound`, a voice message
 inside a bound topic bypasses destination classification exactly like bound text
 and submits the full transcript through that topic's existing route. The normal
 live identity check, blocklist, mutation rate limits, dedupe, and audit still
@@ -167,8 +196,9 @@ The default limits are 120 seconds and 10 MB. Telegram's advertised size is
 checked before download and the actual streamed byte count is checked again.
 A failed download, timeout, empty transcript, invalid provider output, ambiguous
 route, or changed runtime target causes no mutation and is not retried
-automatically. Successful processing records `transcribe_voice`, `route_text`,
-and `send_text` as distinct audit actions.
+automatically. Router processing records `transcribe_voice`, `route_text`, and
+`send_text` as distinct audit actions; Orca Bot processing records
+`transcribe_voice`, `bot_send`, and `bot_reply`.
 
 The `mlx-whisper` provider invokes a separate Python interpreter and emits a
 small JSON transcript contract. Set `python_path` to an environment containing

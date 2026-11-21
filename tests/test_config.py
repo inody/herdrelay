@@ -874,3 +874,67 @@ def test_load_config_defaults_optional_discord_actions_disabled(tmp_path, monkey
 
     assert config.enable_questions is False
     assert config.enable_interrupt is False
+
+
+def test_load_config_accepts_orca_bot_general_provider(tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+runtime:
+  provider: orca
+transports:
+  telegram:
+    enabled: true
+    forum_chat_id: -1001
+    allowed_chat_ids: [-1001]
+    allowed_user_ids: [42]
+    enable_send: true
+    general_router:
+      enabled: true
+      provider: orca-bot
+      orca_bot:
+        bot_id: bot-1
+        queue_path: ~/.cache/test-gateway
+        gateway_worktree: folder:bot-home
+        gateway_command: run-gateway
+"""
+    )
+
+    config = load_config(config_path, require_discord_token=False)
+
+    assert config.telegram.general_router.provider == "orca-bot"
+    assert config.telegram.general_router.orca_bot.bot_id == "bot-1"
+    assert config.telegram.general_router.orca_bot.queue_path.endswith(
+        "/.cache/test-gateway"
+    )
+
+
+def test_load_config_rejects_orca_bot_provider_for_non_orca_runtime(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+runtime:
+  provider: herdr-core
+transports:
+  telegram:
+    enabled: true
+    forum_chat_id: -1001
+    allowed_chat_ids: [-1001]
+    allowed_user_ids: [42]
+    enable_send: true
+    general_router:
+      enabled: true
+      provider: orca-bot
+      orca_bot:
+        bot_id: bot-1
+        gateway_worktree: folder:bot-home
+        gateway_command: run-gateway
+"""
+    )
+
+    with pytest.raises(ValueError, match="requires runtime.provider=orca"):
+        load_config(config_path, require_discord_token=False)

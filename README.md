@@ -13,12 +13,14 @@ The normal product surface is deliberately small:
   identity check;
 - relay lifecycle status, structured questions, and completed responses; and
 - optionally route natural-language Telegram General messages and locally
-  transcribed voice messages to one existing Agent.
+  transcribed voice messages either to one existing Agent or to an Orca Bot.
 
-The selected runtime remains the authority. HerdRelay does not provide shell
-access, arbitrary terminal input, generic approval, remote Agent launch, or
-Agent/terminal close through chat. Its General router selects an existing Agent;
-it does not execute runtime-management commands.
+The selected runtime remains the authority. HerdRelay's direct mutation path
+does not provide shell access, arbitrary terminal input, generic approval,
+remote Agent launch, or Agent/terminal close through chat. The `router` General
+provider only selects an existing Agent. The optional `orca-bot` provider instead
+delegates General to a separately configured Orca Bot, whose `SOUL.md` and tool
+permissions define its capabilities and confirmation policy.
 
 ## Support matrix
 
@@ -234,8 +236,8 @@ In Telegram:
 
 - `/agents` lists currently available agents;
 - `/help` shows enabled controls;
-- `/forget` clears the recent General destination when conversational routing is
-  enabled;
+- `/forget` clears the recent General destination with `provider: router`, or
+  starts a new Telegram-only Orca Bot chat with `provider: orca-bot`;
 - each eligible runtime target (terminal/pane), not each workspace or Agent
   name, receives one forum topic;
 - ordinary topic text submits a prompt only when `enable_send: true` and a
@@ -257,18 +259,19 @@ Prompt and interrupt attempts are claimed and audited before the runtime call.
 Timeouts after mutation may be recorded as `outcome_unknown` and are never
 retried automatically.
 
-### Optional General-topic LLM router
+### Optional General providers
 
-`transports.telegram.general_router` can treat authorized ordinary text in
-General as a routing request to one existing Agent. Bound Agent topics still
-submit directly. The router model receives only opaque candidate IDs and display
-metadata, must return structured JSON, and cannot call runtime tools. HerdRelay
-verifies the selected live `TargetKey`, requires the forwarded prompt to be an
-exact substring of the original utterance, then uses the normal audited prompt
-path. The current router supports prompt routing only: requests to launch,
-close, interrupt, or otherwise manage Agents fail closed.
+`transports.telegram.general_router` is disabled by default. When enabled,
+`provider` selects one of two General behaviors. Bound Agent topics remain on the
+normal direct prompt path regardless of this selection.
 
-The router is disabled by default and supports explicit providers:
+With `provider: router`, ordinary General text is classified as a routing
+request to one existing Agent. The model receives only opaque candidate IDs and
+display metadata, must return structured JSON, and cannot call runtime tools.
+HerdRelay verifies the selected live `TargetKey`, requires the forwarded prompt
+to be an exact substring of the original utterance, then uses the normal audited
+prompt path. Requests to launch, close, interrupt, or otherwise manage Agents
+fail closed.
 
 ```yaml
 transports:
@@ -276,6 +279,7 @@ transports:
     enable_send: true
     general_router:
       enabled: true
+      provider: router
       activation: all-text
       execution_policy: auto-unique
       model:
@@ -306,12 +310,51 @@ explicit destination takes priority. HerdRelay verifies that a
 `recent_context` decision selects the exact stored live candidate; `/forget`
 clears it. The default value `0` keeps the router stateless.
 
+With `provider: orca-bot`, General text is sent to one configured Orca Bot. This
+mode requires `runtime.provider: orca` and fails at startup for other runtimes.
+HerdRelay creates and supervises a dedicated non-Agent Orca terminal because the
+public orchestration CLI requires a live sender-terminal identity. The terminal
+runs a local file-queue worker, is not published as a Telegram Agent topic, and
+does not take UI focus. Requests, pending reply correlation, heartbeat, and the
+Telegram-only Bot chat ID are stored under a private mode-`0700` queue directory.
+A mutation timeout is reported as `outcome_unknown` and is never resent
+automatically. There is no automatic fallback to the model router.
+
+```yaml
+runtime:
+  provider: orca
+transports:
+  telegram:
+    enable_send: true
+    general_router:
+      enabled: true
+      provider: orca-bot
+      orca_bot:
+        bot_id: 00000000-0000-0000-0000-000000000000
+        queue_path: ~/.cache/herdrelay/orca-bot-gateway
+        gateway_worktree: folder:00000000-0000-0000-0000-000000000000
+        gateway_title: HerdRelay Gateway
+        gateway_command: >-
+          cd /path/to/herdrelay &&
+          exec /path/to/uv run python -m herdrelay.orca_bot_gateway
+          --config /path/to/herdrelay/config.yaml
+```
+
+The Bot receives the original General text verbatim. HerdRelay correlates replies
+by the public CLI's outbound message ID and sends only matching replies back to
+General. Use a dedicated Bot chat for Telegram rather than reusing Home Chat.
+Configure side-effect confirmations and allowed behavior in the Bot's
+`SOUL.md`; HerdRelay does not grant tools or silently reinterpret Bot failures.
+`/forget` atomically moves future messages to a newly created Bot chat while
+allowing already-pending replies to finish.
+
 ### Optional Telegram voice input
 
 Authorized Telegram voice messages can be transcribed locally. Voice input
-requires `enable_send: true` and an enabled General router. General passes the
-transcript through the LLM router; with `scope: general-and-bound`, a bound
-topic submits the full transcript directly through its existing Agent route
+requires `enable_send: true` and an enabled General provider. General passes the
+transcript through the selected `router` or `orca-bot` provider; with
+`scope: general-and-bound`, a bound topic submits the full transcript directly
+through its existing Agent route
 without an LLM call. The default `scope: general` keeps bound topics text-only.
 Audio is downloaded to a private temporary directory, bounded by duration and
 file size, and deleted after each attempt. Telegram photo, video, document, and
@@ -339,9 +382,9 @@ and make `ffmpeg` available, or point `python_path` at an existing trusted MLX
 Whisper environment. A provider-neutral `command` option is also available;
 its argv may contain `{input}` and must emit one JSON object containing at least
 a non-empty `text` field. Voice input and its model download are disabled by
-default. Transcription, routing, and prompt submission produce separate audit
-entries, and any download, transcription, or routing error fails closed without
-retry.
+default. Transcription and the selected General submission path produce
+separate audit entries, and any download, transcription, routing, or gateway
+error fails closed without automatic retry.
 
 ## Optional Discord transport
 

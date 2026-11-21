@@ -459,7 +459,7 @@ class Store:
                 SELECT COUNT(*) AS count
                 FROM transport_audit
                 WHERE transport = ? AND timestamp >= ? AND {column} = ?
-                  AND action IN ('send_text', 'interrupt')
+                  AND action IN ('send_text', 'bot_send', 'interrupt')
                   AND outcome IN ('attempt', 'succeeded', 'failed', 'outcome_unknown')
                 """,
                 (transport, since, value),

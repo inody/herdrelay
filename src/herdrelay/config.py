@@ -111,13 +111,29 @@ class TelegramVoiceInputConfig:
 
 
 @dataclass(frozen=True)
+class TelegramOrcaBotConfig:
+    bot_id: str | None = None
+    queue_path: str = "~/.cache/herdrelay/orca-bot-gateway"
+    gateway_worktree: str | None = None
+    gateway_title: str = "HerdRelay Gateway"
+    gateway_command: str | None = None
+    refresh_seconds: float = 1
+    heartbeat_stale_seconds: float = 15
+    command_timeout_seconds: float = 20
+
+
+@dataclass(frozen=True)
 class TelegramGeneralRouterConfig:
     enabled: bool = False
+    provider: str = "router"
     activation: str = "all-text"
     execution_policy: str = "auto-unique"
     general_topic_id: int | None = None
     context_ttl_seconds: int = 0
     model: RouterModelConfig = field(default_factory=RouterModelConfig)
+    orca_bot: TelegramOrcaBotConfig = field(
+        default_factory=TelegramOrcaBotConfig
+    )
 
 
 @dataclass(frozen=True)
@@ -263,6 +279,11 @@ def load_config(
     if not isinstance(router_model_data, dict):
         raise ValueError(
             "transports.telegram.general_router.model must be a YAML mapping"
+        )
+    orca_bot_data = general_router_data.get("orca_bot") or {}
+    if not isinstance(orca_bot_data, dict):
+        raise ValueError(
+            "transports.telegram.general_router.orca_bot must be a YAML mapping"
         )
     voice_input_data = telegram_data.get("voice_input") or {}
     if not isinstance(voice_input_data, dict):
@@ -558,6 +579,9 @@ def load_config(
             ),
             general_router=TelegramGeneralRouterConfig(
                 enabled=bool(general_router_data.get("enabled", False)),
+                provider=str(
+                    general_router_data.get("provider") or "router"
+                ).casefold(),
                 activation=str(
                     general_router_data.get("activation") or "all-text"
                 ).casefold(),
@@ -596,6 +620,32 @@ def load_config(
                     ),
                     max_output_bytes=int(
                         router_model_data.get("max_output_bytes", 16_384)
+                    ),
+                ),
+                orca_bot=TelegramOrcaBotConfig(
+                    bot_id=_optional_str(orca_bot_data.get("bot_id")),
+                    queue_path=str(
+                        orca_bot_data.get("queue_path")
+                        or "~/.cache/herdrelay/orca-bot-gateway"
+                    ),
+                    gateway_worktree=_optional_str(
+                        orca_bot_data.get("gateway_worktree")
+                    ),
+                    gateway_title=str(
+                        orca_bot_data.get("gateway_title")
+                        or "HerdRelay Gateway"
+                    ),
+                    gateway_command=_optional_str(
+                        orca_bot_data.get("gateway_command")
+                    ),
+                    refresh_seconds=float(
+                        orca_bot_data.get("refresh_seconds", 1)
+                    ),
+                    heartbeat_stale_seconds=float(
+                        orca_bot_data.get("heartbeat_stale_seconds", 15)
+                    ),
+                    command_timeout_seconds=float(
+                        orca_bot_data.get("command_timeout_seconds", 20)
                     ),
                 ),
             ),
@@ -717,16 +767,46 @@ def _validate_telegram(config: AppConfig) -> None:
         return
     if not telegram.enable_send:
         raise ValueError("Telegram general_router requires enable_send: true")
+    if router.provider not in {"router", "orca-bot"}:
+        raise ValueError(
+            "Telegram general_router.provider must be 'router' or 'orca-bot'"
+        )
     if router.activation != "all-text":
         raise ValueError(
             "Telegram general_router.activation currently supports only 'all-text'"
         )
+    if router.general_topic_id is not None and router.general_topic_id <= 0:
+        raise ValueError("Telegram general_router.general_topic_id must be positive")
+    if router.provider == "orca-bot":
+        if config.runtime.provider != "orca":
+            raise ValueError(
+                "Telegram orca-bot General provider requires runtime.provider=orca"
+            )
+        bot = router.orca_bot
+        if not bot.bot_id or not bot.gateway_worktree or not bot.gateway_command:
+            raise ValueError(
+                "Telegram orca-bot General provider requires bot_id, "
+                "gateway_worktree, and gateway_command"
+            )
+        if not bot.queue_path.strip() or not bot.gateway_title.strip():
+            raise ValueError(
+                "Telegram orca-bot queue_path and gateway_title must not be empty"
+            )
+        if (
+            bot.refresh_seconds <= 0
+            or bot.heartbeat_stale_seconds <= bot.refresh_seconds
+            or bot.command_timeout_seconds <= 0
+        ):
+            raise ValueError(
+                "Telegram orca-bot timing values must be positive and the "
+                "heartbeat stale interval must exceed the refresh interval"
+            )
+        return
+
     if router.execution_policy != "auto-unique":
         raise ValueError(
             "Telegram general_router.execution_policy currently supports only 'auto-unique'"
         )
-    if router.general_topic_id is not None and router.general_topic_id <= 0:
-        raise ValueError("Telegram general_router.general_topic_id must be positive")
     if not 0 <= router.context_ttl_seconds <= 86_400:
         raise ValueError(
             "Telegram general_router.context_ttl_seconds must be between 0 and 86400"
