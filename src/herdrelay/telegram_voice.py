@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 from pathlib import Path
-import tempfile
 from typing import Protocol
 
 from .config import AppConfig, effective_voice_input
@@ -13,7 +12,13 @@ from .store import Store
 from .telegram_api import TelegramBotApi
 from .telegram_mutations import TelegramMutationHandler
 from .telegram_updates import TelegramInboundMessage
-from .voice_transcription import VoiceTranscriber, build_voice_transcriber
+from .voice_input import (
+    VoiceInputProblem,
+    VoiceInputProcessor,
+    VoiceMedia,
+    transcription_detail,
+)
+from .voice_transcription import VoiceTranscriber
 
 LOG = logging.getLogger(__name__)
 
@@ -43,8 +48,9 @@ class TelegramVoiceHandler:
         self.store = store
         self.api = api
         self.router = router
-        self.transcriber = transcriber or build_voice_transcriber(
-            self.voice_config.transcription
+        self.processor = VoiceInputProcessor(
+            config=self.voice_config,
+            transcriber=transcriber,
         )
 
     async def handle(self, message: TelegramInboundMessage, *, event_key: str) -> bool:
@@ -82,69 +88,47 @@ class TelegramVoiceHandler:
                     "This topic is not connected to an available Agent.",
                 )
                 return False
-        if voice.duration_seconds > self.voice_config.max_duration_seconds:
-            detail = (
-                f"duration {voice.duration_seconds}s exceeds "
-                f"{self.voice_config.max_duration_seconds}s"
+        async def download(path: Path, max_bytes: int) -> int | None:
+            file_info = await self.api.download_file(
+                file_id=voice.file_id,
+                destination=path,
+                max_bytes=max_bytes,
             )
-            self._audit(message, outcome="rejected", detail=detail)
-            await self._feedback(
-                message,
-                "The voice message is too long. Nothing was sent.",
-            )
-            return False
-        if (
-            voice.file_size is not None
-            and voice.file_size > self.voice_config.max_file_bytes
-        ):
-            detail = (
-                f"file size {voice.file_size} exceeds "
-                f"{self.voice_config.max_file_bytes}"
-            )
-            self._audit(message, outcome="rejected", detail=detail)
-            await self._feedback(
-                message,
-                "The voice file is too large. Nothing was sent.",
-            )
-            return False
+            if (
+                file_info is not None
+                and file_info.file_unique_id is not None
+                and file_info.file_unique_id != voice.file_unique_id
+            ):
+                raise ValueError("Telegram voice file identity changed")
+            return path.stat().st_size
 
-        cache_dir = Path("~/.cache/herdrelay/voice-input").expanduser()
-        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        cache_dir.chmod(0o700)
-        suffix = _audio_suffix(voice.mime_type)
+        media = VoiceMedia(
+            download=download,
+            duration_seconds=voice.duration_seconds,
+            advertised_size=voice.file_size,
+            mime_type=voice.mime_type,
+        )
         try:
-            with tempfile.TemporaryDirectory(
-                prefix="telegram-", dir=cache_dir
-            ) as temporary:
-                audio_path = Path(temporary) / f"voice{suffix}"
-                file_info = await self.api.download_file(
-                    file_id=voice.file_id,
-                    destination=audio_path,
-                    max_bytes=self.voice_config.max_file_bytes,
-                )
-                if (
-                    file_info is not None
-                    and file_info.file_unique_id is not None
-                    and file_info.file_unique_id != voice.file_unique_id
-                ):
-                    raise ValueError("Telegram voice file identity changed")
-                transcript = await self.transcriber.transcribe(audio_path)
-        except Exception as exc:
-            LOG.warning("Telegram voice transcription failed: %s", exc)
-            self._audit(message, outcome="failed", detail=str(exc))
-            await self._feedback(
-                message,
-                "The voice message could not be transcribed. Nothing was sent.",
+            transcript = await self.processor.process(
+                media,
+                temporary_prefix="telegram-",
             )
+        except VoiceInputProblem as problem:
+            LOG.warning("Telegram voice transcription failed: %s", problem.detail)
+            self._audit(
+                message,
+                outcome=problem.outcome,
+                detail=problem.detail,
+            )
+            await self._feedback(message, problem.public_message)
             return False
 
         self._audit(
             message,
             outcome="succeeded",
-            detail=(
-                f"provider={self.transcriber.provider_name} "
-                f"model={self.transcriber.model_name or '-'} "
-                f"language={transcript.language or '-'}"
+            detail=transcription_detail(
+                self.processor.transcriber,
+                transcript,
             ),
             payload=transcript.text,
         )
@@ -199,13 +183,3 @@ class TelegramVoiceHandler:
             message_thread_id=message.message_thread_id,
             text=text,
         )
-
-
-def _audio_suffix(mime_type: str | None) -> str:
-    return {
-        "audio/ogg": ".ogg",
-        "audio/opus": ".opus",
-        "audio/mpeg": ".mp3",
-        "audio/mp4": ".m4a",
-        "audio/x-m4a": ".m4a",
-    }.get((mime_type or "").casefold(), ".ogg")

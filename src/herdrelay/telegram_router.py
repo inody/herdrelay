@@ -126,6 +126,67 @@ class IntentModel(Protocol):
     async def classify(self, request: RoutingRequest) -> RoutingDecision: ...
 
 
+@dataclass(frozen=True, slots=True)
+class RoutingResolution:
+    outcome: str
+    detail: str
+    decision: RoutingDecision | None = None
+    selected: RouterCandidate | None = None
+    prompt: str = ""
+
+
+async def resolve_routing_request(
+    model: IntentModel,
+    request: RoutingRequest,
+) -> RoutingResolution:
+    """Apply the shared fail-closed contract to one model decision."""
+    try:
+        decision = await model.classify(request)
+    except Exception as exc:
+        return RoutingResolution(outcome="failed", detail=str(exc))
+
+    candidates = {item.candidate_id: item for item in request.candidates}
+    selected = candidates.get(decision.candidate_id or "")
+    prompt = decision.message_verbatim or ""
+    valid_context_choice = (
+        decision.routing_basis != "recent_context"
+        or (
+            request.recent_context is not None
+            and selected is not None
+            and selected.candidate_id
+            == request.recent_context.candidate.candidate_id
+        )
+    )
+    if (
+        decision.intent != "send_prompt"
+        or decision.ambiguous
+        or decision.routing_basis not in {
+            "explicit_destination",
+            "recent_context",
+        }
+        or not valid_context_choice
+        or selected is None
+        or not prompt
+        or prompt not in request.utterance
+    ):
+        return RoutingResolution(
+            outcome="rejected",
+            detail=decision.reason or "ambiguous or invalid routing decision",
+            decision=decision,
+        )
+    return RoutingResolution(
+        outcome="succeeded",
+        detail=(
+            f"provider={model.provider_name} "
+            f"model={model.model_name or '-'} candidate={selected.candidate_id} "
+            f"basis={decision.routing_basis}"
+        ),
+        decision=decision,
+        selected=selected,
+        prompt=prompt,
+    )
+
+
 class OpenAICompatibleIntentModel:
     provider_name = "openai-compatible"
 
@@ -306,67 +367,40 @@ class TelegramGeneralRouter:
             source_kind=message.source_kind,
             recent_context=recent_context,
         )
-        try:
-            decision = await self.model.classify(request)
-        except Exception as exc:
-            LOG.warning("Telegram General router failed: %s", exc)
+        resolution = await resolve_routing_request(self.model, request)
+        if resolution.outcome == "failed":
+            LOG.warning("Telegram General router failed: %s", resolution.detail)
             self._audit(
                 message,
                 outcome="failed",
-                detail=str(exc),
+                detail=resolution.detail,
                 payload=utterance,
             )
             await self._feedback(
                 message, "The destination could not be resolved. Nothing was sent."
             )
             return False
-
-        by_id = {candidate.candidate_id: candidate for candidate in candidates}
-        selected = by_id.get(decision.candidate_id or "")
-        prompt = decision.message_verbatim or ""
-        valid_context_choice = (
-            decision.routing_basis != "recent_context"
-            or (
-                recent_context is not None
-                and selected is not None
-                and selected.candidate_id
-                == recent_context.candidate.candidate_id
-            )
-        )
-        if (
-            decision.intent != "send_prompt"
-            or decision.ambiguous
-            or decision.routing_basis not in {
-                "explicit_destination",
-                "recent_context",
-            }
-            or not valid_context_choice
-            or selected is None
-            or not prompt
-            or prompt not in utterance
-        ):
-            detail = decision.reason or "ambiguous or invalid routing decision"
+        if resolution.outcome == "rejected":
             self._audit(
                 message,
                 outcome="rejected",
-                detail=detail,
+                detail=resolution.detail,
                 payload=utterance,
             )
             await self._feedback(
                 message,
                 "A single destination could not be selected. Nothing was sent.\n"
-                + _candidate_summary(candidates),
+                + candidate_summary(candidates),
             )
             return False
 
+        selected = resolution.selected
+        prompt = resolution.prompt
+        assert selected is not None
         self._audit(
             message,
             outcome="succeeded",
-            detail=(
-                f"provider={self.model.provider_name} "
-                f"model={self.model.model_name or '-'} candidate={selected.candidate_id} "
-                f"basis={decision.routing_basis}"
-            ),
+            detail=resolution.detail,
             payload=utterance,
             target_key=selected.key.to_storage_key(),
         )
@@ -636,7 +670,7 @@ def _parse_decision(value: str, *, request: RoutingRequest) -> RoutingDecision:
     )
 
 
-def _candidate_summary(candidates: tuple[RouterCandidate, ...]) -> str:
+def candidate_summary(candidates: tuple[RouterCandidate, ...]) -> str:
     lines = ["Candidate agents:"]
     for candidate in candidates[:8]:
         lines.append(

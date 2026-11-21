@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-import tempfile
 from typing import Any
 
 import discord
@@ -11,7 +10,13 @@ from .config import AppConfig, effective_voice_input
 from .formatter import truncate
 from .models import TransportAuditEntry
 from .store import Store
-from .voice_transcription import VoiceTranscriber, build_voice_transcriber
+from .voice_input import (
+    VoiceInputProblem,
+    VoiceInputProcessor,
+    VoiceMedia,
+    transcription_detail,
+)
+from .voice_transcription import VoiceTranscriber
 
 LOG = logging.getLogger(__name__)
 
@@ -24,11 +29,11 @@ class DiscordVoiceHandler:
         store: Store,
         transcriber: VoiceTranscriber | None = None,
     ):
-        self.config = config
         self.voice_config = effective_voice_input(config)
         self.store = store
-        self.transcriber = transcriber or build_voice_transcriber(
-            self.voice_config.transcription
+        self.processor = VoiceInputProcessor(
+            config=self.voice_config,
+            transcriber=transcriber,
         )
 
     async def transcribe(self, message: discord.Message) -> str | None:
@@ -36,67 +41,45 @@ class DiscordVoiceHandler:
         if len(attachments) != 1:
             await self._fail(
                 message,
-                detail="Discord voice message did not contain exactly one attachment",
-                feedback="The voice message attachment is invalid. Nothing was sent.",
+                problem=VoiceInputProblem(
+                    outcome="failed",
+                    detail=(
+                        "Discord voice message did not contain exactly one attachment"
+                    ),
+                    public_message=(
+                        "The voice message attachment is invalid. Nothing was sent."
+                    ),
+                ),
             )
             return None
         attachment = attachments[0]
-        duration = getattr(attachment, "duration", None)
-        if duration is not None and duration > self.voice_config.max_duration_seconds:
-            await self._fail(
-                message,
-                detail=(
-                    f"duration {duration}s exceeds "
-                    f"{self.voice_config.max_duration_seconds}s"
-                ),
-                feedback="The voice message is too long. Nothing was sent.",
-                outcome="rejected",
-            )
-            return None
-        size = getattr(attachment, "size", None)
-        if size is not None and size > self.voice_config.max_file_bytes:
-            await self._fail(
-                message,
-                detail=f"file size {size} exceeds {self.voice_config.max_file_bytes}",
-                feedback="The voice file is too large. Nothing was sent.",
-                outcome="rejected",
-            )
-            return None
 
-        cache_dir = Path("~/.cache/herdrelay/voice-input").expanduser()
-        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        cache_dir.chmod(0o700)
-        suffix = _audio_suffix(
-            getattr(attachment, "content_type", None),
-            getattr(attachment, "filename", None),
+        async def download(path: Path, _max_bytes: int) -> int:
+            return await attachment.save(path)
+
+        media = VoiceMedia(
+            download=download,
+            duration_seconds=getattr(attachment, "duration", None),
+            advertised_size=getattr(attachment, "size", None),
+            mime_type=getattr(attachment, "content_type", None),
+            filename=getattr(attachment, "filename", None),
         )
         try:
-            with tempfile.TemporaryDirectory(prefix="discord-", dir=cache_dir) as temporary:
-                audio_path = Path(temporary) / f"voice{suffix}"
-                written = await attachment.save(audio_path)
-                actual_size = audio_path.stat().st_size
-                if (
-                    written > self.voice_config.max_file_bytes
-                    or actual_size > self.voice_config.max_file_bytes
-                ):
-                    raise ValueError("downloaded Discord voice file exceeds configured limit")
-                transcript = await self.transcriber.transcribe(audio_path)
-        except Exception as exc:
-            LOG.warning("Discord voice transcription failed: %s", exc)
-            await self._fail(
-                message,
-                detail=str(exc),
-                feedback="The voice message could not be transcribed. Nothing was sent.",
+            transcript = await self.processor.process(
+                media,
+                temporary_prefix="discord-",
             )
+        except VoiceInputProblem as problem:
+            LOG.warning("Discord voice transcription failed: %s", problem.detail)
+            await self._fail(message, problem=problem)
             return None
 
         self._audit(
             message,
             outcome="succeeded",
-            detail=(
-                f"provider={self.transcriber.provider_name} "
-                f"model={self.transcriber.model_name or '-'} "
-                f"language={transcript.language or '-'}"
+            detail=transcription_detail(
+                self.processor.transcriber,
+                transcript,
             ),
             payload=transcript.text,
         )
@@ -110,12 +93,14 @@ class DiscordVoiceHandler:
         self,
         message: discord.Message,
         *,
-        detail: str,
-        feedback: str,
-        outcome: str = "failed",
+        problem: VoiceInputProblem,
     ) -> None:
-        self._audit(message, outcome=outcome, detail=detail)
-        await _reply(message, feedback)
+        self._audit(
+            message,
+            outcome=problem.outcome,
+            detail=problem.detail,
+        )
+        await _reply(message, problem.public_message)
 
     def _audit(
         self,
@@ -154,20 +139,3 @@ async def _reply(message: discord.Message, text: str) -> None:
         allowed_mentions=discord.AllowedMentions.none(),
         mention_author=False,
     )
-
-
-def _audio_suffix(content_type: str | None, filename: str | None) -> str:
-    by_type = {
-        "audio/ogg": ".ogg",
-        "audio/opus": ".opus",
-        "audio/mpeg": ".mp3",
-        "audio/mp4": ".m4a",
-        "audio/x-m4a": ".m4a",
-        "audio/webm": ".webm",
-        "audio/wav": ".wav",
-        "audio/x-wav": ".wav",
-    }.get((content_type or "").split(";", 1)[0].casefold())
-    if by_type is not None:
-        return by_type
-    suffix = Path(filename or "").suffix.casefold()
-    return suffix if suffix in {".ogg", ".opus", ".mp3", ".m4a", ".webm", ".wav"} else ".ogg"

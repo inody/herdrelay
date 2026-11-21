@@ -22,6 +22,8 @@ from .telegram_router import (
     RouterCandidate,
     RoutingRequest,
     build_intent_model,
+    candidate_summary,
+    resolve_routing_request,
 )
 
 LOG = logging.getLogger(__name__)
@@ -76,55 +78,38 @@ class DiscordGeneralRouter:
             source_kind=source_kind,
             recent_context=recent_context,
         )
-        try:
-            decision = await self.model.classify(request)
-        except Exception as exc:
-            LOG.warning("Discord General router failed: %s", exc)
-            self._audit(message, outcome="failed", detail=str(exc), payload=utterance)
+        resolution = await resolve_routing_request(self.model, request)
+        if resolution.outcome == "failed":
+            LOG.warning("Discord General router failed: %s", resolution.detail)
+            self._audit(
+                message,
+                outcome="failed",
+                detail=resolution.detail,
+                payload=utterance,
+            )
             await _reply(message, "The destination could not be resolved. Nothing was sent.")
             return False
-
-        by_id = {candidate.candidate_id: candidate for candidate in candidates}
-        selected = by_id.get(decision.candidate_id or "")
-        prompt = decision.message_verbatim or ""
-        valid_context_choice = (
-            decision.routing_basis != "recent_context"
-            or (
-                recent_context is not None
-                and selected is not None
-                and selected.candidate_id == recent_context.candidate.candidate_id
-            )
-        )
-        if (
-            decision.intent != "send_prompt"
-            or decision.ambiguous
-            or decision.routing_basis not in {"explicit_destination", "recent_context"}
-            or not valid_context_choice
-            or selected is None
-            or not prompt
-            or prompt not in utterance
-        ):
+        if resolution.outcome == "rejected":
             self._audit(
                 message,
                 outcome="rejected",
-                detail=decision.reason or "ambiguous or invalid routing decision",
+                detail=resolution.detail,
                 payload=utterance,
             )
             await _reply(
                 message,
                 "A single destination could not be selected. Nothing was sent.\n"
-                + _candidate_summary(candidates),
+                + candidate_summary(candidates),
             )
             return False
 
+        selected = resolution.selected
+        prompt = resolution.prompt
+        assert selected is not None
         self._audit(
             message,
             outcome="succeeded",
-            detail=(
-                f"provider={self.model.provider_name} "
-                f"model={self.model.model_name or '-'} candidate={selected.candidate_id} "
-                f"basis={decision.routing_basis}"
-            ),
+            detail=resolution.detail,
             payload=utterance,
             target_key=selected.key.to_storage_key(),
         )
@@ -443,16 +428,6 @@ class DiscordOrcaBotGeneral:
                     detail=f"request_id={event.get('request_id')}",
                 )
             )
-
-
-def _candidate_summary(candidates: tuple[RouterCandidate, ...]) -> str:
-    lines = ["Candidate agents:"]
-    for candidate in candidates[:8]:
-        lines.append(
-            f"{candidate.candidate_id}: {candidate.display_name} "
-            f"({candidate.target.status or 'unknown'})"
-        )
-    return "\n".join(lines)
 
 
 def _blocked_text(config: AppConfig, text: str) -> str | None:
