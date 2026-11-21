@@ -1,36 +1,38 @@
 # HerdRelay
 
-HerdRelay connects authorized Discord and Telegram users to local coding agents.
-One process selects one runtime backend—Herdr Core, Orca, or the legacy Herdr
-TUI—and can expose it through Discord, Telegram, or both transports at the same
-time.
+HerdRelay is an authorized bridge between Discord or Telegram and local coding
+agents. One process selects one runtime backend—Herdr Core, Orca, or the legacy
+Herdr TUI—and can serve either or both chat transports at the same time. Runtime
+selection and transport selection are independent, so the same transport code
+works with each backend instead of maintaining six backend-specific bridges.
 
-The normal product surface is deliberately small:
+HerdRelay provides four user-facing entry points:
 
-- discover eligible local agents and give each exact target a Discord thread or
-  Telegram forum topic;
-- submit ordinary prompts after authorization, rate limiting, audit, and a fresh
-  identity check;
-- relay lifecycle status, structured questions, and completed responses; and
-- route Telegram General and the Discord parent channel through the same
-  backend-aware General provider; and
-- transcribe bounded Telegram and Discord voice messages locally before routing
-  or direct delivery.
+| Entry point | Destination |
+|---|---|
+| Telegram General | The configured General provider (`router` or `orca-bot`) |
+| Discord parent channel | The same General provider, with separate conversation state |
+| Telegram Agent topic | The exact Agent bound to that topic |
+| Discord Agent thread | The exact Agent bound to that thread |
 
-The selected runtime remains the authority. HerdRelay's direct mutation path
-does not provide shell access, arbitrary terminal input, generic approval,
-remote Agent launch, or Agent/terminal close through chat. The `router` General
-provider only selects an existing Agent. The optional `orca-bot` provider instead
-delegates General to a separately configured Orca Bot, whose `SOUL.md` and tool
-permissions define its capabilities and confirmation policy.
+Authorized voice messages are transcribed first and then use the same General
+or bound route as text. Agent responses, status updates, and structured
+questions return to the persisted topic or thread for that exact runtime target.
+
+The selected runtime remains the authority. HerdRelay's direct Agent path
+supports normal prompts, but not arbitrary terminal input, shell access, generic
+approval, remote Agent launch, or Agent/terminal close. The `router` General
+provider can only select an existing Agent. The optional `orca-bot` provider
+instead delegates General to a separately configured Orca Bot, whose `SOUL.md`
+and tool permissions define its capabilities and confirmation policy.
 
 ## Support matrix
 
 | Runtime | Discord | Telegram |
 |---|---:|---:|
-| Herdr Core | Supported; live send/output acceptance | Supported; live send/output acceptance |
-| Orca terminal agents | Supported; live send/output acceptance | Supported; live Pi and Claude send/output acceptance |
-| Legacy Herdr TUI | Compatibility path | Best-effort; automated tests only |
+| Herdr Core | Supported; live General and bound send/output acceptance | Supported; live General and bound send/output acceptance |
+| Orca terminal agents | Supported; live General and bound send/output acceptance | Supported; live General and bound send/output acceptance |
+| Legacy Herdr TUI | Compatibility backend; live General and bound acceptance | Compatibility backend; live General and bound acceptance |
 
 Guarded interrupt is Core-only. Core and Orca structured questions can be
 shown, but answering them from chat is disabled because neither backend has an
@@ -46,26 +48,29 @@ Development requirements:
 | Discord | `discord.py` 2.x |
 | Pi adapter tests | Node.js 22.6+ |
 
-The current live contract has been exercised with Herdr Core 0.1.21 and local
-Orca public-CLI terminal agents. Runtime versions outside the tested contract
-should be validated before production use.
+The live acceptance matrix has been exercised with Herdr Core 0.1.21, local
+Orca public-CLI terminal agents, and one isolated legacy TUI pane. Runtime
+versions outside the tested contract should be validated before production use.
 
 ## Architecture
 
 ```text
-Claude/Codex hooks ─┐
-Pi TUI extension ───┴─> private JSON inbox ─> shared delivery tracker
-                                                ├─> Discord thread
-                                                └─> Telegram forum topic
+Telegram / Discord text or voice
+             │
+             ▼
+      transport adapter
+        ├─ General ─> router ────────┐
+        │           └> Orca Bot queue ──> configured Orca Bot
+        └─ bound route ──────────────┼─> selected runtime backend
+                                    │    ├─ Herdr Core socket
+                                    │    ├─ legacy Herdr CLI
+                                    │    └─ Orca public CLI
+                                    │
+Claude/Codex hooks ─┐               │
+Pi TUI extension ───┴─> response inbox ┴─> Discord thread / Telegram topic
 
-Discord thread ─┐
-Telegram topic ─┴─> authorization + audit ─> runtime backend
-                                             ├─> Herdr Core socket
-                                             ├─> legacy Herdr CLI
-                                             └─> Orca public CLI
-
-Runtime discovery/events ─> status routing ─> enabled chat transports
-HerdRelay state/audit    <──────────────────> SQLite
+Runtime discovery/events ─> route lifecycle and status delivery
+HerdRelay state/audit    <─> SQLite
 ```
 
 Runtime identity and transport destination are independent. Core routes pin the
@@ -75,6 +80,10 @@ address. Delivery dedupe is per destination, so successful Discord delivery
 never suppresses Telegram, or vice versa.
 
 ## Quick start: Telegram with an existing runtime
+
+This walkthrough starts with Telegram because its forum topics expose the route
+lifecycle directly. Discord can be enabled in the same process afterward; it
+does not require a second HerdRelay instance.
 
 ### 1. Install HerdRelay
 
@@ -154,8 +163,9 @@ transports:
 HerdRelay uses only Orca's public CLI. Before each prompt it resolves the exact
 runtime, host, pane, worktree, Agent identity, and writable terminal. A transient
 pre-send discovery gap may be refreshed once, but input is never retried after
-`terminal send` begins. Orca chats remain excluded because no accepted public
-prompt path is available; local terminal agents are supported.
+`terminal send` begins. Orca chat agents are not exposed as direct runtime
+targets because they lack an accepted public prompt path. This is separate from
+the optional Orca Bot General provider, which uses the public orchestration CLI.
 
 For Herdr Core, select `provider: herdr-core` and configure an already-running
 socket:
@@ -261,7 +271,7 @@ Prompt and interrupt attempts are claimed and audited before the runtime call.
 Timeouts after mutation may be recorded as `outcome_unknown` and are never
 retried automatically.
 
-### General providers
+## General providers
 
 `relay.general` is transport-neutral. It handles ordinary text in Telegram
 General and in the configured Discord `thread_parent_channel_id`. Bound Telegram
@@ -355,7 +365,7 @@ Configure side-effect confirmations and allowed behavior in the Bot's
 `/forget` atomically moves future messages to a newly created Bot chat while
 allowing already-pending replies to finish.
 
-### Optional voice input
+## Optional voice input
 
 Authorized Telegram and Discord voice messages can be transcribed locally.
 Voice input requires `enable_send: true` on the originating transport and an
@@ -408,7 +418,7 @@ transports:
     enable_send: true
     enable_questions: false
     enable_watcher: true
-    enable_interrupt: true
+    enable_interrupt: false
     enable_auto_threads: true
     auto_threads:
       refresh_seconds: 30
@@ -466,9 +476,9 @@ runtime:
 ```
 
 Use `selected` during backend tests to prevent unrelated panes from creating
-topics and threads. Legacy Discord behavior remains available. TUI-to-Telegram routing has contract
-tests but no live acceptance guarantee and is outside the supported production
-matrix.
+topics and threads. The legacy TUI remains a compatibility backend rather than
+the recommended production backend, but Discord and Telegram General and bound
+routes have completed live send/output acceptance with an isolated pane.
 
 The former top-level `herdr` section and `runtime.core` name remain accepted for
 configuration compatibility. New installations should use the grouped schema in
@@ -481,7 +491,7 @@ Settings are grouped by responsibility:
 - `runtime`: provider selection, backend eligibility, host scope, and explicit
   target exposure policy;
 - `storage`: stable SQLite path;
-- `relay`: shared output, streaming, and text safety policy;
+- `relay`: General routing, voice input, output streaming, and shared text safety policy;
 - `transports.discord`: Discord access and controls; and
 - `transports.telegram`: Telegram access and controls.
 
@@ -538,7 +548,8 @@ Treat every enabled chat destination as remote terminal access.
 
 HerdRelay never exposes raw runtime protocols, arbitrary backend methods, shell
 commands, force-send behavior, raw terminal keys, generic approval/denial, or
-Agent/terminal start, close, kill, or remove operations over Telegram.
+Agent/terminal start, close, kill, or remove operations through its chat
+transports.
 
 ## Operations
 
@@ -607,14 +618,13 @@ socket. It never types into an existing terminal.
 - `scripts/` — adapter installers, compatibility checks, service helpers, and
   log rotation;
 - `tests/` — unit, regression, adapter, and isolated live-contract tests;
-- `docs/operations.md` — event formats and operational details;
-- `docs/core-telegram-design.md` — Core/Telegram architecture and security boundary;
-- `docs/core-telegram-plan.md` — Core/Telegram implementation history and remaining
-  acceptance work;
-- `docs/runtime-transport-design.md` — generalized backend/transport architecture,
-  including Orca; and
-- `docs/runtime-transport-plan.md` — staged refactor and Orca implementation plan;
-- `docs/feature-inventory.md` — common features, legacy TUI-only controls, and cleanup candidates.
+- `docs/runtime-transport-design.md` — current generalized backend/transport
+  architecture and security boundaries;
+- `docs/operations.md` — current event formats, lifecycle behavior, and
+  troubleshooting;
+- `docs/core-telegram-design.md`, `docs/core-telegram-plan.md`, and
+  `docs/runtime-transport-plan.md` — historical design and rollout records; and
+- `docs/feature-inventory.md` — common features and compatibility-only controls.
 
 ## Current limitations
 
@@ -634,7 +644,9 @@ socket. It never types into an existing terminal.
   which intentionally does not backfill responses that predate its first
   snapshot. Orca interrupt is disabled because `terminal send --interrupt`
   accepted input without stopping the tested Pi turn.
-- Legacy TUI with Telegram is best-effort and not live-acceptance tested.
+- Legacy TUI is retained as a compatibility backend. Its Discord and Telegram
+  General and bound paths have live acceptance, but production deployments
+  should prefer Core or Orca.
 - Native Orca chat agents remain excluded until a documented safe prompt path
   is available; local Orca terminal agents are exposed automatically.
 - Existing Pi sessions need `/reload` after the Pi adapter changes. Claude and

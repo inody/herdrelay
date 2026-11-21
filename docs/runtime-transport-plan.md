@@ -1,8 +1,10 @@
 # Runtime and transport implementation plan
 
-Status: proposed
+Status: historical implementation record; completed
 
-This plan implements the architecture in
+This document preserves the staged rollout and may use future tense for work
+that is now implemented. Current behavior is documented in the README and
+[operations guide](operations.md). The plan implements the architecture in
 [Runtime and transport architecture](runtime-transport-design.md). It extends
 the completed Herdr Core and Telegram work without replacing the supported
 production path in one step.

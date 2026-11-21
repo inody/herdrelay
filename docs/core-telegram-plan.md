@@ -1,8 +1,11 @@
 # Herdr Core and Telegram implementation plan
 
-Status: implementation history and remaining acceptance work
+Status: historical implementation record
 
-Further backend/transport generalization and Orca support are planned in
+This document preserves the original rollout phases and therefore contains
+acceptance statements that are no longer current. See the README and
+[operations guide](operations.md) for the supported matrix and current behavior.
+The later backend/transport generalization is recorded in
 [Runtime and transport implementation plan](runtime-transport-plan.md).
 
 This plan implements the architecture in

@@ -1,14 +1,13 @@
 # Runtime and transport architecture
 
-Status: proposed
+Status: implemented; current architecture reference
 
-This document defines the next HerdRelay architecture: Telegram and Discord are
+This document defines the HerdRelay architecture: Telegram and Discord are
 independent chat transports, while Herdr Core, the legacy Herdr TUI, and Orca
 are interchangeable runtime backends. It generalizes the earlier
-[Herdr Core and Telegram architecture](core-telegram-design.md) without
-changing the current production path by default.
+[Herdr Core and Telegram architecture](core-telegram-design.md).
 
-The staged migration is described in
+The completed staged migration is recorded in
 [Runtime and transport implementation plan](runtime-transport-plan.md).
 
 ## 1. Decision
