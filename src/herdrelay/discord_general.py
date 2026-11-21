@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 import json
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import discord
 
 from .config import AppConfig
-from .domain import MutationOutcomeUnknownError, TargetKey
+from .domain import Actor, Location
 from .formatter import target_route_name, truncate
 from .models import TransportAuditEntry
 from .orca_bot_gateway import GatewayQueue
+from .prompt_submission import (
+    PromptOutcome,
+    PromptSubmission,
+    PromptSubmissionService,
+)
 from .runtime import RuntimeClient
 from .store import Store
 from .telegram_router import (
@@ -54,6 +59,7 @@ class DiscordGeneralRouter:
         self.router = config.telegram.general_router
         self.store = store
         self.client = client
+        self.prompt_service = PromptSubmissionService(store=store, client=client)
         self.model = model or build_intent_model(self.router.model)
 
     async def handle(
@@ -126,50 +132,33 @@ class DiscordGeneralRouter:
         self, message: discord.Message, *, selected: RouterCandidate, text: str
     ) -> bool:
         blocked = _blocked_text(self.config, text)
-        event_key = f"discord:message:{message.id}"
-        audit_id = self.store.claim_transport_mutation(
-            event_key=event_key,
-            entry=TransportAuditEntry(
-                transport="discord",
-                actor_id=str(message.author.id),
-                container_id=str(message.guild.id if message.guild else 0),
-                conversation_id=str(message.channel.id),
-                action="send_text",
-                target_key=selected.key.to_storage_key(),
-                payload_preview=truncate(text, max_chars=200),
-                outcome="attempt",
+        result = await asyncio.to_thread(
+            self.prompt_service.submit,
+            PromptSubmission(
+                event_key=f"discord:message:{message.id}",
+                actor=Actor(transport="discord", actor_id=str(message.author.id)),
+                location=Location(
+                    transport="discord",
+                    container_id=str(message.guild.id if message.guild else 0),
+                    conversation_id=str(message.channel.id),
+                ),
+                target=selected.key,
+                text=text,
+                preflight_rejection=("text blocklist" if blocked is not None else None),
             ),
         )
-        if audit_id is None:
+        if result.outcome is PromptOutcome.DEDUPLICATED:
             return True
-        if blocked is not None:
-            self.store.finish_transport_audit(
-                audit_id, outcome="rejected", detail="text blocklist"
-            )
+        if (
+            result.outcome is PromptOutcome.REJECTED
+            and result.detail == "text blocklist"
+        ):
             await _reply(message, "Message was rejected by the text blocklist.")
             return True
-        try:
-            target = await asyncio.to_thread(
-                self.client.resolve_target_key, selected.key
-            )
-            live_key = self.client.target_key(target.target)
-            if live_key.to_route_value() != selected.key.to_route_value():
-                raise ValueError("resolved target identity changed")
-            await asyncio.to_thread(self.client.send, target.target, text)
-        except MutationOutcomeUnknownError as exc:
-            self.store.finish_transport_audit(
-                audit_id, outcome="outcome_unknown", detail=truncate(str(exc), max_chars=500)
-            )
-            await _react(message, "⚠️")
-            return True
-        except Exception as exc:
-            self.store.finish_transport_audit(
-                audit_id, outcome="failed", detail=truncate(str(exc), max_chars=500)
-            )
-            await _react(message, "⚠️")
-            return True
-        self.store.finish_transport_audit(audit_id, outcome="succeeded")
-        await _react(message, "✅")
+        await _react(
+            message,
+            "✅" if result.outcome is PromptOutcome.SUCCEEDED else "⚠️",
+        )
         return True
 
     async def _candidates(

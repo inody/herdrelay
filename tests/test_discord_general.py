@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -15,7 +16,11 @@ from herdrelay.config import (
 )
 from herdrelay.discord_bot import HerdrDiscordBot
 from herdrelay.discord_general import DiscordGeneralRouter, DiscordOrcaBotGeneral
-from herdrelay.domain import TargetKey
+from herdrelay.domain import (
+    MutationOutcomeUnknownError,
+    MutationReceipt,
+    TargetKey,
+)
 from herdrelay.models import HerdrTarget
 from herdrelay.orca_bot_gateway import GatewayQueue
 from herdrelay.store import Store
@@ -36,9 +41,10 @@ class FakeModel:
 
 
 class FakeClient:
-    def __init__(self, target, key):
+    def __init__(self, target, key, *, send_error=None):
         self.target = target
         self.key = key
+        self.send_error = send_error
         self.sent = []
 
     def list_targets(self):
@@ -54,6 +60,9 @@ class FakeClient:
 
     def send(self, address, text):
         self.sent.append((address, text))
+        if self.send_error is not None:
+            raise self.send_error
+        return MutationReceipt(observed_turn=None, result={})
 
 
 def message(content="チャットブリッジのパイにテストして", *, message_id=10):
@@ -136,6 +145,96 @@ async def test_discord_general_router_sends_to_exact_bound_candidate(tmp_path):
         }
     ]
     assert store.get_state("discord:general-context:1:100:42") is not None
+
+
+@pytest.mark.asyncio
+async def test_discord_general_router_preserves_unknown_outcome_without_retry(tmp_path):
+    config = router_config(tmp_path)
+    store = Store(config.database_path)
+    key = TargetKey.legacy("w1:p1")
+    target = HerdrTarget(
+        target=key.address,
+        workspace_label="herdr-chat-bridge",
+        agent_name="pi",
+        status="idle",
+    )
+    store.upsert_binding(
+        guild_id=1,
+        channel_id=100,
+        thread_id=200,
+        herdr_target=key.to_route_value(),
+        label="herdr-chat-bridge",
+        created_by=1,
+    )
+    model = FakeModel(
+        RoutingDecision(
+            intent="send_prompt",
+            candidate_id="candidate-1",
+            message_verbatim="テストして",
+            ambiguous=False,
+            reason=None,
+            routing_basis="explicit_destination",
+        )
+    )
+    client = FakeClient(
+        target,
+        key,
+        send_error=MutationOutcomeUnknownError("response lost"),
+    )
+    handler = DiscordGeneralRouter(
+        config=config, store=store, client=client, model=model
+    )
+    inbound = message()
+
+    assert await handler.handle(inbound) is True
+
+    assert client.sent == [("w1:p1", "テストして")]
+    inbound.add_reaction.assert_awaited_once_with("⚠️")
+    audits = store.list_transport_audits()
+    assert audits[-1]["outcome"] == "outcome_unknown"
+    assert audits[-1]["detail"] == "response lost"
+
+
+@pytest.mark.asyncio
+async def test_discord_general_router_claims_blocklist_rejection(tmp_path):
+    config = replace(router_config(tmp_path), dangerous_text_blocklist=("sudo",))
+    store = Store(config.database_path)
+    key = TargetKey.legacy("w1:p1")
+    target = HerdrTarget(target=key.address, workspace_label="project", agent_name="pi")
+    store.upsert_binding(
+        guild_id=1,
+        channel_id=100,
+        thread_id=200,
+        herdr_target=key.to_route_value(),
+        label="project",
+        created_by=1,
+    )
+    model = FakeModel(
+        RoutingDecision(
+            intent="send_prompt",
+            candidate_id="candidate-1",
+            message_verbatim="sudo reboot",
+            ambiguous=False,
+            reason=None,
+            routing_basis="explicit_destination",
+        )
+    )
+    client = FakeClient(target, key)
+    handler = DiscordGeneralRouter(
+        config=config, store=store, client=client, model=model
+    )
+    inbound = message("projectにsudo reboot")
+
+    assert await handler.handle(inbound) is True
+
+    assert client.sent == []
+    assert any(
+        call.args[0] == "Message was rejected by the text blocklist."
+        for call in inbound.reply.await_args_list
+    )
+    audits = store.list_transport_audits()
+    assert audits[-1]["outcome"] == "rejected"
+    assert audits[-1]["detail"] == "text blocklist"
 
 
 @pytest.mark.asyncio

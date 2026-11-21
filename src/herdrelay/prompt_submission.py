@@ -36,6 +36,7 @@ class PromptSubmission:
     target: TargetKey
     text: str
     audit_action: str = "send_text"
+    preflight_rejection: str | None = None
 
     def __post_init__(self) -> None:
         if not self.event_key.strip():
@@ -44,6 +45,11 @@ class PromptSubmission:
             raise ValueError("prompt actor and location transports disagree")
         if not self.audit_action.strip():
             raise ValueError("prompt audit action must be non-empty")
+        if (
+            self.preflight_rejection is not None
+            and not self.preflight_rejection.strip()
+        ):
+            raise ValueError("prompt preflight rejection must be non-empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +107,12 @@ class PromptSubmissionService:
         if audit_id is None:
             return PromptResult(outcome=PromptOutcome.DEDUPLICATED)
 
+        if submission.preflight_rejection is not None:
+            return self._finish(
+                audit_id,
+                outcome=PromptOutcome.REJECTED,
+                detail=submission.preflight_rejection,
+            )
         if not submission.text.strip():
             return self._finish(
                 audit_id,

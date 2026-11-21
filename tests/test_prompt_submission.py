@@ -188,6 +188,31 @@ def test_prompt_submission_fails_closed_on_unexpected_resolution_error(tmp_path)
     assert store.list_transport_audits()[0]["detail"] == "invalid backend snapshot"
 
 
+def test_prompt_submission_claims_preflight_policy_rejection(tmp_path):
+    key = TargetKey.core(controller_core_id="core-1", address="t1")
+    client = FakeClient(key)
+    service, store = make_service(tmp_path, client)
+    request = PromptSubmission(
+        event_key="discord:message:1",
+        actor=Actor(transport="discord", actor_id="42"),
+        location=Location(
+            transport="discord", container_id="1", conversation_id="100"
+        ),
+        target=key,
+        text="blocked prompt",
+        preflight_rejection="text blocklist",
+    )
+
+    result = service.submit(request)
+
+    assert result.outcome is PromptOutcome.REJECTED
+    assert result.detail == "text blocklist"
+    assert client.resolve_calls == []
+    assert client.send_calls == []
+    assert store.has_event_key(request.event_key) is True
+    assert store.list_transport_audits()[0]["outcome"] == "rejected"
+
+
 def test_prompt_submission_rate_limit_rejection_is_audited_without_claim(tmp_path):
     key = TargetKey.core(controller_core_id="core-1", address="t1")
     client = FakeClient(key)

@@ -58,7 +58,7 @@ question controls.
 - [x] Stage 3: add `PromptSubmissionService` and parity tests while no transport
   uses it.
 - [x] Stage 4: migrate Telegram direct-Agent submission.
-- [ ] Stage 5: migrate Discord General router submission.
+- [x] Stage 5: migrate Discord General router submission.
 - [ ] Stage 6: migrate Discord bound-thread submission while leaving structured
   question handling in the Discord adapter.
 - [ ] Stage 7: remove obsolete transport-specific execution code and verify the
@@ -83,3 +83,6 @@ cross-transport policy is approved.
 - Stage 4: `497 passed, 1 skipped`; Telegram bound, routed General, and
   text-normalized voice prompts use the shared service. Interrupt confirmation
   remains transport-specific and unchanged.
+- Stage 5: `500 passed, 1 skipped`; Discord router-based General submission uses
+  the shared service, including claimed blocklist rejection and unknown-outcome
+  handling. Orca Bot General remains a separate queue-based use case.
